@@ -201,7 +201,7 @@ async def versus_command(interaction: discord.Interaction, club: str):
 @tree.command(name="vs", description="Alias for /versus")
 @app_commands.describe(club="Club name or club ID")
 async def vs_command(interaction: discord.Interaction, club: str):
-    await versus_command(interaction, club)
+    await versus_command.callback(interaction, club)
 
 @client.event
 async def on_ready():
