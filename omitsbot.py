@@ -211,5 +211,6 @@ async def on_ready():
     await tree.sync()
     print(f"Bot is ready as {client.user}")
 
-client.run(TOKEN)
+if __name__ == "__main__":
+    client.run(TOKEN)
 
