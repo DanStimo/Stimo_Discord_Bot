@@ -236,6 +236,7 @@ async def versus_command(interaction: discord.Interaction, club: str):
 async def on_ready():
     await tree.sync()
     print(f"Bot is ready as {client.user}")
+    await update_club_mapping_from_recent_matches(CLUB_ID)
 
 if __name__ == "__main__":
     client.run(TOKEN)
