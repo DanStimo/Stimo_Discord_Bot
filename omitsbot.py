@@ -125,38 +125,38 @@ class ClubDropdown(discord.ui.Select):
         )
 
     async def callback(self, interaction: discord.Interaction):
-    if self.values[0] == "none":
-        await interaction.response.edit_message(content="Okay, request canceled.", view=None)
-        return
-
-    chosen = self.values[0]
-    selected = next((c for c in self.club_data if str(c['clubInfo']['clubId']) == chosen), None)
-    if not selected:
-        await interaction.response.edit_message(content="Club data could not be found.", view=None)
-        return
-
-    stats = await get_club_stats(chosen)
-    recent_form = await get_recent_form(chosen)
-    form_string = ' '.join(recent_form) if recent_form else "No recent matches found."
-
-    embed = discord.Embed(
-        title=f"📋 {selected['clubInfo']['name'].upper()} Club Stats",
-        color=0xB30000
-    )
-    embed.add_field(name="Skill Rating", value=f"🏋️ {stats['skillRating']}", inline=False)
-    embed.add_field(name="Matches Played", value=f"📊 {stats['matchesPlayed']}", inline=False)
-    embed.add_field(name="Wins", value=f"✅ {stats['wins']}", inline=False)
-    embed.add_field(name="Draws", value=f"➖ {stats['draws']}", inline=False)
-    embed.add_field(name="Losses", value=f"❌ {stats['losses']}", inline=False)
-    embed.add_field(name="Win Streak", value=f"{stats['winStreak']} {streak_emoji(stats['winStreak'])}", inline=False)
-    embed.add_field(name="Unbeaten Streak", value=f"{stats['unbeatenStreak']} {streak_emoji(stats['unbeatenStreak'])}", inline=False)
-    embed.add_field(name="Recent Form", value=form_string, inline=False)
-
-    await interaction.response.edit_message(
-        embed=embed,
-        content=None,
-        view=None
-    )
+        if self.values[0] == "none":
+            await interaction.response.edit_message(content="Okay, request canceled.", view=None)
+            return
+    
+        chosen = self.values[0]
+        selected = next((c for c in self.club_data if str(c['clubInfo']['clubId']) == chosen), None)
+        if not selected:
+            await interaction.response.edit_message(content="Club data could not be found.", view=None)
+            return
+    
+        stats = await get_club_stats(chosen)
+        recent_form = await get_recent_form(chosen)
+        form_string = ' '.join(recent_form) if recent_form else "No recent matches found."
+    
+        embed = discord.Embed(
+            title=f"📋 {selected['clubInfo']['name'].upper()} Club Stats",
+            color=0xB30000
+        )
+        embed.add_field(name="Skill Rating", value=f"🏋️ {stats['skillRating']}", inline=False)
+        embed.add_field(name="Matches Played", value=f"📊 {stats['matchesPlayed']}", inline=False)
+        embed.add_field(name="Wins", value=f"✅ {stats['wins']}", inline=False)
+        embed.add_field(name="Draws", value=f"➖ {stats['draws']}", inline=False)
+        embed.add_field(name="Losses", value=f"❌ {stats['losses']}", inline=False)
+        embed.add_field(name="Win Streak", value=f"{stats['winStreak']} {streak_emoji(stats['winStreak'])}", inline=False)
+        embed.add_field(name="Unbeaten Streak", value=f"{stats['unbeatenStreak']} {streak_emoji(stats['unbeatenStreak'])}", inline=False)
+        embed.add_field(name="Recent Form", value=form_string, inline=False)
+    
+        await interaction.response.edit_message(
+            embed=embed,
+            content=None,
+            view=None
+        )
 
 
 class ClubDropdownView(discord.ui.View):
