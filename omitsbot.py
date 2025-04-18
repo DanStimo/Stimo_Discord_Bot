@@ -198,6 +198,11 @@ async def versus_command(interaction: discord.Interaction, club: str):
             print(f"Error in /versus: {e}")
             await interaction.followup.send("An error occurred while fetching opponent stats.")
 
+@tree.command(name="vs", description="Alias for /versus")
+@app_commands.describe(club="Club name or club ID")
+async def vs_command(interaction: discord.Interaction, club: str):
+    await versus_command(interaction, club)
+
 @client.event
 async def on_ready():
     await tree.sync()
