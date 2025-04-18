@@ -101,7 +101,7 @@ async def record_command(interaction: discord.Interaction):
     form_string = ' '.join(recent_form) if recent_form else "No recent matches found."
     if stats:
         embed = discord.Embed(title="📊 Wingus FC Club Stats", color=0xB30000)
-        embed.add_field(name="Skill Rating", value=f"🏋️ {stats['skillRating']}", inline=False)
+        embed.add_field(name="Skill Rating", value=f"🏅 {stats['skillRating']}", inline=False)
         embed.add_field(name="Matches Played", value=f"📊 {stats['matchesPlayed']}", inline=False)
         embed.add_field(name="Wins", value=f"✅ {stats['wins']}", inline=False)
         embed.add_field(name="Draws", value=f"➖ {stats['draws']}", inline=False)
@@ -143,7 +143,7 @@ class ClubDropdown(discord.ui.Select):
             title=f"📋 {selected['clubInfo']['name'].upper()} Club Stats",
             color=0xB30000
         )
-        embed.add_field(name="Skill Rating", value=f"🏋️ {stats['skillRating']}", inline=False)
+        embed.add_field(name="Skill Rating", value=f"🏅 {stats['skillRating']}", inline=False)
         embed.add_field(name="Matches Played", value=f"📊 {stats['matchesPlayed']}", inline=False)
         embed.add_field(name="Wins", value=f"✅ {stats['wins']}", inline=False)
         embed.add_field(name="Draws", value=f"➖ {stats['draws']}", inline=False)
@@ -222,9 +222,8 @@ async def vs_command(interaction: discord.Interaction, club: str):
 
 @client.event
 async def on_ready():
-    GUILD_ID = 1360645256961589428  # replace with your actual Discord server ID
-    await tree.sync(guild=discord.Object(id=GUILD_ID))
-    print(f"Synced commands to guild: {GUILD_ID}")
+    await tree.sync()
+    print(f"Bot is ready as {client.user}")
 
 
 client.run(TOKEN)
