@@ -205,7 +205,7 @@ async def versus_command(interaction: discord.Interaction, club: str):
                     title=f"📋 {selected['clubInfo']['name'].upper()} Club Stats",
                     color=0xB30000
                 )
-                embed.add_field(name="Skill Rating", value=f"🏋️ {stats['skillRating']}", inline=False)
+                embed.add_field(name="Skill Rating", value=f"🏅 {stats['skillRating']}", inline=False)
                 embed.add_field(name="Matches Played", value=f"📊 {stats['matchesPlayed']}", inline=False)
                 embed.add_field(name="Wins", value=f"✅ {stats['wins']}", inline=False)
                 embed.add_field(name="Draws", value=f"➖ {stats['draws']}", inline=False)
