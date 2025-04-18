@@ -185,7 +185,8 @@ async def versus_command(interaction: discord.Interaction, club: str):
 
                 club_names = [club.get("clubInfo", {}).get("name", "") for club in search_data]
                 matches = process.extract(club, club_names, scorer=fuzz.token_set_ratio, limit=5)
-                good_matches = [match for match in matches if match[1] >= 50]
+                good_matches = [(name, score) for name, score in matches if score >= 50]
+
 
                 if not good_matches:
                     await interaction.followup.send(f"No clubs found that match '{club}'.")
@@ -195,8 +196,9 @@ async def versus_command(interaction: discord.Interaction, club: str):
                     best_match_name = good_matches[0][0]
                 else:
                     suggestions = '\n'.join(
-                        [f"- {name} ({score}%)" for name, score, _ in good_matches]
+                        [f"- {name} ({score}%)" for name, score in good_matches]
                     )
+
                     await interaction.followup.send(
                         f"Did you mean one of these clubs?\n{suggestions}\n\n"
                         f"Please rerun the command using the exact name."
