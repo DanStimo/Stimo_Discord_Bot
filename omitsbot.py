@@ -39,6 +39,31 @@ def streak_emoji(value):
     except:
         return "❓"
 
+async def update_club_mapping_from_recent_matches(club_id, platform='common-gen5'):
+    url = f"https://proclubs.ea.com/api/fc/clubs/matches?matchType=leagueMatch&platform={platform}&clubIds={club_id}&matchType=gameType0"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(url, headers=headers)
+            if response.status_code == 200:
+                matches = response.json()
+                updated = False
+                for match in matches:
+                    opponent = match.get('opponentClub', {})
+                    opponent_id = str(opponent.get('clubId'))
+                    opponent_name = opponent.get('name')
+                    if opponent_id and opponent_name and opponent_id not in club_mapping:
+                        club_mapping[opponent_id] = opponent_name
+                        updated = True
+                if updated:
+                    with open('club_mapping.json', 'w') as f:
+                        json.dump(club_mapping, f, indent=4)
+            else:
+                print(f"[ERROR] EA API response status: {response.status_code}")
+    except Exception as e:
+        print(f"[ERROR] Failed to update club mapping: {e}")
+
+
 async def get_club_stats(club_id):
     url = f"https://proclubs.ea.com/api/fc/clubs/overallStats?platform={PLATFORM}&clubIds={club_id}"
     headers = {"User-Agent": "Mozilla/5.0"}
