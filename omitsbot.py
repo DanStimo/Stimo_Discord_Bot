@@ -152,12 +152,12 @@ class ClubDropdown(discord.ui.Select):
         embed.add_field(name="Unbeaten Streak", value=f"{stats['unbeatenStreak']} {streak_emoji(stats['unbeatenStreak'])}", inline=False)
         embed.add_field(name="Recent Form", value=form_string, inline=False)
     
-        await interaction.followup.edit_message(
-            message_id=interaction.message.id,
+        await interaction.message.edit(
             embed=embed,
             content=None,
             view=None
         )
+
 
 
 
