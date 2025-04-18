@@ -171,32 +171,49 @@ class ClubDropdownView(discord.ui.View):
 async def versus_command(interaction: discord.Interaction, club: str):
     await interaction.response.defer(thinking=True)
     headers = {"User-Agent": "Mozilla/5.0"}
+
     async with httpx.AsyncClient(timeout=10) as client:
         try:
-            encoded_name = club.replace(" ", "%20")
-            search_url = f"https://proclubs.ea.com/api/fc/allTimeLeaderboard/search?platform={PLATFORM}&clubName={encoded_name}"
-            search_response = await client.get(search_url, headers=headers)
-            if search_response.status_code != 200:
-                await interaction.followup.send("Club not found or EA API failed.")
-                return
+            search_terms = list({club, club[:4], club.split()[0] if " " in club else club})
+            seen_ids = set()
+            combined_results = []
 
-            search_data = search_response.json()
-            if not search_data or not isinstance(search_data, list):
+            for term in search_terms:
+                encoded_name = term.replace(" ", "%20")
+                search_url = f"https://proclubs.ea.com/api/fc/allTimeLeaderboard/search?platform={PLATFORM}&clubName={encoded_name}"
+                response = await client.get(search_url, headers=headers)
+
+                if response.status_code != 200:
+                    continue
+
+                data = response.json()
+                if not data or not isinstance(data, list):
+                    continue
+
+                for club_data in data:
+                    club_info = club_data.get("clubInfo", {})
+                    club_id = str(club_info.get("clubId"))
+                    if club_id and club_id not in seen_ids:
+                        seen_ids.add(club_id)
+                        combined_results.append(club_data)
+
+            if not combined_results:
                 await interaction.followup.send("No matching clubs found.")
                 return
 
             options = [
                 discord.SelectOption(label=c['clubInfo']['name'], value=str(c['clubInfo']['clubId']))
-                for c in search_data[:25]
+                for c in combined_results[:25]
             ]
             options.append(discord.SelectOption(label="None of these", value="none"))
 
-            view = ClubDropdownView(interaction, options, search_data)
+            view = ClubDropdownView(interaction, options, combined_results)
             await interaction.followup.send("Multiple clubs found. Please choose the correct one:", view=view)
 
         except Exception as e:
             print(f"Error in /versus: {e}")
             await interaction.followup.send("An error occurred while fetching opponent stats.")
+
 
 @tree.command(name="vs", description="Alias for /versus")
 @app_commands.describe(club="Club name or club ID")
