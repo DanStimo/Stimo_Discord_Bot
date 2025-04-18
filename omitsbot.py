@@ -174,54 +174,61 @@ async def versus_command(interaction: discord.Interaction, club: str):
 
     async with httpx.AsyncClient(timeout=10) as client:
         try:
-            search_terms = list({club, club[:4], club.split()[0] if " " in club else club})
-            seen_ids = set()
-            combined_results = []
+            encoded_name = club.replace(" ", "%20")
+            search_url = f"https://proclubs.ea.com/api/fc/allTimeLeaderboard/search?platform={PLATFORM}&clubName={encoded_name}"
+            search_response = await client.get(search_url, headers=headers)
 
-            for term in search_terms:
-                encoded_name = term.replace(" ", "%20")
-                search_url = f"https://proclubs.ea.com/api/fc/allTimeLeaderboard/search?platform={PLATFORM}&clubName={encoded_name}"
-                response = await client.get(search_url, headers=headers)
+            if search_response.status_code != 200:
+                await interaction.followup.send("Club not found or EA API failed.")
+                return
 
-                if response.status_code != 200:
-                    continue
-
-                data = response.json()
-                if not data or not isinstance(data, list):
-                    continue
-
-                for club_data in data:
-                    club_info = club_data.get("clubInfo", {})
-                    club_id = str(club_info.get("clubId"))
-                    if club_id and club_id not in seen_ids:
-                        seen_ids.add(club_id)
-                        combined_results.append(club_data)
-
-            if not combined_results:
+            search_data = search_response.json()
+            if not search_data or not isinstance(search_data, list):
                 await interaction.followup.send("No matching clubs found.")
                 return
 
-            options = []
+            # Filter out bad names
+            valid_clubs = [
+                c for c in search_data
+                if c.get("clubInfo", {}).get("name", "").strip().lower() != "none of these"
+            ]
 
-            for c in combined_results:
-                name = c['clubInfo']['name']
-                club_id = str(c['clubInfo']['clubId'])
-            
-                # Exclude "None of these" if it somehow exists in results (just in case)
-                if name.lower() != "none of these":
-                    options.append(discord.SelectOption(label=name, value=club_id))
-            
-            # Add the cancel option manually at the end
+            # Auto-select if exactly one valid club found
+            if len(valid_clubs) == 1:
+                selected = valid_clubs[0]
+                club_id = str(selected["clubInfo"]["clubId"])
+                stats = await get_club_stats(club_id)
+                recent_form = await get_recent_form(club_id)
+                form_string = ' '.join(recent_form) if recent_form else "No recent matches found."
+
+                embed = discord.Embed(
+                    title=f"📋 {selected['clubInfo']['name'].upper()} Club Stats",
+                    color=0xB30000
+                )
+                embed.add_field(name="Skill Rating", value=f"🏋️ {stats['skillRating']}", inline=False)
+                embed.add_field(name="Matches Played", value=f"📊 {stats['matchesPlayed']}", inline=False)
+                embed.add_field(name="Wins", value=f"✅ {stats['wins']}", inline=False)
+                embed.add_field(name="Draws", value=f"➖ {stats['draws']}", inline=False)
+                embed.add_field(name="Losses", value=f"❌ {stats['losses']}", inline=False)
+                embed.add_field(name="Win Streak", value=f"{stats['winStreak']} {streak_emoji(stats['winStreak'])}", inline=False)
+                embed.add_field(name="Unbeaten Streak", value=f"{stats['unbeatenStreak']} {streak_emoji(stats['unbeatenStreak'])}", inline=False)
+                embed.add_field(name="Recent Form", value=form_string, inline=False)
+                await interaction.followup.send(embed=embed)
+                return
+
+            # Build options from top 25
+            options = [
+                discord.SelectOption(label=c['clubInfo']['name'], value=str(c['clubInfo']['clubId']))
+                for c in valid_clubs[:25]
+            ]
             options.append(discord.SelectOption(label="None of these", value="none"))
 
-
-            view = ClubDropdownView(interaction, options, combined_results)
+            view = ClubDropdownView(interaction, options, valid_clubs)
             await interaction.followup.send("Multiple clubs found. Please choose the correct one:", view=view)
 
         except Exception as e:
             print(f"Error in /versus: {e}")
             await interaction.followup.send("An error occurred while fetching opponent stats.")
-
 
 @tree.command(name="vs", description="Alias for /versus")
 @app_commands.describe(club="Club name or club ID")
