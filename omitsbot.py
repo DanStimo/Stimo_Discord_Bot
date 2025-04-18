@@ -191,9 +191,19 @@ async def versus_command(interaction: discord.Interaction, club: str):
                     await interaction.followup.send(f"No clubs found that match '{club}'.")
                     return
 
-                best_match_name = good_matches[0][0]
-                club_data = next((c for c in search_data if c.get("clubInfo", {}).get("name", "") == best_match_name), None)
+                if len(good_matches) == 1:
+                    best_match_name = good_matches[0][0]
+                else:
+                    suggestions = '\n'.join(
+                        [f"- {name} ({score}%)" for name, score, _ in good_matches]
+                    )
+                    await interaction.followup.send(
+                        f"Did you mean one of these clubs?\n{suggestions}\n\n"
+                        f"Please rerun the command using the exact name."
+                    )
+                    return
 
+                club_data = next((c for c in search_data if c.get("clubInfo", {}).get("name", "") == best_match_name), None)
                 if not club_data:
                     await interaction.followup.send("Could not retrieve club data.")
                     return
@@ -231,6 +241,7 @@ async def versus_command(interaction: discord.Interaction, club: str):
         except Exception as e:
             print(f"Error in /versus: {e}")
             await interaction.followup.send("An error occurred while fetching opponent stats.")
+
 
 @client.event
 async def on_ready():
