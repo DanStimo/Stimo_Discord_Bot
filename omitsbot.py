@@ -205,7 +205,9 @@ async def vs_command(interaction: discord.Interaction, club: str):
 
 @client.event
 async def on_ready():
-    await tree.sync()
-    print(f"Bot is ready as {client.user}")
+    GUILD_ID = 1360645256961589428  # replace with your actual Discord server ID
+    await tree.sync(guild=discord.Object(id=GUILD_ID))
+    print(f"Synced commands to guild: {GUILD_ID}")
+
 
 client.run(TOKEN)
