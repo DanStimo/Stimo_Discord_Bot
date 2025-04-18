@@ -9,7 +9,7 @@ load_dotenv()
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 CLUB_ID = os.getenv("CLUB_ID", "167054")  # fallback/default
-
+PLATFORM = os.getenv("PLATFORM", "common-gen5")
 
 intents = discord.Intents.default()
 client = discord.Client(intents=intents)
