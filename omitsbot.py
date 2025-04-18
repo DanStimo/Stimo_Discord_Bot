@@ -1,10 +1,11 @@
 import discord
 from discord import app_commands
 import httpx
-import json
 from fuzzywuzzy import process, fuzz
 import os
 from dotenv import load_dotenv
+from db import fetch_club_name, insert_club_mapping
+
 load_dotenv()
 
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -14,17 +15,6 @@ PLATFORM = os.getenv("PLATFORM", "common-gen5")
 intents = discord.Intents.default()
 client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
-
-# Load or initialize club mapping
-from db import fetch_club_name
-
-async def get_club_mapping(club_ids):
-    mapping = {}
-    for cid in club_ids:
-        name = await fetch_club_name(cid)
-        if name:
-            mapping[cid] = name
-    return mapping
 
 def normalize(name):
     return ''.join(name.lower().split())
@@ -42,33 +32,6 @@ def streak_emoji(value):
             return "🔥🔥🔥"
     except:
         return "❓"
-    
-async def update_club_mapping_from_recent_matches(club_id, platform='common-gen5'):
-    url = f"https://proclubs.ea.com/api/fc/clubs/matches?matchType=leagueMatch&platform={platform}&clubIds={club_id}&matchType=gameType0"
-    headers = {"User-Agent": "Mozilla/5.0"}
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.get(url, headers=headers)
-            if response.status_code == 200:
-                matches = response.json()
-                updated = False
-                for match in matches:
-                    opponent = match.get('opponentClub', {})
-                    opponent_id = str(opponent.get('clubId'))
-                    opponent_name = opponent.get('name')
-                    if opponent_id and opponent_name and opponent_id not in club_mapping:
-                        club_mapping[opponent_id] = opponent_name
-                        updated = True
-                if updated:
-                    from db import insert_club_mapping
-
-                    await insert_club_mapping(opponent_id, best_match_name)
-
-            else:
-                print(f"[ERROR] EA API response status: {response.status_code}")
-    except Exception as e:
-        print(f"[ERROR] Failed to update club mapping: {e}")
-
 
 async def get_club_stats(club_id):
     url = f"https://proclubs.ea.com/api/fc/clubs/overallStats?platform={PLATFORM}&clubIds={club_id}"
@@ -101,8 +64,6 @@ async def get_recent_form(club_id):
             response = await client.get(url, headers=headers)
             if response.status_code == 200:
                 matches = response.json()
-                
-
                 if not matches:
                     print("[DEBUG] No matches returned from EA.")
                     return []
@@ -163,19 +124,10 @@ async def versus_command(interaction: discord.Interaction, club: str):
 
     async with httpx.AsyncClient(timeout=10) as client:
         try:
-            normalized_input = normalize(club)
-            matched_club_id = None
-            for club_id, club_name in club_mapping.items():
-                if normalize(club_name) == normalized_input:
-                    matched_club_id = club_id
-                    break
-
-            if matched_club_id:
-                opponent_id = matched_club_id
-                club_name_formatted = club_mapping[opponent_id].upper()
-            elif club.isdigit():
+            if club.isdigit():
                 opponent_id = club
-                club_name_formatted = club_mapping.get(opponent_id, f"CLUB ID {opponent_id}")
+                opponent_name = await fetch_club_name(opponent_id)
+                club_name_formatted = opponent_name.upper() if opponent_name else f"CLUB ID {opponent_id}"
             else:
                 encoded_name = club.replace(" ", "%20")
                 search_url = f"https://proclubs.ea.com/api/fc/allTimeLeaderboard/search?platform={PLATFORM}&clubName={encoded_name}"
@@ -207,10 +159,7 @@ async def versus_command(interaction: discord.Interaction, club: str):
                 opponent_id = str(club_data.get("clubInfo", {}).get("clubId"))
                 club_name_formatted = best_match_name.upper()
 
-                if opponent_id not in club_mapping:
-                    club_mapping[opponent_id] = best_match_name
-                    with open('club_mapping.json', 'w') as f:
-                        json.dump(club_mapping, f, indent=4)
+                await insert_club_mapping(opponent_id, best_match_name)
 
             stats = await get_club_stats(opponent_id)
             if not stats:
