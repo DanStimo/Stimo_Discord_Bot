@@ -169,7 +169,7 @@ class ClubDropdownView(discord.ui.View):
 @tree.command(name="versus", description="Check another club's stats by name or ID.")
 @app_commands.describe(club="Club name or club ID")
 async def versus_command(interaction: discord.Interaction, club: str):
-    await interaction.response.defer(thinking=True)
+    await interaction.response.defer(ephemeral=False)
     headers = {"User-Agent": "Mozilla/5.0"}
 
     async with httpx.AsyncClient(timeout=10) as client:
