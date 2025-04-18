@@ -201,11 +201,19 @@ async def versus_command(interaction: discord.Interaction, club: str):
                 await interaction.followup.send("No matching clubs found.")
                 return
 
-            options = [
-                discord.SelectOption(label=c['clubInfo']['name'], value=str(c['clubInfo']['clubId']))
-                for c in combined_results[:25]
-            ]
+            options = []
+
+            for c in combined_results:
+                name = c['clubInfo']['name']
+                club_id = str(c['clubInfo']['clubId'])
+            
+                # Exclude "None of these" if it somehow exists in results (just in case)
+                if name.lower() != "none of these":
+                    options.append(discord.SelectOption(label=name, value=club_id))
+            
+            # Add the cancel option manually at the end
             options.append(discord.SelectOption(label="None of these", value="none"))
+
 
             view = ClubDropdownView(interaction, options, combined_results)
             await interaction.followup.send("Multiple clubs found. Please choose the correct one:", view=view)
