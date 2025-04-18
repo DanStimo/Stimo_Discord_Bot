@@ -9,18 +9,23 @@ load_dotenv()
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 CLUB_ID = os.getenv("CLUB_ID", "167054")  # fallback/default
-PLATFORM = os.getenv("PLATFORM", "common-gen5")
+
+
 
 intents = discord.Intents.default()
 client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
 
 # Load or initialize club mapping
-try:
-    with open('club_mapping.json', 'r') as f:
-        club_mapping = json.load(f)
-except FileNotFoundError:
-    club_mapping = {}
+from db import fetch_club_name
+
+async def get_club_mapping(club_ids):
+    mapping = {}
+    for cid in club_ids:
+        name = await fetch_club_name(cid)
+        if name:
+            mapping[cid] = name
+    return mapping
 
 def normalize(name):
     return ''.join(name.lower().split())
@@ -38,7 +43,7 @@ def streak_emoji(value):
             return "🔥🔥🔥"
     except:
         return "❓"
-
+    
 async def update_club_mapping_from_recent_matches(club_id, platform='common-gen5'):
     url = f"https://proclubs.ea.com/api/fc/clubs/matches?matchType=leagueMatch&platform={platform}&clubIds={club_id}&matchType=gameType0"
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -56,8 +61,10 @@ async def update_club_mapping_from_recent_matches(club_id, platform='common-gen5
                         club_mapping[opponent_id] = opponent_name
                         updated = True
                 if updated:
-                    with open('club_mapping.json', 'w') as f:
-                        json.dump(club_mapping, f, indent=4)
+                    from db import insert_club_mapping
+
+                    await insert_club_mapping(opponent_id, best_match_name)
+
             else:
                 print(f"[ERROR] EA API response status: {response.status_code}")
     except Exception as e:
@@ -236,8 +243,5 @@ async def versus_command(interaction: discord.Interaction, club: str):
 async def on_ready():
     await tree.sync()
     print(f"Bot is ready as {client.user}")
-    await update_club_mapping_from_recent_matches(CLUB_ID)
 
-if __name__ == "__main__":
-    client.run(TOKEN)
-
+client.run(TOKEN)
