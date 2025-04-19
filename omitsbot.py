@@ -106,6 +106,46 @@ async def get_recent_form(club_id):
         print(f"[ERROR] Failed to fetch recent form: {e}")
         return []
 
+async def get_last_match(club_id):
+    base_url = "https://proclubs.ea.com/api/fc/clubs/matches"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    match_types = ["leagueMatch", "playoffMatch"]
+    all_matches = []
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            for match_type in match_types:
+                url = f"{base_url}?matchType={match_type}&platform={PLATFORM}&clubIds={club_id}"
+                response = await client.get(url, headers=headers)
+                if response.status_code == 200:
+                    matches = response.json()
+                    all_matches.extend(matches)
+
+        all_matches.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
+
+        if not all_matches:
+            return "Last match data not available."
+
+        match = all_matches[0]
+        clubs_data = match.get("clubs", {})
+        club_data = clubs_data.get(str(club_id))
+        opponent_id = next((cid for cid in clubs_data if cid != str(club_id)), None)
+        opponent_data = clubs_data.get(opponent_id) if opponent_id else None
+
+        if not club_data or not opponent_data:
+            return "Last match data not available."
+
+        our_score = int(club_data.get("goals", 0))
+        opponent_score = int(opponent_data.get("goals", 0))
+        opponent_name = opponent_data.get("name", "Unknown")
+
+        result = "✅ Win" if our_score > opponent_score else "❌ Loss" if our_score < opponent_score else "➖ Draw"
+        return f"Last Match: {opponent_name} ({our_score}-{opponent_score}) - {result}"
+
+    except Exception as e:
+        print(f"[ERROR] Failed to fetch last match: {e}")
+        return "Last match data not available."
+
 @tree.command(name="record", description="Show Wingus FC's current record.")
 async def record_command(interaction: discord.Interaction):
     stats = await get_club_stats(CLUB_ID)
@@ -120,6 +160,7 @@ async def record_command(interaction: discord.Interaction):
         embed.add_field(name="Losses", value=f"❌ {stats['losses']}", inline=False)
         embed.add_field(name="Win Streak", value=f"{stats['winStreak']} {streak_emoji(stats['winStreak'])}", inline=False)
         embed.add_field(name="Unbeaten Streak", value=f"{stats['unbeatenStreak']} {streak_emoji(stats['unbeatenStreak'])}", inline=False)
+        embed.add_field(name="Last Match", value=last_match, inline=False)
         embed.add_field(name="Recent Form", value=form_string, inline=False)
         await interaction.response.send_message(embed=embed)
     else:
