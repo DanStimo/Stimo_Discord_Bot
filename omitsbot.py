@@ -66,7 +66,7 @@ class PrintRecordButton(discord.ui.View):
             try:
                 await self.message.edit(view=None)
             except Exception as e:
-                print(f"[ERROR] Failed to remove button: {e}")
+                print(f"[ERROR] Failed to remove view after timeout: {e}")
 
 async def get_club_stats(club_id):
     url = f"https://proclubs.ea.com/api/fc/clubs/overallStats?platform={PLATFORM}&clubIds={club_id}"
@@ -330,9 +330,6 @@ class ClubDropdown(discord.ui.Select):
             view=None
         )
 
-
-
-
 class ClubDropdownView(discord.ui.View):
     def __init__(self, interaction, options, club_data):
         super().__init__()
@@ -375,7 +372,7 @@ async def versus_command(interaction: discord.Interaction, club: str):
                 rank = await get_club_rank(opponent_id)
                 rank_display = f"#{rank}" if isinstance(rank, int) else "Unranked"
                 form_string = ' '.join(recent_form) if recent_form else "No recent matches found."
-
+            
                 embed = discord.Embed(
                     title=f"📋 {selected['clubInfo']['name'].upper()} Club Stats",
                     color=0xB30000
@@ -390,10 +387,11 @@ async def versus_command(interaction: discord.Interaction, club: str):
                 embed.add_field(name="Unbeaten Streak", value=f"{stats['unbeatenStreak']} {streak_emoji(stats['unbeatenStreak'])}", inline=False)
                 embed.add_field(name="Last Match", value=last_match, inline=False)
                 embed.add_field(name="Recent Form", value=form_string, inline=False)
-                
+            
                 view = PrintRecordButton(stats, selected['clubInfo']['name'].upper())
                 view.message = await interaction.followup.send(embed=embed, view=view)
                 return
+
 
             # Build options from top 25
             options = [
