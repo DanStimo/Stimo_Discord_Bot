@@ -181,7 +181,7 @@ async def record_command(interaction: discord.Interaction):
 
     if stats:
         embed = discord.Embed(title="📊 Wingus FC Club Stats", color=0xB30000)
-        embed.add_field(name="Rank", value=f"📈 #{rank}", inline=False)
+        embed.add_field(name="Leaderboard Rank", value=f"📈 #{rank}", inline=False)
         embed.add_field(name="Skill Rating", value=f"🏅 {stats['skillRating']}", inline=False)
         embed.add_field(name="Matches Played", value=f"📊 {stats['matchesPlayed']}", inline=False)
         embed.add_field(name="Wins", value=f"✅ {stats['wins']}", inline=False)
