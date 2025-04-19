@@ -140,7 +140,7 @@ async def get_last_match(club_id):
         opponent_name = opponent_data.get("name", "Unknown")
 
         result = "✅ Win" if our_score > opponent_score else "❌ Loss" if our_score < opponent_score else "➖ Draw"
-        return f"Last Match: {opponent_name} ({our_score}-{opponent_score}) - {result}"
+        return f"{opponent_name} ({our_score}-{opponent_score}) - {result}"
 
     except Exception as e:
         print(f"[ERROR] Failed to fetch last match: {e}")
@@ -150,7 +150,7 @@ async def get_last_match(club_id):
 async def record_command(interaction: discord.Interaction):
     stats = await get_club_stats(CLUB_ID)
     recent_form = await get_recent_form(CLUB_ID)
-    last_match = await get_last_match(CLUB_ID)  # ✅ Add this here
+    last_match = await get_last_match(CLUB_ID)
     form_string = ' '.join(recent_form) if recent_form else "No recent matches found."
 
     if stats:
