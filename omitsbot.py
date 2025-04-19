@@ -361,7 +361,7 @@ async def on_ready():
     await tree.sync()
     print(f"Bot is ready as {client.user}")
 
-     client.loop.create_task(rotate_presence())
+    client.loop.create_task(rotate_presence())
 
     # Optional announcement
     channel_id = int(os.getenv("ANNOUNCE_CHANNEL_ID", "0"))  # replace with actual ID if needed
