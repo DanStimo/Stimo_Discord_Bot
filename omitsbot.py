@@ -332,7 +332,7 @@ async def on_ready():
     channel = client.get_channel(channel_id)
 
     if channel:
-        await channel.send("✅ omitS Bot is now online and ready for commands!")
+        await channel.send("✅ - omitS Bot (<:discord:1363127822209646612>) is now online and ready for commands!")
     else:
         print(f"[WARN] Could not find channel with ID {channel_id}")
 
