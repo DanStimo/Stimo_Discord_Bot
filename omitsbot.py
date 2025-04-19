@@ -145,8 +145,8 @@ async def get_last_match(club_id):
         our_score = int(club_data.get("goals", 0))
         opponent_score = int(opponent_data.get("goals", 0))
 
-        result = "✅ Win" if our_score > opponent_score else "❌ Loss" if our_score < opponent_score else "➖ Draw"
-        return f"{opponent_name} ({our_score}-{opponent_score}) - {result}"
+        result = "✅" if our_score > opponent_score else "❌" if our_score < opponent_score else "➖"
+        return f"{result} - {opponent_name} ({our_score}-{opponent_score})"
 
     except Exception as e:
         print(f"[ERROR] Failed to fetch last match: {e}")
