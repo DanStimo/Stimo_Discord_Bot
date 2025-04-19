@@ -281,6 +281,7 @@ async def versus_command(interaction: discord.Interaction, club: str):
                 club_id = str(selected["clubInfo"]["clubId"])
                 stats = await get_club_stats(club_id)
                 recent_form = await get_recent_form(club_id)
+                rank = await get_club_rank(CLUB_ID)
                 last_match = await get_last_match(club_id)  # ✅ New line
                 form_string = ' '.join(recent_form) if recent_form else "No recent matches found."
 
@@ -289,6 +290,7 @@ async def versus_command(interaction: discord.Interaction, club: str):
                     title=f"📋 {selected['clubInfo']['name'].upper()} Club Stats",
                     color=0xB30000
                 )
+                embed.add_field(name="Rank", value=f"📈 #{rank}", inline=False)
                 embed.add_field(name="Skill Rating", value=f"🏅 {stats['skillRating']}", inline=False)
                 embed.add_field(name="Matches Played", value=f"📊 {stats['matchesPlayed']}", inline=False)
                 embed.add_field(name="Wins", value=f"✅ {stats['wins']}", inline=False)
