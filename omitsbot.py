@@ -283,14 +283,14 @@ async def versus_command(interaction: discord.Interaction, club: str):
                 recent_form = await get_recent_form(opponent_id)
                 last_match = await get_last_match(opponent_id)
                 rank = await get_club_rank(opponent_id)
-                rank_display = f"📈 Rank: #{rank}" if rank else "📈 Rank: Unranked"
+                rank_display = f"📈 Rank: #{rank}" if rank else "📈 Unranked"
                 form_string = ' '.join(recent_form) if recent_form else "No recent matches found."
 
                 embed = discord.Embed(
                     title=f"📋 {selected['clubInfo']['name'].upper()} Club Stats",
                     color=0xB30000
                 )
-                embed.add_field(name="Leaderboard Rank", value=f"📈 #{rank}", inline=False)
+                embed.add_field(name="Leaderboard Rank", value=rank_display, inline=False)
                 embed.add_field(name="Skill Rating", value=f"🏅 {stats['skillRating']}", inline=False)
                 embed.add_field(name="Matches Played", value=f"📊 {stats['matchesPlayed']}", inline=False)
                 embed.add_field(name="Wins", value=f"✅ {stats['wins']}", inline=False)
@@ -328,5 +328,12 @@ async def on_ready():
     await tree.sync()
     print(f"Bot is ready as {client.user}")
 
+    channel_id = int(os.getenv("ANNOUNCE_CHANNEL_ID", "0"))  # replace with actual ID if needed
+    channel = client.get_channel(channel_id)
+
+    if channel:
+        await channel.send("✅ omitS Bot is now online and ready for commands!")
+    else:
+        print(f"[WARN] Could not find channel with ID {channel_id}")
 
 client.run(TOKEN)
