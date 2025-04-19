@@ -281,7 +281,7 @@ async def versus_command(interaction: discord.Interaction, club: str):
                 club_id = str(selected["clubInfo"]["clubId"])
                 stats = await get_club_stats(club_id)
                 recent_form = await get_recent_form(club_id)
-                rank = await get_club_rank(CLUB_ID)
+                rank = await get_club_rank(opponent_id)
                 last_match = await get_last_match(club_id)  # ✅ New line
                 form_string = ' '.join(recent_form) if recent_form else "No recent matches found."
 
