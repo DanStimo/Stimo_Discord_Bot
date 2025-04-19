@@ -226,7 +226,7 @@ async def rotate_presence():
 
         await asyncio.sleep(300)  # 5 minutes
 
-@tree.command(name="record", description="Show Wingus FC's current record.")
+@tree.command(name="record", description="Show xNever Enoughx's current record.")
 async def record_command(interaction: discord.Interaction):
     stats = await get_club_stats(CLUB_ID)
     recent_form = await get_recent_form(CLUB_ID)
