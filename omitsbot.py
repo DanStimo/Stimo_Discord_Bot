@@ -175,7 +175,7 @@ async def get_club_rank(club_id):
 async def record_command(interaction: discord.Interaction):
     stats = await get_club_stats(CLUB_ID)
     recent_form = await get_recent_form(CLUB_ID)
-    rank = await get_club_rank(opponent_id)
+    rank = await get_club_rank(CLUB_ID)
     last_match = await get_last_match(CLUB_ID)
     form_string = ' '.join(recent_form) if recent_form else "No recent matches found."
 
