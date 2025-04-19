@@ -295,10 +295,12 @@ class ClubDropdown(discord.ui.Select):
             await interaction.response.edit_message(content="Okay, request canceled.", view=None)
             return
     
+        await interaction.response.defer()  # Defer early to avoid timeout
+    
         chosen = self.values[0]
         selected = next((c for c in self.club_data if str(c['clubInfo']['clubId']) == chosen), None)
         if not selected:
-            await interaction.response.edit_message(content="Club data could not be found.", view=None)
+            await interaction.edit_original_response(content="Club data could not be found.", view=None)
             return
     
         stats = await get_club_stats(chosen)
@@ -325,7 +327,8 @@ class ClubDropdown(discord.ui.Select):
     
         view = PrintRecordButton(stats, selected['clubInfo']['name'].upper())
     
-        await interaction.response.edit_message(embed=embed, view=view)
+        await interaction.edit_original_response(embed=embed, view=view)
+
         
         return
     
