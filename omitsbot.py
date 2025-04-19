@@ -46,7 +46,7 @@ class PrintRecordButton(discord.ui.View):
         super().__init__(timeout=900)  # 15 minutes
         self.stats = stats
         self.club_name = club_name
-        self.message = None
+        self.message = None  # store the original message
 
     @discord.ui.button(label="🖨️ Print Record", style=discord.ButtonStyle.primary)
     async def print_record(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -62,6 +62,7 @@ class PrintRecordButton(discord.ui.View):
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     async def on_timeout(self):
+        # After timeout, remove the view (i.e., the button)
         if self.message:
             try:
                 await self.message.edit(view=None)
@@ -294,22 +295,20 @@ class ClubDropdown(discord.ui.Select):
         if self.values[0] == "none":
             await interaction.response.edit_message(content="Okay, request canceled.", view=None)
             return
-    
-        await interaction.response.defer()  # Defer early to avoid timeout
-    
+
         chosen = self.values[0]
         selected = next((c for c in self.club_data if str(c['clubInfo']['clubId']) == chosen), None)
         if not selected:
-            await interaction.edit_original_response(content="Club data could not be found.", view=None)
+            await interaction.response.edit_message(content="Club data could not be found.", view=None)
             return
-    
+
         stats = await get_club_stats(chosen)
         recent_form = await get_recent_form(chosen)
         last_match = await get_last_match(chosen)
         rank = await get_club_rank(chosen)
         rank_display = f"#{rank}" if isinstance(rank, int) else "Unranked"
         form_string = ' '.join(recent_form) if recent_form else "No recent matches found."
-    
+
         embed = discord.Embed(
             title=f"📋 {selected['clubInfo']['name'].upper()} Club Stats",
             color=0xB30000
@@ -324,13 +323,10 @@ class ClubDropdown(discord.ui.Select):
         embed.add_field(name="Unbeaten Streak", value=f"{stats['unbeatenStreak']} {streak_emoji(stats['unbeatenStreak'])}", inline=False)
         embed.add_field(name="Last Match", value=last_match, inline=False)
         embed.add_field(name="Recent Form", value=form_string, inline=False)
-    
-        view = PrintRecordButton(stats, selected['clubInfo']['name'].upper())
-    
-        await interaction.edit_original_response(embed=embed, view=view)
 
-        
-        return
+        # ✅ Use PrintRecordButton with timeout
+        view = PrintRecordButton(stats, selected['clubInfo']['name'].upper())
+        view.message = await interaction.response.edit_message(embed=embed, view=view)
     
         await interaction.message.edit(
             embed=embed,
