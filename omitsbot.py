@@ -132,6 +132,7 @@ async def get_last_match(club_id):
         opponent_id = next((cid for cid in clubs_data if cid != str(club_id)), None)
         opponent_data = clubs_data.get(opponent_id) if opponent_id else None
 
+        opponent_name = opponent_data.get("name") or match.get("opponentClub", {}).get("name", "Unknown")
         if not club_data or not opponent_data:
             return "Last match data not available."
 
