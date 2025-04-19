@@ -301,6 +301,9 @@ class ClubDropdown(discord.ui.Select):
             await interaction.response.edit_message(content="Club data could not be found.", view=None)
             return
     
+        # Defer to allow time before sending follow-up
+        await interaction.response.defer()
+    
         stats = await get_club_stats(chosen)
         recent_form = await get_recent_form(chosen)
         last_match = await get_last_match(chosen)
