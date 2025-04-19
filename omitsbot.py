@@ -283,7 +283,7 @@ async def versus_command(interaction: discord.Interaction, club: str):
                 recent_form = await get_recent_form(opponent_id)
                 last_match = await get_last_match(opponent_id)
                 rank = await get_club_rank(opponent_id)
-                rank_display = f"#{rank}" if rank is not None else "Unranked"
+                rank_display = f"#{rank}" if isinstance(rank, int) else "Unranked"
                 form_string = ' '.join(recent_form) if recent_form else "No recent matches found."
 
                 embed = discord.Embed(
