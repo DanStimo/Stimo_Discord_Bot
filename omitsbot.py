@@ -41,6 +41,26 @@ def streak_emoji(value):
     except:
         return "❓"
 
+class PrintRecordButton(discord.ui.View):
+    def __init__(self, stats, club_name):
+        super().__init__()
+        self.stats = stats
+        self.club_name = club_name
+
+    @discord.ui.button(label="🖨️ Print Record", style=discord.ButtonStyle.primary)
+    async def print_record(self, interaction: discord.Interaction, button: discord.ui.Button):
+        wins = self.stats.get("wins", "N/A")
+        draws = self.stats.get("draws", "N/A")
+        losses = self.stats.get("losses", "N/A")
+
+        embed = discord.Embed(
+            title=f"{self.club_name} W-D-L Record",
+            description=f"**{wins}** Wins | **{draws}** Draws | **{losses}** Losses",
+            color=0xB30000
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
 async def get_club_stats(club_id):
     url = f"https://proclubs.ea.com/api/fc/clubs/overallStats?platform={PLATFORM}&clubIds={club_id}"
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -357,7 +377,9 @@ async def versus_command(interaction: discord.Interaction, club: str):
                 embed.add_field(name="Unbeaten Streak", value=f"{stats['unbeatenStreak']} {streak_emoji(stats['unbeatenStreak'])}", inline=False)
                 embed.add_field(name="Last Match", value=last_match, inline=False)
                 embed.add_field(name="Recent Form", value=form_string, inline=False)
-                await interaction.followup.send(embed=embed)
+                view = PrintRecordButton(stats, selected['clubInfo']['name'].upper())
+                await interaction.followup.send(embed=embed, view=view)
+
                 return
 
             # Build options from top 25
