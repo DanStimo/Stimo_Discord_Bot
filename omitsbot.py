@@ -304,7 +304,8 @@ class ClubDropdown(discord.ui.Select):
         stats = await get_club_stats(chosen)
         recent_form = await get_recent_form(chosen)
         form_string = ' '.join(recent_form) if recent_form else "No recent matches found."
-    
+        rank = await get_club_rank(chosen)
+        
         embed = discord.Embed(
             title=f"📋 {selected['clubInfo']['name'].upper()} Club Stats",
             color=0xB30000
