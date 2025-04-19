@@ -200,10 +200,16 @@ async def rotate_presence():
                 response = await http.get(url, headers=headers)
                 if response.status_code == 200:
                     data = response.json()
-                    members = data.get("members", [])
+                    all_members = data.get("members", [])
 
-                    if members:
-                        random_member = random.choice(members)
+                    # Filter out members with less than 10 games played
+                    active_members = [
+                        m for m in all_members
+                        if int(m.get("gamesPlayed", 0)) >= 10
+                    ]
+
+                    if active_members:
+                        random_member = random.choice(active_members)
                         gamertag = random_member.get("name", "someone")
 
                         activity = discord.Activity(
@@ -212,7 +218,7 @@ async def rotate_presence():
                         )
                         await client.change_presence(activity=activity)
                     else:
-                        print("[ERROR] 'members' list is empty")
+                        print("[ERROR] No active members with 10+ games found.")
                 else:
                     print(f"[ERROR] API returned status {response.status_code}")
         except Exception as e:
