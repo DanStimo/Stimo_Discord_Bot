@@ -152,16 +152,36 @@ async def get_last_match(club_id):
         print(f"[ERROR] Failed to fetch last match: {e}")
         return "Last match data not available."
 
+async def get_club_rank(club_id):
+    url = f"https://proclubs.ea.com/api/fc/allTimeLeaderboard?platform={PLATFORM}"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.get(url, headers=headers)
+            if response.status_code == 200:
+                leaderboard = response.json()
+                for club in leaderboard:
+                    if str(club.get("clubId")) == str(club_id):
+                        return club.get("rank", "N/A")
+            else:
+                print(f"[ERROR] Failed to fetch leaderboard, status code {response.status_code}")
+    except Exception as e:
+        print(f"[ERROR] Exception in get_club_rank: {e}")
+    
+    return "N/A"
 
 @tree.command(name="record", description="Show Wingus FC's current record.")
 async def record_command(interaction: discord.Interaction):
     stats = await get_club_stats(CLUB_ID)
     recent_form = await get_recent_form(CLUB_ID)
+    rank = await get_club_rank(opponent_id)
     last_match = await get_last_match(CLUB_ID)
     form_string = ' '.join(recent_form) if recent_form else "No recent matches found."
 
     if stats:
         embed = discord.Embed(title="📊 Wingus FC Club Stats", color=0xB30000)
+        embed.add_field(name="Rank", value=f"📈 #{rank}", inline=False)
         embed.add_field(name="Skill Rating", value=f"🏅 {stats['skillRating']}", inline=False)
         embed.add_field(name="Matches Played", value=f"📊 {stats['matchesPlayed']}", inline=False)
         embed.add_field(name="Wins", value=f"✅ {stats['wins']}", inline=False)
