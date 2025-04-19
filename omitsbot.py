@@ -308,21 +308,21 @@ class ClubDropdown(discord.ui.Select):
         embed = discord.Embed(
             title=f"📋 {selected['clubInfo']['name'].upper()} Club Stats",
             color=0xB30000
-        )
-                embed.add_field(name="Leaderboard Rank", value=f"📈 {rank_display}", inline=False)
-                embed.add_field(name="Skill Rating", value=f"🏅 {stats['skillRating']}", inline=False)
-                embed.add_field(name="Matches Played", value=f"📊 {stats['matchesPlayed']}", inline=False)
-                embed.add_field(name="Wins", value=f"✅ {stats['wins']}", inline=False)
-                embed.add_field(name="Draws", value=f"➖ {stats['draws']}", inline=False)
-                embed.add_field(name="Losses", value=f"❌ {stats['losses']}", inline=False)
-                embed.add_field(name="Win Streak", value=f"{stats['winStreak']} {streak_emoji(stats['winStreak'])}", inline=False)
-                embed.add_field(name="Unbeaten Streak", value=f"{stats['unbeatenStreak']} {streak_emoji(stats['unbeatenStreak'])}", inline=False)
-                embed.add_field(name="Last Match", value=last_match, inline=False)
-                embed.add_field(name="Recent Form", value=form_string, inline=False)
+            )
+            embed.add_field(name="Leaderboard Rank", value=f"📈 {rank_display}", inline=False)
+            embed.add_field(name="Skill Rating", value=f"🏅 {stats['skillRating']}", inline=False)
+            embed.add_field(name="Matches Played", value=f"📊 {stats['matchesPlayed']}", inline=False)
+            embed.add_field(name="Wins", value=f"✅ {stats['wins']}", inline=False)
+            embed.add_field(name="Draws", value=f"➖ {stats['draws']}", inline=False)
+            embed.add_field(name="Losses", value=f"❌ {stats['losses']}", inline=False)
+            embed.add_field(name="Win Streak", value=f"{stats['winStreak']} {streak_emoji(stats['winStreak'])}", inline=False)
+            embed.add_field(name="Unbeaten Streak", value=f"{stats['unbeatenStreak']} {streak_emoji(stats['unbeatenStreak'])}", inline=False)
+            embed.add_field(name="Last Match", value=last_match, inline=False)
+            embed.add_field(name="Recent Form", value=form_string, inline=False)
                 
-                view = PrintRecordButton(stats, selected['clubInfo']['name'].upper())
-                view.message = await interaction.followup.send(embed=embed, view=view)
-                return
+            view = PrintRecordButton(stats, selected['clubInfo']['name'].upper())
+            view.message = await interaction.followup.send(embed=embed, view=view)
+            return
     
         await interaction.message.edit(
             embed=embed,
