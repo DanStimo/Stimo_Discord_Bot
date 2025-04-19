@@ -198,21 +198,33 @@ async def rotate_presence():
 
             async with httpx.AsyncClient(timeout=10) as http:
                 response = await http.get(url, headers=headers)
-                if response.status_code == 200:
-                    members = response.json()
-                    if members:
-                        random_member = random.choice(members)
-                        gamertag = random_member.get("name", "someone")
 
-                        activity = discord.Activity(
-                            type=discord.ActivityType.watching,
-                            name=f"{gamertag} 👀"
-                        )
-                        await client.change_presence(activity=activity)
+                # Debug logging if request fails
+                if response.status_code != 200:
+                    print(f"[ERROR] Failed to fetch members: {response.status_code}")
+                    print(f"[ERROR] Response text: {await response.aread()}")
+                else:
+                    try:
+                        members = response.json()
+                        if not isinstance(members, list) or not members:
+                            print("[ERROR] No members returned or wrong format")
+                        else:
+                            random_member = random.choice(members)
+                            gamertag = random_member.get("name", "someone")
+
+                            activity = discord.Activity(
+                                type=discord.ActivityType.watching,
+                                name=f"{gamertag} 👀"
+                            )
+                            await client.change_presence(activity=activity)
+                    except Exception as parse_error:
+                        print(f"[ERROR] JSON parsing failed: {parse_error}")
+                        print(f"[DEBUG] Raw content: {response.text}")
         except Exception as e:
             print(f"[ERROR] Failed to rotate presence: {e}")
 
         await asyncio.sleep(300)  # rotate every 5 minutes
+
 
 @tree.command(name="record", description="Show Wingus FC's current record.")
 async def record_command(interaction: discord.Interaction):
