@@ -169,7 +169,7 @@ async def get_club_rank(club_id):
     except Exception as e:
         print(f"[ERROR] Exception in get_club_rank: {e}")
     
-    return "N/A"
+    return "Not Ranked"
 
 @tree.command(name="record", description="Show Wingus FC's current record.")
 async def record_command(interaction: discord.Interaction):
