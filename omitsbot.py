@@ -228,6 +228,8 @@ async def rotate_presence():
 
 @tree.command(name="record", description="Show xNever Enoughx's current record.")
 async def record_command(interaction: discord.Interaction):
+    await interaction.response.defer()  # Prevent timeout
+
     stats = await get_club_stats(CLUB_ID)
     recent_form = await get_recent_form(CLUB_ID)
     rank = await get_club_rank(CLUB_ID)
@@ -246,9 +248,9 @@ async def record_command(interaction: discord.Interaction):
         embed.add_field(name="Unbeaten Streak", value=f"{stats['unbeatenStreak']} {streak_emoji(stats['unbeatenStreak'])}", inline=False)
         embed.add_field(name="Last Match", value=last_match, inline=False)
         embed.add_field(name="Recent Form", value=form_string, inline=False)
-        await interaction.response.send_message(embed=embed)
+        await interaction.followup.send(embed=embed)
     else:
-        await interaction.response.send_message("Could not fetch club stats.")
+        await interaction.followup.send("Could not fetch club stats.")
 
 class ClubDropdown(discord.ui.Select):
     def __init__(self, interaction, options, club_data):
