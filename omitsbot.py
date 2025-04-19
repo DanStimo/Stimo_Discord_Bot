@@ -163,7 +163,7 @@ async def get_club_rank(club_id):
                 leaderboard = response.json()
                 for club in leaderboard:
                     if str(club.get("clubId")) == str(club_id):
-                        return club.get("rank", "N/A")
+                        return club.get("rank", "Not Top 100")
             else:
                 print(f"[ERROR] Failed to fetch leaderboard, status code {response.status_code}")
     except Exception as e:
@@ -289,7 +289,7 @@ async def versus_command(interaction: discord.Interaction, club: str):
                     title=f"📋 {selected['clubInfo']['name'].upper()} Club Stats",
                     color=0xB30000
                 )
-                embed.add_field(name="Leaderboard Rank", value=f"#{rank}", inline=False)
+                embed.add_field(name="Leaderboard Rank", value=f"📈 #{rank}", inline=False)
                 embed.add_field(name="Skill Rating", value=f"🏅 {stats['skillRating']}", inline=False)
                 embed.add_field(name="Matches Played", value=f"📊 {stats['matchesPlayed']}", inline=False)
                 embed.add_field(name="Wins", value=f"✅ {stats['wins']}", inline=False)
