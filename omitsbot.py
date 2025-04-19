@@ -249,13 +249,13 @@ async def versus_command(interaction: discord.Interaction, club: str):
             ]
 
             # Auto-select if exactly one valid club found
-        if len(valid_clubs) == 1:
-            selected = valid_clubs[0]
-            club_id = str(selected["clubInfo"]["clubId"])
-            stats = await get_club_stats(club_id)
-            recent_form = await get_recent_form(club_id)
-            last_match = await get_last_match(club_id)  # ✅ New line
-            form_string = ' '.join(recent_form) if recent_form else "No recent matches found."
+            if len(valid_clubs) == 1:
+                selected = valid_clubs[0]
+                club_id = str(selected["clubInfo"]["clubId"])
+                stats = await get_club_stats(club_id)
+                recent_form = await get_recent_form(club_id)
+                last_match = await get_last_match(club_id)  # ✅ New line
+                form_string = ' '.join(recent_form) if recent_form else "No recent matches found."
 
 
                 embed = discord.Embed(
