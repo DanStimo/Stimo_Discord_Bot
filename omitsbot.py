@@ -303,9 +303,11 @@ class ClubDropdown(discord.ui.Select):
     
         stats = await get_club_stats(chosen)
         recent_form = await get_recent_form(chosen)
-        form_string = ' '.join(recent_form) if recent_form else "No recent matches found."
+        last_match = await get_last_match(chosen)
         rank = await get_club_rank(chosen)
-        
+        rank_display = f"#{rank}" if isinstance(rank, int) else "Unranked"
+        form_string = ' '.join(recent_form) if recent_form else "No recent matches found."
+    
         embed = discord.Embed(
             title=f"📋 {selected['clubInfo']['name'].upper()} Club Stats",
             color=0xB30000
@@ -320,9 +322,10 @@ class ClubDropdown(discord.ui.Select):
         embed.add_field(name="Unbeaten Streak", value=f"{stats['unbeatenStreak']} {streak_emoji(stats['unbeatenStreak'])}", inline=False)
         embed.add_field(name="Last Match", value=last_match, inline=False)
         embed.add_field(name="Recent Form", value=form_string, inline=False)
-                
+    
         view = PrintRecordButton(stats, selected['clubInfo']['name'].upper())
         view.message = await interaction.followup.send(embed=embed, view=view)
+
         return
     
         await interaction.message.edit(
