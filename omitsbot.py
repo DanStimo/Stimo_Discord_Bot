@@ -43,9 +43,10 @@ def streak_emoji(value):
 
 class PrintRecordButton(discord.ui.View):
     def __init__(self, stats, club_name):
-        super().__init__()
+        super().__init__(timeout=900)  # 15 minutes
         self.stats = stats
         self.club_name = club_name
+        self.message = None  # will store the sent message
 
     @discord.ui.button(label="🖨️ Print Record", style=discord.ButtonStyle.primary)
     async def print_record(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -60,6 +61,11 @@ class PrintRecordButton(discord.ui.View):
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
+    async def on_timeout(self):
+        if self.message:
+            for child in self.children:
+                child.disabled = True
+            await self.message.edit(view=None)  # Remove the button entirely
 
 async def get_club_stats(club_id):
     url = f"https://proclubs.ea.com/api/fc/clubs/overallStats?platform={PLATFORM}&clubIds={club_id}"
