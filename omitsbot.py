@@ -63,36 +63,48 @@ async def get_club_stats(club_id):
     return None
 
 async def get_recent_form(club_id):
-    url = f"https://proclubs.ea.com/api/fc/clubs/matches?matchType=leagueMatch&platform={PLATFORM}&clubIds={club_id}"
+    base_url = "https://proclubs.ea.com/api/fc/clubs/matches"
     headers = {"User-Agent": "Mozilla/5.0"}
+    match_types = ["leagueMatch", "playoffMatch"]
+    all_matches = []
+
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.get(url, headers=headers)
-            if response.status_code == 200:
-                matches = response.json()
-                if not matches:
-                    print("[DEBUG] No matches returned from EA.")
-                    return []
-                results = []
-                for match in matches[:5]:
-                    clubs_data = match.get("clubs", {})
-                    club_data = clubs_data.get(str(club_id))
-                    opponent_id = next((cid for cid in clubs_data if cid != str(club_id)), None)
-                    opponent_data = clubs_data.get(opponent_id) if opponent_id else None
-                    if not club_data or not opponent_data or "goals" not in club_data or "goals" not in opponent_data:
-                        continue
-                    our_score = int(club_data["goals"])
-                    opponent_score = int(opponent_data["goals"])
-                    if our_score > opponent_score:
-                        results.append("✅")
-                    elif our_score < opponent_score:
-                        results.append("❌")
-                    else:
-                        results.append("➖")
-                return results
+            for match_type in match_types:
+                url = f"{base_url}?matchType={match_type}&platform={PLATFORM}&clubIds={club_id}"
+                response = await client.get(url, headers=headers)
+                if response.status_code == 200:
+                    matches = response.json()
+                    all_matches.extend(matches)
+
+        # Sort by match timestamp (most recent first)
+        all_matches.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
+
+        results = []
+        for match in all_matches[:5]:
+            clubs_data = match.get("clubs", {})
+            club_data = clubs_data.get(str(club_id))
+            opponent_id = next((cid for cid in clubs_data if cid != str(club_id)), None)
+            opponent_data = clubs_data.get(opponent_id) if opponent_id else None
+
+            if not club_data or not opponent_data:
+                continue
+
+            our_score = int(club_data.get("goals", 0))
+            opponent_score = int(opponent_data.get("goals", 0))
+
+            if our_score > opponent_score:
+                results.append("✅")
+            elif our_score < opponent_score:
+                results.append("❌")
+            else:
+                results.append("➖")
+
+        return results
+
     except Exception as e:
-        print(f"Error fetching recent matches: {e}")
-    return []
+        print(f"[ERROR] Failed to fetch recent form: {e}")
+        return []
 
 @tree.command(name="record", description="Show Wingus FC's current record.")
 async def record_command(interaction: discord.Interaction):
