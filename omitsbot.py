@@ -206,6 +206,8 @@ async def rotate_presence():
                 else:
                     try:
                         members = response.json()
+                        print(f"[DEBUG] Raw members response: {members}")
+                        
                         if not isinstance(members, list) or not members:
                             print("[ERROR] No members returned or wrong format")
                         else:
