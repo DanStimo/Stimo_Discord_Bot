@@ -163,7 +163,7 @@ async def get_club_rank(club_id):
                 leaderboard = response.json()
                 for club in leaderboard:
                     if str(club.get("clubId")) == str(club_id):
-                        return club.get("rank", "Not Top 100")
+                        return club.get("rank", "Unranked")
             else:
                 print(f"[ERROR] Failed to fetch leaderboard, status code {response.status_code}")
     except Exception as e:
