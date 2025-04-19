@@ -46,7 +46,7 @@ class PrintRecordButton(discord.ui.View):
         super().__init__(timeout=900)  # 15 minutes
         self.stats = stats
         self.club_name = club_name
-        self.message = None  # will store the sent message
+        self.message = None
 
     @discord.ui.button(label="🖨️ Print Record", style=discord.ButtonStyle.primary)
     async def print_record(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -63,9 +63,10 @@ class PrintRecordButton(discord.ui.View):
 
     async def on_timeout(self):
         if self.message:
-            for child in self.children:
-                child.disabled = True
-            await self.message.edit(view=None)  # Remove the button entirely
+            try:
+                await self.message.edit(view=None)
+            except Exception as e:
+                print(f"[ERROR] Failed to remove button: {e}")
 
 async def get_club_stats(club_id):
     url = f"https://proclubs.ea.com/api/fc/clubs/overallStats?platform={PLATFORM}&clubIds={club_id}"
@@ -383,9 +384,9 @@ async def versus_command(interaction: discord.Interaction, club: str):
                 embed.add_field(name="Unbeaten Streak", value=f"{stats['unbeatenStreak']} {streak_emoji(stats['unbeatenStreak'])}", inline=False)
                 embed.add_field(name="Last Match", value=last_match, inline=False)
                 embed.add_field(name="Recent Form", value=form_string, inline=False)
+                
                 view = PrintRecordButton(stats, selected['clubInfo']['name'].upper())
-                await interaction.followup.send(embed=embed, view=view)
-
+                view.message = await interaction.followup.send(embed=embed, view=view)
                 return
 
             # Build options from top 25
