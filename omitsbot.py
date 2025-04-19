@@ -283,14 +283,14 @@ async def versus_command(interaction: discord.Interaction, club: str):
                 recent_form = await get_recent_form(opponent_id)
                 last_match = await get_last_match(opponent_id)
                 rank = await get_club_rank(opponent_id)
-                rank_display = f"📈 Rank: #{rank}" if rank else "📈 Unranked"
+                rank_display = f"#{rank}" if rank is not None else "Unranked"
                 form_string = ' '.join(recent_form) if recent_form else "No recent matches found."
 
                 embed = discord.Embed(
                     title=f"📋 {selected['clubInfo']['name'].upper()} Club Stats",
                     color=0xB30000
                 )
-                embed.add_field(name="Leaderboard Rank", value=rank_display, inline=False)
+                embed.add_field(name="Leaderboard Rank", value=f"📈 {rank_display}", inline=False)
                 embed.add_field(name="Skill Rating", value=f"🏅 {stats['skillRating']}", inline=False)
                 embed.add_field(name="Matches Played", value=f"📊 {stats['matchesPlayed']}", inline=False)
                 embed.add_field(name="Wins", value=f"✅ {stats['wins']}", inline=False)
