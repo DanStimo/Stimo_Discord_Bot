@@ -249,12 +249,14 @@ async def versus_command(interaction: discord.Interaction, club: str):
             ]
 
             # Auto-select if exactly one valid club found
-            if len(valid_clubs) == 1:
-                selected = valid_clubs[0]
-                club_id = str(selected["clubInfo"]["clubId"])
-                stats = await get_club_stats(club_id)
-                recent_form = await get_recent_form(club_id)
-                form_string = ' '.join(recent_form) if recent_form else "No recent matches found."
+        if len(valid_clubs) == 1:
+            selected = valid_clubs[0]
+            club_id = str(selected["clubInfo"]["clubId"])
+            stats = await get_club_stats(club_id)
+            recent_form = await get_recent_form(club_id)
+            last_match = await get_last_match(club_id)  # ✅ New line
+            form_string = ' '.join(recent_form) if recent_form else "No recent matches found."
+
 
                 embed = discord.Embed(
                     title=f"📋 {selected['clubInfo']['name'].upper()} Club Stats",
@@ -267,6 +269,7 @@ async def versus_command(interaction: discord.Interaction, club: str):
                 embed.add_field(name="Losses", value=f"❌ {stats['losses']}", inline=False)
                 embed.add_field(name="Win Streak", value=f"{stats['winStreak']} {streak_emoji(stats['winStreak'])}", inline=False)
                 embed.add_field(name="Unbeaten Streak", value=f"{stats['unbeatenStreak']} {streak_emoji(stats['unbeatenStreak'])}", inline=False)
+                embed.add_field(name="Last Match", value=last_match, inline=False)
                 embed.add_field(name="Recent Form", value=form_string, inline=False)
                 await interaction.followup.send(embed=embed)
                 return
