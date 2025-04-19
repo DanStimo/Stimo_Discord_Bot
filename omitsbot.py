@@ -278,19 +278,18 @@ async def versus_command(interaction: discord.Interaction, club: str):
             # Auto-select if exactly one valid club found
             if len(valid_clubs) == 1:
                 selected = valid_clubs[0]
-                club_id = str(selected["clubInfo"]["clubId"])
-                stats = await get_club_stats(club_id)
-                recent_form = await get_recent_form(club_id)
+                opponent_id = str(selected["clubInfo"]["clubId"])
+                stats = await get_club_stats(opponent_id)
+                recent_form = await get_recent_form(opponent_id)
+                last_match = await get_last_match(opponent_id)
                 rank = await get_club_rank(opponent_id)
-                last_match = await get_last_match(club_id)  # ✅ New line
                 form_string = ' '.join(recent_form) if recent_form else "No recent matches found."
-
 
                 embed = discord.Embed(
                     title=f"📋 {selected['clubInfo']['name'].upper()} Club Stats",
                     color=0xB30000
                 )
-                embed.add_field(name="Rank", value=f"📈 #{rank}", inline=False)
+                embed.add_field(name="Leaderboard Rank", value=f"#{rank}", inline=False)
                 embed.add_field(name="Skill Rating", value=f"🏅 {stats['skillRating']}", inline=False)
                 embed.add_field(name="Matches Played", value=f"📊 {stats['matchesPlayed']}", inline=False)
                 embed.add_field(name="Wins", value=f"✅ {stats['wins']}", inline=False)
@@ -316,6 +315,7 @@ async def versus_command(interaction: discord.Interaction, club: str):
         except Exception as e:
             print(f"Error in /versus: {e}")
             await interaction.followup.send("An error occurred while fetching opponent stats.")
+
 
 @tree.command(name="vs", description="Alias for /versus")
 @app_commands.describe(club="Club name or club ID")
