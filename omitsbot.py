@@ -4,6 +4,8 @@ import httpx
 import json
 from fuzzywuzzy import process, fuzz
 import os
+import random
+import asyncio
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -171,6 +173,37 @@ async def get_club_rank(club_id):
     
     return "Unranked"
 
+async def get_squad_names(club_id):
+    url = f"https://proclubs.ea.com/api/fc/club/members?platform={PLATFORM}&clubId={club_id}"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(url, headers=headers)
+            if response.status_code == 200:
+                data = response.json()
+                members = data.get("members", [])
+                names = [member.get("playername") for member in members if member.get("playername")]
+                return names
+    except Exception as e:
+        print(f"[ERROR] Failed to fetch squad names: {e}")
+    return []
+
+async def rotate_presence():
+    await client.wait_until_ready()
+    squad = await get_squad_names(CLUB_ID)
+
+    if not squad:
+        squad = ["someone awesome 👀"]  # fallback
+
+    while not client.is_closed():
+        player = random.choice(squad)
+        activity = discord.Activity(
+            type=discord.ActivityType.competing,
+            name=f"with {player}"
+        )
+        await client.change_presence(activity=activity)
+        await asyncio.sleep(600)  # Update every 10 minutes
+
 @tree.command(name="record", description="Show Wingus FC's current record.")
 async def record_command(interaction: discord.Interaction):
     stats = await get_club_stats(CLUB_ID)
@@ -328,12 +361,7 @@ async def on_ready():
     await tree.sync()
     print(f"Bot is ready as {client.user}")
 
-    # Set custom presence/status
-    activity = discord.Activity(
-        type=discord.ActivityType.watching,
-        name="In '🤖│bot-spam' use /record or /vs"
-    )
-    await client.change_presence(activity=activity)
+     client.loop.create_task(rotate_presence())
 
     # Optional announcement
     channel_id = int(os.getenv("ANNOUNCE_CHANNEL_ID", "0"))  # replace with actual ID if needed
