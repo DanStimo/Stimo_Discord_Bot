@@ -328,9 +328,16 @@ async def on_ready():
     await tree.sync()
     print(f"Bot is ready as {client.user}")
 
+    # Set custom presence/status
+    activity = discord.Activity(
+        type=discord.ActivityType.watching,
+        name="In '🤖│bot-spam' use /record or /vs"
+    )
+    await client.change_presence(activity=activity)
+
+    # Optional announcement
     channel_id = int(os.getenv("ANNOUNCE_CHANNEL_ID", "0"))  # replace with actual ID if needed
     channel = client.get_channel(channel_id)
-
     if channel:
         await channel.send("✅ - omitS Bot (<:discord:1363127822209646612>) is now online and ready for commands!")
     else:
