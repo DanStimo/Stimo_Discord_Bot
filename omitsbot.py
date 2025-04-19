@@ -132,13 +132,18 @@ async def get_last_match(club_id):
         opponent_id = next((cid for cid in clubs_data if cid != str(club_id)), None)
         opponent_data = clubs_data.get(opponent_id) if opponent_id else None
 
-        opponent_name = opponent_data.get("name") or match.get("opponentClub", {}).get("name", "Unknown")
         if not club_data or not opponent_data:
             return "Last match data not available."
 
+        # ✅ Safely pull opponent name from multiple possible sources
+        opponent_name = (
+            opponent_data.get("name")
+            or opponent_data.get("details", {}).get("name")
+            or match.get("opponentClub", {}).get("name", "Unknown")
+        )
+
         our_score = int(club_data.get("goals", 0))
         opponent_score = int(opponent_data.get("goals", 0))
-        opponent_name = opponent_data.get("name", "Unknown")
 
         result = "✅ Win" if our_score > opponent_score else "❌ Loss" if our_score < opponent_score else "➖ Draw"
         return f"{opponent_name} ({our_score}-{opponent_score}) - {result}"
@@ -146,6 +151,7 @@ async def get_last_match(club_id):
     except Exception as e:
         print(f"[ERROR] Failed to fetch last match: {e}")
         return "Last match data not available."
+
 
 @tree.command(name="record", description="Show Wingus FC's current record.")
 async def record_command(interaction: discord.Interaction):
