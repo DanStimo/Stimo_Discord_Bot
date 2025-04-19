@@ -190,19 +190,31 @@ async def get_squad_names(club_id):
 
 async def rotate_presence():
     await client.wait_until_ready()
-    squad = await get_squad_names(CLUB_ID)
-
-    if not squad:
-        squad = ["someone awesome 👀"]  # fallback
+    headers = {"User-Agent": "Mozilla/5.0"}
+    
+    # 🔒 Hardcoded club ID
+    fixed_club_id = "304203"
+    url = f"https://proclubs.ea.com/api/fc/squadlist?platform={PLATFORM}&clubId={fixed_club_id}"
 
     while not client.is_closed():
-        player = random.choice(squad)
-        activity = discord.Activity(
-            type=discord.ActivityType.competing,
-            name=f"with {player}"
-        )
-        await client.change_presence(activity=activity)
-        await asyncio.sleep(600)  # Update every 10 minutes
+        try:
+            async with httpx.AsyncClient(timeout=10) as http:
+                response = await http.get(url, headers=headers)
+                if response.status_code == 200:
+                    squad = response.json()
+                    player_names = [p.get("playername") for p in squad if p.get("playername")]
+                    if player_names:
+                        name = random.choice(player_names)
+                        activity = discord.Activity(type=discord.ActivityType.watching, name=f"{name} 👀")
+                        await client.change_presence(activity=activity)
+                    else:
+                        await client.change_presence(activity=discord.Activity(
+                            type=discord.ActivityType.watching, name="The Squad"
+                        ))
+        except Exception as e:
+            print(f"[ERROR] rotate_presence: {e}")
+        
+        await asyncio.sleep(600)  # update every 10 minutes
 
 @tree.command(name="record", description="Show Wingus FC's current record.")
 async def record_command(interaction: discord.Interaction):
