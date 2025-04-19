@@ -150,7 +150,9 @@ async def get_last_match(club_id):
 async def record_command(interaction: discord.Interaction):
     stats = await get_club_stats(CLUB_ID)
     recent_form = await get_recent_form(CLUB_ID)
+    last_match = await get_last_match(CLUB_ID)  # ✅ Add this here
     form_string = ' '.join(recent_form) if recent_form else "No recent matches found."
+
     if stats:
         embed = discord.Embed(title="📊 Wingus FC Club Stats", color=0xB30000)
         embed.add_field(name="Skill Rating", value=f"🏅 {stats['skillRating']}", inline=False)
