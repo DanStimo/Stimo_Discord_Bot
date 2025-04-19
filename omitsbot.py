@@ -190,31 +190,29 @@ async def get_squad_names(club_id):
 
 async def rotate_presence():
     await client.wait_until_ready()
-    headers = {"User-Agent": "Mozilla/5.0"}
-    
-    # 🔒 Hardcoded club ID
-    fixed_club_id = "304203"
-    url = f"https://proclubs.ea.com/api/fc/squadlist?platform={PLATFORM}&clubId={fixed_club_id}"
-
     while not client.is_closed():
         try:
+            fixed_club_id = "304203"
+            url = f"https://proclubs.ea.com/api/fc/members/stats?platform={PLATFORM}&clubId={fixed_club_id}"
+            headers = {"User-Agent": "Mozilla/5.0"}
+
             async with httpx.AsyncClient(timeout=10) as http:
                 response = await http.get(url, headers=headers)
                 if response.status_code == 200:
-                    squad = response.json()
-                    player_names = [p.get("playername") for p in squad if p.get("playername")]
-                    if player_names:
-                        name = random.choice(player_names)
-                        activity = discord.Activity(type=discord.ActivityType.watching, name=f"{name} 👀")
+                    members = response.json()
+                    if members:
+                        random_member = random.choice(members)
+                        gamertag = random_member.get("name", "someone")
+
+                        activity = discord.Activity(
+                            type=discord.ActivityType.watching,
+                            name=f"{gamertag} 👀"
+                        )
                         await client.change_presence(activity=activity)
-                    else:
-                        await client.change_presence(activity=discord.Activity(
-                            type=discord.ActivityType.watching, name="The Squad"
-                        ))
         except Exception as e:
-            print(f"[ERROR] rotate_presence: {e}")
-        
-        await asyncio.sleep(600)  # update every 10 minutes
+            print(f"[ERROR] Failed to rotate presence: {e}")
+
+        await asyncio.sleep(300)  # rotate every 5 minutes
 
 @tree.command(name="record", description="Show Wingus FC's current record.")
 async def record_command(interaction: discord.Interaction):
