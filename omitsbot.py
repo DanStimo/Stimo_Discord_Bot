@@ -254,6 +254,14 @@ async def rotate_presence():
 
         await asyncio.sleep(300)  # 5 minutes
 
+async def safe_interaction_edit(interaction, embed, view):
+    if interaction.response.is_done():
+        return await interaction.edit_original_response(embed=embed, view=view)
+    else:
+        await interaction.response.defer()
+        return await interaction.edit_original_response(embed=embed, view=view)
+
+
 @tree.command(name="record", description="Show xNever Enoughx's current record.")
 async def record_command(interaction: discord.Interaction):
     await interaction.response.defer()  # Prevent timeout
@@ -326,10 +334,7 @@ class ClubDropdown(discord.ui.Select):
 
         # ✅ Use PrintRecordButton with timeout
         view = PrintRecordButton(stats, selected['clubInfo']['name'].upper())
-        if interaction.response.is_done():
-            await interaction.edit_original_response(embed=embed, view=view)
-        else:
-            await interaction.response.edit_message(embed=embed, view=view)
+        view.message = await safe_interaction_edit(interaction, embed, view)
 
         return
     
