@@ -302,6 +302,9 @@ class ClubDropdown(discord.ui.Select):
         )
 
     async def callback(self, interaction: discord.Interaction):
+        # ✅ Prevents "This interaction failed"
+        await interaction.response.defer()
+
         if self.values[0] == "none":
             await interaction.message.edit(content="Okay, request canceled.", view=None)
             return
@@ -334,8 +337,9 @@ class ClubDropdown(discord.ui.Select):
         embed.add_field(name="Last Match", value=last_match, inline=False)
         embed.add_field(name="Recent Form", value=form_string, inline=False)
 
+        # Use PrintRecordButton with timeout
         view = PrintRecordButton(stats, selected['clubInfo']['name'].upper())
-        await interaction.message.edit(embed=embed, view=view)
+        view.message = await interaction.message.edit(embed=embed, view=view)
 
         return
     
