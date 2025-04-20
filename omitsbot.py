@@ -303,13 +303,13 @@ class ClubDropdown(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction):
         if self.values[0] == "none":
-            await interaction.response.edit_message(content="Okay, request canceled.", view=None)
+            await interaction.message.edit(content="Okay, request canceled.", view=None)
             return
 
         chosen = self.values[0]
         selected = next((c for c in self.club_data if str(c['clubInfo']['clubId']) == chosen), None)
         if not selected:
-            await interaction.response.edit_message(content="Club data could not be found.", view=None)
+            await interaction.message.edit(content="Club data could not be found.", view=None)
             return
 
         stats = await get_club_stats(chosen)
@@ -334,9 +334,8 @@ class ClubDropdown(discord.ui.Select):
         embed.add_field(name="Last Match", value=last_match, inline=False)
         embed.add_field(name="Recent Form", value=form_string, inline=False)
 
-        # ✅ Use PrintRecordButton with timeout
         view = PrintRecordButton(stats, selected['clubInfo']['name'].upper())
-        view.message = await safe_interaction_edit(interaction, embed, view)
+        await interaction.message.edit(embed=embed, view=view)
 
         return
     
