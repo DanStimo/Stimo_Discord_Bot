@@ -399,30 +399,29 @@ async def record_command(interaction: discord.Interaction):
             view = PrintRecordButton(stats, selected['clubInfo']['name'].upper())
             await interaction.message.edit(content=None, embed=embed, view=view)
     
-            # 🧹 Auto-delete the message after 60 seconds
-            async def delete_after_timeout():
-                try:
-                    await asyncio.sleep(60)
-                    await interaction.message.delete()
-                except Exception as e:
-                    print(f"[ERROR] Failed to delete message after timeout: {e}")
-    
-            asyncio.create_task(delete_after_timeout())
-
-
             # Build options from top 25
             options = [
                 discord.SelectOption(label=c['clubInfo']['name'], value=str(c['clubInfo']['clubId']))
                 for c in valid_clubs[:25]
             ]
             options.append(discord.SelectOption(label="None of these", value="none"))
-
+            
             view = ClubDropdownView(interaction, options, valid_clubs)
-            await interaction.followup.send("Multiple clubs found. Please choose the correct one:", view=view)
+            dropdown_message = await interaction.followup.send(
+                "Multiple clubs found. Please choose the correct one:",
+                view=view
+            )
+            
+            # 🧹 Auto-delete the dropdown message after 60 seconds
+            async def delete_after_timeout():
+                try:
+                    await asyncio.sleep(60)
+                    await dropdown_message.delete()
+                except Exception as e:
+                    print(f"[ERROR] Failed to delete dropdown message after timeout: {e}")
+            
+            asyncio.create_task(delete_after_timeout())
 
-        except Exception as e:
-            print(f"Error in /versus: {e}")
-            await interaction.followup.send("An error occurred while fetching opponent stats.")
 
 
 @tree.command(name="vs", description="Alias for /versus")
