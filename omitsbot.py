@@ -341,14 +341,16 @@ class ClubDropdown(discord.ui.Select):
         view = PrintRecordButton(stats, selected['clubInfo']['name'].upper())
         view.message = await interaction.message.edit(content=None, embed=embed, view=view)
 
+        # 🧹 Auto-delete the message after 60 seconds
+        async def delete_after_timeout():
+            try:
+                await asyncio.sleep(60)
+                await view.message.delete()
+            except Exception as e:
+                print(f"[ERROR] Failed to delete message after timeout: {e}")
 
-        return
-    
-        await interaction.message.edit(
-            embed=embed,
-            content=None,
-            view=None
-        )
+        asyncio.create_task(delete_after_timeout())
+
 
 class ClubDropdownView(discord.ui.View):
     def __init__(self, interaction, options, club_data):
