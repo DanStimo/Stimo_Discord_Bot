@@ -266,8 +266,6 @@ async def safe_interaction_edit(interaction, embed, view):
 
 @tree.command(name="record", description="Show xNever Enoughx's current record.")
 async def record_command(interaction: discord.Interaction):
-    await interaction.response.defer()  # Prevent timeout
-
     stats = await get_club_stats(CLUB_ID)
     recent_form = await get_recent_form(CLUB_ID)
     rank = await get_club_rank(CLUB_ID)
@@ -286,15 +284,20 @@ async def record_command(interaction: discord.Interaction):
         embed.add_field(name="Unbeaten Streak", value=f"{stats['unbeatenStreak']} {streak_emoji(stats['unbeatenStreak'])}", inline=False)
         embed.add_field(name="Last Match", value=last_match, inline=False)
         embed.add_field(name="Recent Form", value=form_string, inline=False)
+
+        # Respond first
         await interaction.response.send_message(embed=embed)
+
+        # Then fetch the message object
         message = await interaction.original_response()
 
+        # Schedule deletion
         async def delete_after_timeout():
-            await asyncio.sleep(60)
+            await asyncio.sleep(60)  # 60 seconds
             try:
                 await message.delete()
             except Exception as e:
-                print(f"[ERROR] Failed to delete /record embed after timeout: {e}")
+                print(f"[ERROR] Failed to delete /record message: {e}")
 
         asyncio.create_task(delete_after_timeout())
     else:
