@@ -409,7 +409,7 @@ async def versus_command(interaction: discord.Interaction, club: str):
                 embed.add_field(name="Recent Form", value=form_string, inline=False)
             
                 view = PrintRecordButton(stats, selected['clubInfo']['name'].upper())
-                view.message = await interaction.followup.send(embed=embed, view=view)
+                view.message = await interaction.followup.send(embed=embed, view=view, delete_after=60)
                 return
 
 
