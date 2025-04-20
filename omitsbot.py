@@ -285,23 +285,18 @@ async def record_command(interaction: discord.Interaction):
         embed.add_field(name="Last Match", value=last_match, inline=False)
         embed.add_field(name="Recent Form", value=form_string, inline=False)
 
-        # Respond first
-        await interaction.response.send_message(embed=embed)
+        message = await safe_interaction_respond(interaction, embed=embed)
+        if message:
+            async def delete_after_timeout():
+                await asyncio.sleep(60)
+                try:
+                    await message.delete()
+                except Exception as e:
+                    print(f"[ERROR] Failed to auto-delete /record message: {e}")
 
-        # Then fetch the message object
-        message = await interaction.original_response()
-
-        # Schedule deletion
-        async def delete_after_timeout():
-            await asyncio.sleep(60)  # 60 seconds
-            try:
-                await message.delete()
-            except Exception as e:
-                print(f"[ERROR] Failed to delete /record message: {e}")
-
-        asyncio.create_task(delete_after_timeout())
+            asyncio.create_task(delete_after_timeout())
     else:
-        await interaction.response.send_message("Could not fetch club stats.")
+        await safe_interaction_respond(interaction, content="Could not fetch club stats.")
 
 class ClubDropdown(discord.ui.Select):
     def __init__(self, interaction, options, club_data):
