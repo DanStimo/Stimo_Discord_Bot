@@ -255,12 +255,14 @@ async def rotate_presence():
         await asyncio.sleep(300)  # 5 minutes
 
 async def safe_interaction_edit(interaction, embed, view):
-    if interaction.response.is_done():
-        return await interaction.edit_original_response(embed=embed, view=view)
-    else:
-        await interaction.response.defer()
-        return await interaction.edit_original_response(embed=embed, view=view)
-
+    try:
+        if interaction.response.is_done():
+            return await interaction.edit_original_response(embed=embed, view=view)
+        else:
+            return await interaction.response.edit_message(embed=embed, view=view)
+    except Exception as e:
+        print(f"[ERROR] Failed to safely edit interaction: {e}")
+        return None
 
 @tree.command(name="record", description="Show xNever Enoughx's current record.")
 async def record_command(interaction: discord.Interaction):
