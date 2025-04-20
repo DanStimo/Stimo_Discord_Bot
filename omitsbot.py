@@ -339,7 +339,8 @@ class ClubDropdown(discord.ui.Select):
 
         # Use PrintRecordButton with timeout
         view = PrintRecordButton(stats, selected['clubInfo']['name'].upper())
-        view.message = await interaction.message.edit(embed=embed, view=view)
+        view.message = await interaction.message.edit(content=None, embed=embed, view=view)
+
 
         return
     
