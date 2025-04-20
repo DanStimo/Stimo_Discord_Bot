@@ -286,9 +286,19 @@ async def record_command(interaction: discord.Interaction):
         embed.add_field(name="Unbeaten Streak", value=f"{stats['unbeatenStreak']} {streak_emoji(stats['unbeatenStreak'])}", inline=False)
         embed.add_field(name="Last Match", value=last_match, inline=False)
         embed.add_field(name="Recent Form", value=form_string, inline=False)
-        await interaction.followup.send(embed=embed)
+        await interaction.response.send_message(embed=embed)
+        message = await interaction.original_response()
+
+        async def delete_after_timeout():
+            await asyncio.sleep(60)
+            try:
+                await message.delete()
+            except Exception as e:
+                print(f"[ERROR] Failed to delete /record embed after timeout: {e}")
+
+        asyncio.create_task(delete_after_timeout())
     else:
-        await interaction.followup.send("Could not fetch club stats.")
+        await interaction.response.send_message("Could not fetch club stats.")
 
 class ClubDropdown(discord.ui.Select):
     def __init__(self, interaction, options, club_data):
