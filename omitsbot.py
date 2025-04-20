@@ -299,7 +299,7 @@ async def record_command(interaction: discord.Interaction):
         message = await safe_interaction_respond(interaction, embed=embed)
         if message:
             async def delete_after_timeout():
-                await asyncio.sleep(60)
+                await asyncio.sleep(180)
                 try:
                     await message.delete()
                 except Exception as e:
@@ -363,7 +363,7 @@ class ClubDropdown(discord.ui.Select):
         # 🧹 Auto-delete the message after 60 seconds
         async def delete_after_timeout():
             try:
-                await asyncio.sleep(60)
+                await asyncio.sleep(180)
                 await view.message.delete()
             except Exception as e:
                 print(f"[ERROR] Failed to delete message after timeout: {e}")
@@ -433,7 +433,7 @@ async def versus_command(interaction: discord.Interaction, club: str):
                 message = await interaction.followup.send(embed=embed, view=view)
 
                 async def delete_after_timeout():
-                    await asyncio.sleep(60)
+                    await asyncio.sleep(180)
                     try:
                         await message.delete()
                     except Exception as e:
