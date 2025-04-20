@@ -411,13 +411,12 @@ async def versus_command(interaction: discord.Interaction, club: str):
                 embed.add_field(name="Recent Form", value=form_string, inline=False)
             
                 view = PrintRecordButton(stats, selected['clubInfo']['name'].upper())
-                view.message = await interaction.message.edit(content=None, embed=embed, view=view)
+                message = await interaction.followup.send(embed=embed, view=view)
 
-                # 🧹 Auto-delete after 60 seconds
                 async def delete_after_timeout():
+                    await asyncio.sleep(60)
                     try:
-                        await asyncio.sleep(60)
-                        await view.message.delete()
+                        await message.delete()
                     except Exception as e:
                         print(f"[ERROR] Failed to delete message after timeout: {e}")
                 
