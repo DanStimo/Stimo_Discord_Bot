@@ -264,6 +264,17 @@ async def safe_interaction_edit(interaction, embed, view):
         print(f"[ERROR] Failed to safely edit interaction: {e}")
         return None
 
+async def safe_interaction_respond(interaction: discord.Interaction, **kwargs):
+    try:
+        if interaction.response.is_done():
+            return await interaction.followup.send(**kwargs)
+        else:
+            await interaction.response.send_message(**kwargs)
+            return await interaction.original_response()
+    except Exception as e:
+        print(f"[ERROR] Failed to respond to interaction: {e}")
+        return None
+
 @tree.command(name="record", description="Show xNever Enoughx's current record.")
 async def record_command(interaction: discord.Interaction):
     stats = await get_club_stats(CLUB_ID)
