@@ -218,37 +218,27 @@ async def get_squad_names(club_id):
 
 async def rotate_presence():
     await client.wait_until_ready()
+    github_url = "https://raw.githubusercontent.com/DanStimo/Stimo_Discord_Bot/master/omitS_Squad.txt"
+
     while not client.is_closed():
         try:
-            fixed_club_id = "304203"
-            url = f"https://proclubs.ea.com/api/fc/members/stats?platform={PLATFORM}&clubId={fixed_club_id}"
-            headers = {"User-Agent": "Mozilla/5.0"}
-
             async with httpx.AsyncClient(timeout=10) as http:
-                response = await http.get(url, headers=headers)
+                response = await http.get(github_url)
                 if response.status_code == 200:
-                    data = response.json()
-                    all_members = data.get("members", [])
+                    lines = response.text.strip().splitlines()
+                    valid_names = [line.strip() for line in lines if line.strip()]
 
-                    # Filter out members with less than 10 games played
-                    active_members = [
-                        m for m in all_members
-                        if int(m.get("gamesPlayed", 0)) >= 10
-                    ]
-
-                    if active_members:
-                        random_member = random.choice(active_members)
-                        gamertag = random_member.get("name", "someone")
-
+                    if valid_names:
+                        gamertag = random.choice(valid_names)
                         activity = discord.Activity(
                             type=discord.ActivityType.watching,
                             name=f"{gamertag} 👀"
                         )
                         await client.change_presence(activity=activity)
                     else:
-                        print("[ERROR] No active members with 10+ games found.")
+                        print("[ERROR] Squad file is empty or badly formatted.")
                 else:
-                    print(f"[ERROR] API returned status {response.status_code}")
+                    print(f"[ERROR] GitHub file fetch failed: {response.status_code}")
         except Exception as e:
             print(f"[ERROR] Failed to rotate presence: {e}")
 
