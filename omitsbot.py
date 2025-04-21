@@ -501,11 +501,11 @@ async def vs_command(interaction: discord.Interaction, club: str):
 
 # - THIS IS FOR THE /LASTMATCH COMMAND.
 async def handle_lastmatch(interaction: discord.Interaction, club: str, from_dropdown: bool = False, original_message=None):
-
+    
 @tree.command(name="lastmatch", description="Show the last match stats for a club.")
 @app_commands.describe(club="Club name or club ID")
 async def lastmatch_command(interaction: discord.Interaction, club: str):
-    await handle_lastmatch(interaction, club, from_dropdown=False)
+    await handle_lastmatch(interaction, club)
     headers = {"User-Agent": "Mozilla/5.0"}
 
     async with httpx.AsyncClient(timeout=10) as client:
