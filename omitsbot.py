@@ -634,6 +634,12 @@ async def handle_lastmatch(interaction: discord.Interaction, club: str, from_dro
 async def lastmatch_command(interaction: discord.Interaction, club: str):
     await handle_lastmatch(interaction, club, from_dropdown=False, original_message=None)
 
+# - THIS IS FOR THE LM ALIAS OF LASTMATCH.
+@tree.command(name="lm", description="Alias for /lastmatch")
+@app_commands.describe(club="Club name or club ID")
+async def lm_command(interaction: discord.Interaction, club: str):
+    await handle_lastmatch(interaction, club, from_dropdown=False, original_message=None)
+
 @client.event
 async def on_ready():
     await tree.sync()
