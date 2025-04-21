@@ -501,8 +501,7 @@ async def vs_command(interaction: discord.Interaction, club: str):
 
 # - THIS IS FOR THE /LASTMATCH COMMAND.
 async def handle_lastmatch(interaction: discord.Interaction, club: str, from_dropdown: bool = False, original_message=None):
-    await interaction.response.defer()
-
+    
     headers = {"User-Agent": "Mozilla/5.0"}
    
     async with httpx.AsyncClient(timeout=10) as client:
