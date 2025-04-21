@@ -534,15 +534,22 @@ async def lastmatch_command(interaction: discord.Interaction, club: str):
                 color=discord.Color.green() if our_score > opponent_score else discord.Color.red() if our_score < opponent_score else discord.Color.gold()
             )
 
-            for player in our_data.get("players", {}).values():
+            players = our_data.get("players", {})
+            for player_id in players:
+                player = players[player_id]
                 name = player.get("name", "Unknown")
                 goals = player.get("goals", 0)
                 assists = player.get("assists", 0)
                 yellow = player.get("yellowCards", 0)
                 red = player.get("redCards", 0)
+                rating = player.get("rating", "N/A")
+            
                 embed.add_field(
                     name=f"{name}",
-                    value=f"⚽ {goals} | 🎯 {assists} | 🟨 {yellow} | 🟥 {red}",
+                    value=(
+                        f"⚽ {goals} | 🎯 {assists} | 🟨 {yellow} | 🟥 {red} | "
+                        f"⭐ {rating}"
+                    ),
                     inline=False
                 )
 
