@@ -501,6 +501,11 @@ async def vs_command(interaction: discord.Interaction, club: str):
 
 # - THIS IS FOR THE /LASTMATCH COMMAND.
 async def handle_lastmatch(interaction: discord.Interaction, club: str, from_dropdown: bool = False, original_message=None):
+    try:
+    if not interaction.response.is_done():
+        await interaction.response.defer()
+except Exception as e:
+    print(f"[WARN] Could not defer interaction: {e}")
     
     headers = {"User-Agent": "Mozilla/5.0"}
    
