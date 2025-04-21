@@ -403,7 +403,7 @@ class LastMatchDropdown(discord.ui.Select):
             await interaction.message.edit(content="Club data could not be found.", view=None)
             return
 
-        await lastmatch_command.callback(interaction, chosen, from_dropdown=True, original_message=interaction.message)
+        await handle_lastmatch(interaction, chosen, from_dropdown=True, original_message=interaction.message)
 
 class LastMatchDropdownView(discord.ui.View):
     def __init__(self, interaction, options, club_data):
@@ -500,10 +500,12 @@ async def vs_command(interaction: discord.Interaction, club: str):
     await versus_command.callback(interaction, club)
 
 # - THIS IS FOR THE /LASTMATCH COMMAND.
+async def handle_lastmatch(interaction: discord.Interaction, club: str, from_dropdown: bool = False, original_message=None):
+
 @tree.command(name="lastmatch", description="Show the last match stats for a club.")
 @app_commands.describe(club="Club name or club ID")
-async def lastmatch_command(interaction: discord.Interaction, club: str, from_dropdown: bool = False, original_message: discord.Message = None):
-    await interaction.response.defer()
+async def lastmatch_command(interaction: discord.Interaction, club: str):
+    await handle_lastmatch(interaction, club, from_dropdown=False)
     headers = {"User-Agent": "Mozilla/5.0"}
 
     async with httpx.AsyncClient(timeout=10) as client:
