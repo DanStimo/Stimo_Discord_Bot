@@ -458,17 +458,24 @@ class LastMatchDropdown(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction):
         await interaction.response.defer()
+
+        if self.values[0] == "none":
+            await interaction.message.edit(content="Okay, request canceled.", view=None)
+            return
+
         chosen = self.values[0]
         selected = next((c for c in self.club_data if str(c['clubInfo']['clubId']) == chosen), None)
-        if selected:
-            await send_last_match_embed(interaction, str(chosen))
-        else:
-            await interaction.followup.send("Could not fetch club details.")
+        if not selected:
+            await interaction.message.edit(content="Club data could not be found.", view=None)
+            return
+
+        await lastmatch_command.callback(interaction, chosen, from_dropdown=True, original_message=interaction.message)
 
 class LastMatchDropdownView(discord.ui.View):
     def __init__(self, interaction, options, club_data):
         super().__init__()
         self.add_item(LastMatchDropdown(interaction, options, club_data))
+
 
 # - THIS IS FOR THE /VERSUS COMMAND.
 @tree.command(name="versus", description="Check another club's stats by name or ID.")
@@ -562,7 +569,7 @@ async def vs_command(interaction: discord.Interaction, club: str):
 # - THIS IS FOR THE /LASTMATCH COMMAND.
 @tree.command(name="lastmatch", description="Show the last match stats for a club.")
 @app_commands.describe(club="Club name or club ID")
-async def lastmatch_command(interaction: discord.Interaction, club: str):
+async def lastmatch_command(interaction: discord.Interaction, club: str, from_dropdown: bool = False, original_message: discord.Message = None):
     await interaction.response.defer()
     headers = {"User-Agent": "Mozilla/5.0"}
 
@@ -580,9 +587,24 @@ async def lastmatch_command(interaction: discord.Interaction, club: str):
                 return
 
             search_data = search_response.json()
-            valid_clubs = [c for c in search_data if c.get("clubInfo", {}).get("name")]
-            if not valid_clubs:
+            if not search_data or not isinstance(search_data, list):
                 await interaction.followup.send("No matching clubs found.")
+                return
+            
+            valid_clubs = [
+                c for c in search_data
+                if c.get("clubInfo", {}).get("name", "").strip().lower() != "none of these"
+            ]
+            
+            # If multiple clubs found and this wasn't triggered from dropdown, show selector
+            if len(valid_clubs) > 1 and not from_dropdown:
+                options = [
+                    discord.SelectOption(label=c["clubInfo"]["name"], value=str(c["clubInfo"]["clubId"]))
+                    for c in valid_clubs[:25]
+                ]
+                options.append(discord.SelectOption(label="None of these", value="none"))
+                view = LastMatchDropdownView(interaction, options, valid_clubs)
+                await interaction.followup.send("Multiple clubs found. Please choose the correct one:", view=view)
                 return
 
             if len(valid_clubs) == 1:
@@ -658,12 +680,15 @@ async def lastmatch_command(interaction: discord.Interaction, club: str):
             embed.set_footer(text="📘 Stat Key: ⚽ Goals | 🎯 Assists | 🟥 Red Cards | 🛡️ Tackles | 🧤 Saves | ⭐ Rating")
 
 
-            await interaction.followup.send(embed=embed)
-
-        except Exception as e:
-            print(f"[ERROR] Failed to fetch last match: {e}")
-            await interaction.followup.send("An error occurred while fetching the last match.")
-
+            if from_dropdown and original_message:
+                await original_message.edit(content=None, embed=embed, view=None)
+            else:
+                await interaction.followup.send(embed=embed)
+            
+            
+                    except Exception as e:
+                        print(f"[ERROR] Failed to fetch last match: {e}")
+                        await interaction.followup.send("An error occurred while fetching the last match.")
 
 @client.event
 async def on_ready():
