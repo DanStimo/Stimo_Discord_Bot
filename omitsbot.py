@@ -603,8 +603,27 @@ async def handle_lastmatch(interaction: discord.Interaction, club: str, from_dro
 
             if from_dropdown and original_message:
                 await original_message.edit(content=None, embed=embed, view=None)
+            
+                async def delete_after_timeout():
+                    await asyncio.sleep(180)
+                    try:
+                        await original_message.delete()
+                    except Exception as e:
+                        print(f"[ERROR] Failed to auto-delete dropdown message: {e}")
+            
+                asyncio.create_task(delete_after_timeout())
+            
             else:
-                await interaction.followup.send(embed=embed)
+                message = await interaction.followup.send(embed=embed)
+            
+                async def delete_after_timeout():
+                    await asyncio.sleep(180)
+                    try:
+                        await message.delete()
+                    except Exception as e:
+                        print(f"[ERROR] Failed to auto-delete lastmatch message: {e}")
+            
+                asyncio.create_task(delete_after_timeout())
 
         except Exception as e:
             print(f"[ERROR] Failed to fetch last match: {e}")
