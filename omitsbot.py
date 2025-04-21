@@ -563,6 +563,13 @@ async def lastmatch_command(interaction: discord.Interaction, club: str):
                     inline=False
                 )
 
+            # 🔑 Add stat key
+            embed.add_field(
+                name="📘 Stat Key",
+                value="⚽ Goals | 🎯 Assists | 🟥 Red Cards | 🛡️ Tackles | 🧤 Saves | ⭐ Rating",
+                inline=False
+            )
+
             await interaction.followup.send(embed=embed)
 
         except Exception as e:
