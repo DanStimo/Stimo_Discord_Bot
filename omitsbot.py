@@ -501,7 +501,7 @@ async def vs_command(interaction: discord.Interaction, club: str):
 
 # - THIS IS FOR THE /LASTMATCH COMMAND.
 async def handle_lastmatch(interaction: discord.Interaction, club: str, from_dropdown: bool = False, original_message=None):
-        try:
+    try:
         if not interaction.response.is_done():
             await interaction.response.defer()
     except Exception as e:
