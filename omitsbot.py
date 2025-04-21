@@ -477,29 +477,28 @@ async def lastmatch_command(interaction: discord.Interaction, club: str):
 
     async with httpx.AsyncClient(timeout=10) as client:
         try:
-            # Search for the club using EA's search endpoint
-            encoded_name = club.replace(" ", "%20")
-            search_url = f"https://proclubs.ea.com/api/fc/allTimeLeaderboard/search?platform={PLATFORM}&clubName={encoded_name}"
-            search_response = await client.get(search_url, headers=headers)
+            # Step 1: Resolve club ID
+            if club.isdigit():
+                club_id = club
+            else:
+                search_url = f"https://proclubs.ea.com/api/fc/allTimeLeaderboard/search?platform={PLATFORM}&clubName={club.replace(' ', '%20')}"
+                search_response = await client.get(search_url, headers=headers)
+                if search_response.status_code != 200:
+                    await interaction.followup.send("Club not found or EA API failed.")
+                    return
 
-            if search_response.status_code != 200:
-                await interaction.followup.send("Club not found or EA API failed.")
-                return
+                search_data = search_response.json()
+                if not search_data or not isinstance(search_data, list):
+                    await interaction.followup.send("No matching clubs found.")
+                    return
 
-            search_data = search_response.json()
-            if not search_data or not isinstance(search_data, list):
-                await interaction.followup.send("No matching clubs found.")
-                return
+                club_id = str(search_data[0]["clubInfo"]["clubId"])
+                club_name = search_data[0]["clubInfo"]["name"]
 
-            # Take the first result as the most likely match
-            selected = search_data[0]
-            club_info = selected.get("clubInfo", {})
-            club_id = str(club_info.get("clubId"))
-            club_name = club_info.get("name", "Unknown")
-
-            # Get both league and playoff matches
+            # Step 2: Fetch both league and playoff matches
             match_types = ["leagueMatch", "playoffMatch"]
             matches = []
+
             for match_type in match_types:
                 url = f"https://proclubs.ea.com/api/fc/clubs/matches?matchType={match_type}&platform={PLATFORM}&clubIds={club_id}"
                 response = await client.get(url, headers=headers)
@@ -510,58 +509,54 @@ async def lastmatch_command(interaction: discord.Interaction, club: str):
                 await interaction.followup.send("No matches found for this club.")
                 return
 
-            # Sort by timestamp and get the most recent
+            # Step 3: Sort by timestamp and get most recent
             matches.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
             last_match = matches[0]
 
+            # Step 4: Get club and opponent data
             clubs = last_match.get("clubs", {})
-            our_data = clubs.get(club_id)
+            club_data = clubs.get(club_id)
             opponent_id = next((cid for cid in clubs if cid != club_id), None)
-            opponent_data = clubs.get(opponent_id)
+            opponent_data = clubs.get(opponent_id) if opponent_id else {}
 
-            our_name = our_data.get("details", {}).get("name", "Unknown") if our_data else "Unknown"
-            opponent_name = opponent_data.get("details", {}).get("name", "Unknown") if opponent_data else "Unknown"
+            # Safe name resolution
+            our_name = club_data.get("details", {}).get("name", club_data.get("name", "Unknown")) if club_data else "Unknown"
+            opponent_name = opponent_data.get("details", {}).get("name", opponent_data.get("name", "Unknown")) if opponent_data else "Unknown"
 
-            our_score = int(our_data.get("goals", 0)) if our_data else 0
+            # Scores and result
+            our_score = int(club_data.get("goals", 0)) if club_data else 0
             opponent_score = int(opponent_data.get("goals", 0)) if opponent_data else 0
-
             result_emoji = "✅" if our_score > opponent_score else "❌" if our_score < opponent_score else "➖"
-            result_line = f"{result_emoji} {our_name} {our_score}-{opponent_score} {opponent_name}"
+            result_text = "Win" if our_score > opponent_score else "Loss" if our_score < opponent_score else "Draw"
 
+            # Step 5: Create embed
             embed = discord.Embed(
                 title=f"📅 Last Match: {our_name} vs {opponent_name}",
-                description=f"{result_emoji} {'Win' if our_score > opponent_score else 'Loss' if our_score < opponent_score else 'Draw'} ({our_score}-{opponent_score})",
+                description=f"{result_emoji} {result_text} ({our_score}-{opponent_score})",
                 color=discord.Color.green() if our_score > opponent_score else discord.Color.red() if our_score < opponent_score else discord.Color.gold()
             )
 
-            players = our_data.get("players")
-            if not players:
-                embed.add_field(name="Player Stats", value="❌ Player stats are unavailable for this match.", inline=False)
-            else:
-                for player_id in players:
-                    player = players[player_id]
-                    name = player.get("name", "Unknown")
-                    goals = player.get("goals", 0)
-                    assists = player.get("assists", 0)
-                    yellow = player.get("yellowCards", 0)
-                    red = player.get("redCards", 0)
-                    rating = player.get("rating", "N/A")
-            
-                    embed.add_field(
-                        name=f"{name}",
-                        value=(
-                            f"⚽ {goals} | 🎯 {assists} | 🟨 {yellow} | 🟥 {red} | "
-                            f"⭐ {rating}"
-                        ),
-                        inline=False
-                    )
+            # Step 6: Add player stats
+            players_data = last_match.get("players", {}).get(club_id, {})
+            for player in players_data.values():
+                name = player.get("playername", "Unknown")
+                goals = player.get("goals", 0)
+                assists = player.get("assists", 0)
+                yellow = player.get("yellowCards", 0)
+                red = player.get("redCards", 0)
+                rating = player.get("rating", "N/A")
 
+                embed.add_field(
+                    name=f"{name}",
+                    value=f"⚽ {goals} | 🎯 {assists} | 🟨 {yellow} | 🟥 {red} | ⭐ {rating}",
+                    inline=False
+                )
 
             await interaction.followup.send(embed=embed)
 
         except Exception as e:
-            print(f"Error in /lastmatch: {e}")
-            await interaction.followup.send("An error occurred while fetching the last match data.")
+            print(f"[ERROR] Failed to fetch last match: {e}")
+            await interaction.followup.send("An error occurred while fetching the last match.")
 
 
 @client.event
