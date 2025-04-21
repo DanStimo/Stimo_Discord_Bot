@@ -545,13 +545,13 @@ async def lastmatch_command(interaction: discord.Interaction, club: str):
             )
 
             for player in sorted_players:
-            name = player.get("playername", "Unknown")
-            goals = player.get("goals", 0)
-            assists = player.get("assists", 0)
-            red = player.get("redcards", 0)
-            tackles = player.get("tacklesmade", 0)
-            saves = player.get("saves", 0)
-            rating = player.get("rating", "N/A")
+                name = player.get("playername", "Unknown")
+                goals = player.get("goals", 0)
+                assists = player.get("assists", 0)
+                red = player.get("redcards", 0)
+                tackles = player.get("tacklesmade", 0)
+                saves = player.get("saves", 0)
+                rating = player.get("rating", "N/A")
         
             # Pad numbers to fixed width using f-strings
             stat_line = (
