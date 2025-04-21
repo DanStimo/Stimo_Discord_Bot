@@ -553,13 +553,13 @@ async def lastmatch_command(interaction: discord.Interaction, club: str):
                 tackles = player.get("tacklesmade", 0)
                 saves = player.get("saves", 0)
             
-            embed.add_field(
-                name=f"{name}",
-                value=(
-                    f"⚽ {goals} | 🎯 {assists} | 🟥 {red} | 🛡️ {tackles} | 🧤 {saves} | ⭐ {rating}"
-                ),
-                inline=False
-            )
+                embed.add_field(
+                    name=f"{name}",
+                    value=(
+                        f"⚽ {goals} | 🎯 {assists} | 🟥 {red} | 🛡️ {tackles} | 🧤 {saves} | ⭐ {rating}"
+                    ),
+                    inline=False
+                )
             
             embed.add_field(name="\u200b", value="\u200b", inline=False)
 
