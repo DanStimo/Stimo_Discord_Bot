@@ -644,8 +644,19 @@ async def on_ready():
     # Optional announcement
     channel_id = int(os.getenv("ANNOUNCE_CHANNEL_ID", "0"))  # replace with actual ID if needed
     channel = client.get_channel(channel_id)
+    
     if channel:
-        await channel.send("✅ - omitS Bot (<:discord:1363127822209646612>) is now online and ready for commands!")
+        message = await channel.send("✅ - omitS Bot (<:discord:1363127822209646612>) is now online and ready for commands!")
+    
+        async def delete_after_announcement():
+            await asyncio.sleep(60)
+            try:
+                await message.delete()
+            except Exception as e:
+                print(f"[ERROR] Failed to auto-delete announcement message: {e}")
+    
+        asyncio.create_task(delete_after_announcement())
+    
     else:
         print(f"[WARN] Could not find channel with ID {channel_id}")
 
