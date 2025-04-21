@@ -469,56 +469,80 @@ async def vs_command(interaction: discord.Interaction, club: str):
     await versus_command.callback(interaction, club)
 
 # - THIS IS FOR THE /LASTMATCH COMMAND.
-@tree.command(name="lastmatch", description="Get the last match and player stats of a club.")
+@tree.command(name="lastmatch", description="Show the last match stats for a club.")
 @app_commands.describe(club="Club name or club ID")
 async def lastmatch_command(interaction: discord.Interaction, club: str):
     await interaction.response.defer()
+    headers = {"User-Agent": "Mozilla/5.0"}
 
     async with httpx.AsyncClient(timeout=10) as client:
         try:
-            club_id = None
+            # Step 1: Resolve club ID
             if club.isdigit():
                 club_id = club
             else:
                 search_url = f"https://proclubs.ea.com/api/fc/allTimeLeaderboard/search?platform={PLATFORM}&clubName={club.replace(' ', '%20')}"
-                headers = {"User-Agent": "Mozilla/5.0"}
-                response = await client.get(search_url, headers=headers)
-                results = response.json()
-                if results and isinstance(results, list):
-                    club_id = str(results[0]['clubInfo']['clubId'])
+                search_response = await client.get(search_url, headers=headers)
+                if search_response.status_code != 200:
+                    await interaction.followup.send("Club not found or EA API failed.")
+                    return
 
-            if not club_id:
-                await interaction.followup.send("Could not find that club.")
-                return
+                search_data = search_response.json()
+                if not search_data or not isinstance(search_data, list):
+                    await interaction.followup.send("No matching clubs found.")
+                    return
 
-            # Get last match
-            match_url = f"https://proclubs.ea.com/api/fc/clubs/matches?platform={PLATFORM}&matchType=leagueMatch&clubIds={club_id}"
-            match_response = await client.get(match_url, headers=headers)
-            matches = match_response.json()
+                club_id = str(search_data[0]["clubInfo"]["clubId"])
+                club_name = search_data[0]["clubInfo"]["name"]
+
+            # Step 2: Fetch both league and playoff matches
+            match_types = ["leagueMatch", "playoffMatch"]
+            matches = []
+
+            for match_type in match_types:
+                url = f"https://proclubs.ea.com/api/fc/clubs/matches?matchType={match_type}&platform={PLATFORM}&clubIds={club_id}"
+                response = await client.get(url, headers=headers)
+                if response.status_code == 200:
+                    matches.extend(response.json())
+
             if not matches:
                 await interaction.followup.send("No matches found for this club.")
                 return
 
-            last_match = sorted(matches, key=lambda m: m.get("timestamp", 0), reverse=True)[0]
-            clubs_data = last_match["clubs"]
-            club_data = clubs_data.get(str(club_id))
-            opponent_id = next(cid for cid in clubs_data if cid != str(club_id))
-            opponent_data = clubs_data[opponent_id]
+            # Step 3: Sort by timestamp and get most recent
+            matches.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
+            last_match = matches[0]
 
-            # Match summary
-            our_score = int(club_data.get("goals", 0))
-            opp_score = int(opponent_data.get("goals", 0))
-            result = "✅ Win" if our_score > opp_score else "❌ Loss" if our_score < opp_score else "➖ Draw"
+            # Step 4: Get club and opponent data
+            clubs = last_match.get("clubs", {})
+            club_data = clubs.get(club_id)
+            opponent_id = next((cid for cid in clubs if cid != club_id), None)
+            opponent_data = clubs.get(opponent_id) if opponent_id else {}
 
+            # Safe name resolution
+            our_name = club_data.get("details", {}).get("name", club_data.get("name", "Unknown")) if club_data else "Unknown"
+            opponent_name = opponent_data.get("details", {}).get("name", opponent_data.get("name", "Unknown")) if opponent_data else "Unknown"
+
+            # Scores and result
+            our_score = int(club_data.get("goals", 0)) if club_data else 0
+            opponent_score = int(opponent_data.get("goals", 0)) if opponent_data else 0
+            result_emoji = "✅" if our_score > opponent_score else "❌" if our_score < opponent_score else "➖"
+            result_text = "Win" if our_score > opponent_score else "Loss" if our_score < opponent_score else "Draw"
+
+            # Step 5: Create embed
             embed = discord.Embed(
-                title=f"📅 Last Match: {club_data.get('name', 'Unknown')} vs {opponent_data.get('name', 'Unknown')}",
-                description=f"{result} ({our_score}-{opp_score})",
-                color=0x1F8B4C
+                title=f"📅 Last Match: {our_name} vs {opponent_name}",
+                description=f"{result_emoji} {result_text} ({our_score}-{opponent_score})",
+                color=discord.Color.green() if our_score > opponent_score else discord.Color.red() if our_score < opponent_score else discord.Color.gold()
             )
 
-            # Sort players by rating (descending), fallback to 0 if missing
-            players_data = list(last_match.get("players", {}).get(str(club_id), {}).values())
-            sorted_players = sorted(players_data, key=lambda p: float(p.get("rating", 0)), reverse=True)
+            # Step 6: Add player stats (sorted by rating)
+            players_data = list(last_match.get("players", {}).get(club_id, {}).values())
+            sorted_players = sorted(
+                players_data,
+                key=lambda p: float(p.get("rating", 0)),
+                reverse=True
+            )
 
             for player in sorted_players:
                 name = player.get("playername", "Unknown")
@@ -528,8 +552,8 @@ async def lastmatch_command(interaction: discord.Interaction, club: str):
                 rating = player.get("rating", "N/A")
 
                 embed.add_field(
-                    name=name,
-                    value=f"⭐ {rating} | ⚽ {goals} | 🎯 {assists} | 🟥 {red}",
+                    name=f"{name}",
+                    value=f"⚽ {goals} | 🎯 {assists} | 🟥 {red} | ⭐ {rating}",
                     inline=False
                 )
 
@@ -538,9 +562,6 @@ async def lastmatch_command(interaction: discord.Interaction, club: str):
         except Exception as e:
             print(f"[ERROR] Failed to fetch last match: {e}")
             await interaction.followup.send("An error occurred while fetching the last match.")
-
-
-
 
 @client.event
 async def on_ready():
