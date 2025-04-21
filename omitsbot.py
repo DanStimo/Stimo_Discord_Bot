@@ -550,10 +550,16 @@ async def lastmatch_command(interaction: discord.Interaction, club: str):
                 assists = player.get("assists", 0)
                 red = player.get("redCards", 0)
                 rating = player.get("rating", "N/A")
+                tackles = player.get("tacklesMade", 0)
+                saves = player.get("saves", 0)
 
                 embed.add_field(
                     name=f"{name}",
-                    value=f"⚽ {goals} | 🎯 {assists} | 🟥 {red} | ⭐ {rating}",
+                    value=(
+                        f"⚽ {goals} | 🎯 {assists} | "
+                        f"🟥 {red} | "
+                        f"🛡️ {tackles} | 🧤 {saves} | ⭐ {rating}"
+                    ),
                     inline=False
                 )
 
@@ -562,6 +568,7 @@ async def lastmatch_command(interaction: discord.Interaction, club: str):
         except Exception as e:
             print(f"[ERROR] Failed to fetch last match: {e}")
             await interaction.followup.send("An error occurred while fetching the last match.")
+
 
 @client.event
 async def on_ready():
