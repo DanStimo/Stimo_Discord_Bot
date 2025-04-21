@@ -609,7 +609,8 @@ async def handle_lastmatch(interaction: discord.Interaction, club: str, from_dro
 @tree.command(name="lastmatch", description="Show the last match stats for a club.")
 @app_commands.describe(club="Club name or club ID")
 async def lastmatch_command(interaction: discord.Interaction, club: str):
-    await handle_lastmatch(interaction, club)
+    await handle_lastmatch(interaction, club, from_dropdown=False, original_message=None)
+    
     headers = {"User-Agent": "Mozilla/5.0"}
 
     async with httpx.AsyncClient(timeout=10) as client:
