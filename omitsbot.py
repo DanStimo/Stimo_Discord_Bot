@@ -545,25 +545,22 @@ async def lastmatch_command(interaction: discord.Interaction, club: str):
             )
 
             for player in sorted_players:
-                name = player.get("playername", "Unknown")
-                goals = player.get("goals", 0)
-                assists = player.get("assists", 0)
-                red = player.get("redcards", 0)
-                rating = player.get("rating", "N/A")
-                tackles = player.get("tacklesmade", 0)
-                saves = player.get("saves", 0)
+            name = player.get("playername", "Unknown")
+            goals = player.get("goals", 0)
+            assists = player.get("assists", 0)
+            red = player.get("redcards", 0)
+            tackles = player.get("tacklesmade", 0)
+            saves = player.get("saves", 0)
+            rating = player.get("rating", "N/A")
+        
+            # Pad numbers to fixed width using f-strings
+            stat_line = (
+                f"⚽ {goals:<2} | 🎯 {assists:<2} | 🟥 {red:<2} | "
+                f"🛡️ {tackles:<2} | 🧤 {saves:<2} | ⭐ {rating}"
+            )
+        
+            embed.add_field(name=f"{name}", value=stat_line, inline=False)
 
-                embed.add_field(
-                    name=f"{name}",
-                    value=(
-                        f"⚽ {goals} | 🎯 {assists} | "
-                        f"🟥 {red} | "
-                        f"🛡️ {tackles} | 🧤 {saves} | ⭐ {rating}"
-                    ),
-                    inline=False
-                )
-
-            embed.add_field(name="\u2800", value="\u2800", inline=False)
 
             #Stat key as footer
             embed.set_footer(text="📘 Stat Key: ⚽ Goals | 🎯 Assists | 🟥 Red Cards | 🛡️ Tackles | 🧤 Saves | ⭐ Rating")
