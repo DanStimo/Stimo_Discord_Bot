@@ -686,9 +686,9 @@ async def lastmatch_command(interaction: discord.Interaction, club: str, from_dr
                 await interaction.followup.send(embed=embed)
             
             
-            except Exception as e:
-                print(f"[ERROR] Failed to fetch last match: {e}")
-                await interaction.followup.send("An error occurred while fetching the last match.")
+        except Exception as e:
+            print(f"[ERROR] Failed to fetch last match: {e}")
+            await interaction.followup.send("An error occurred while fetching the last match.")
 
 @client.event
 async def on_ready():
