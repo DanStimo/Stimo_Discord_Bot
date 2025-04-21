@@ -559,11 +559,8 @@ async def lastmatch_command(interaction: discord.Interaction, club: str):
                 )
 
                 embed.add_field(name=f"{name}", value=stat_line, inline=False)
-
-            embed.set_footer(text="📘 Stat Key: ⚽ Goals | 🎯 Assists | 🟥 Red Cards | 🛡️ Tackles | 🧤 Saves | ⭐ Rating")
-        
-            embed.add_field(name=f"{name}", value=stat_line, inline=False)
-
+                
+                embed.add_field(name="\u2800", value="\u2800", inline=False)
 
             #Stat key as footer
             embed.set_footer(text="📘 Stat Key: ⚽ Goals | 🎯 Assists | 🟥 Red Cards | 🛡️ Tackles | 🧤 Saves | ⭐ Rating")
