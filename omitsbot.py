@@ -630,6 +630,102 @@ async def lastmatch_command(interaction: discord.Interaction, club: str):
 async def lm_command(interaction: discord.Interaction, club: str):
     await handle_lastmatch(interaction, club, from_dropdown=False, original_message=None)
 
+# - THIS IS FOR TOP 100.
+class Top100View(discord.ui.View):
+    def __init__(self, leaderboard, per_page=10):
+        super().__init__(timeout=180)  # Auto-timeout after 180 seconds
+        self.leaderboard = leaderboard
+        self.per_page = per_page
+        self.page = 0
+        self.message = None
+
+    def get_embed(self):
+        start = self.page * self.per_page
+        end = start + self.per_page
+        current_page_clubs = self.leaderboard[start:end]
+
+        embed = discord.Embed(
+            title=f"🏆 Top 100 Clubs (Page {self.page + 1}/{(len(self.leaderboard) - 1) // self.per_page + 1})",
+            description="Navigate using the buttons below.",
+            color=0xFFD700
+        )
+
+        for club in current_page_clubs:
+            name = club.get("clubName", "Unknown Club")
+            rank = club.get("rank", "N/A")
+            skill = club.get("skillRating", "N/A")
+            embed.add_field(
+                name=f"#{rank} - {name}",
+                value=f"⭐ Skill Rating: {skill}",
+                inline=False
+            )
+
+        embed.set_footer(text="EA Pro Clubs All-Time Leaderboard")
+        return embed
+
+    @discord.ui.button(label="⏮️ First", style=discord.ButtonStyle.secondary)
+    async def first_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page = 0
+        await interaction.response.edit_message(embed=self.get_embed(), view=self)
+
+    @discord.ui.button(label="⬅️ Prev", style=discord.ButtonStyle.primary)
+    async def prev_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.page > 0:
+            self.page -= 1
+        await interaction.response.edit_message(embed=self.get_embed(), view=self)
+
+    @discord.ui.button(label="➡️ Next", style=discord.ButtonStyle.primary)
+    async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if (self.page + 1) * self.per_page < len(self.leaderboard):
+            self.page += 1
+        await interaction.response.edit_message(embed=self.get_embed(), view=self)
+
+    @discord.ui.button(label="⏭️ Last", style=discord.ButtonStyle.secondary)
+    async def last_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page = (len(self.leaderboard) - 1) // self.per_page
+        await interaction.response.edit_message(embed=self.get_embed(), view=self)
+
+    async def on_timeout(self):
+        if self.message:
+            try:
+                await self.message.delete()
+            except Exception as e:
+                print(f"[ERROR] Failed to auto-delete /t100 message: {e}")
+
+# -------------------------
+
+@tree.command(name="t100", description="Show the Top 100 Clubs from EA Pro Clubs Leaderboard.")
+async def top100_command(interaction: discord.Interaction):
+    await interaction.response.defer()
+
+    url = f"https://proclubs.ea.com/api/fc/allTimeLeaderboard?platform={PLATFORM}"
+    headers = {"User-Agent": "Mozilla/5.0"}
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.get(url, headers=headers)
+            if response.status_code != 200:
+                await interaction.followup.send("⚠️ Failed to fetch the leaderboard from EA.")
+                return
+
+            leaderboard = response.json()
+
+            if not leaderboard or not isinstance(leaderboard, list):
+                await interaction.followup.send("⚠️ No leaderboard data found.")
+                return
+
+            top_100 = sorted(leaderboard, key=lambda c: c.get("rank", 9999))[:100]
+
+            view = Top100View(top_100, per_page=10)
+            embed = view.get_embed()
+
+            message = await interaction.followup.send(embed=embed, view=view)
+            view.message = message  # Store message for deletion on timeout
+
+    except Exception as e:
+        print(f"[ERROR] Failed to fetch Top 100: {e}")
+        await interaction.followup.send("❌ An error occurred while fetching the Top 100 clubs.")
+
 @client.event
 async def on_ready():
     await tree.sync()
