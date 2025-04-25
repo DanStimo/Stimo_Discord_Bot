@@ -732,7 +732,7 @@ async def top100_command(interaction: discord.Interaction):
 
     except Exception as e:
         print(f"[ERROR] Failed to fetch Top 100: {e}")
-        await send_temporary_message(interaction.followup, content"❌ An error occurred while fetching the Top 100 clubs.")
+        await send_temporary_message(interaction.followup, content="❌ An error occurred while fetching the Top 100 clubs.")
 
 @client.event
 async def on_ready():
