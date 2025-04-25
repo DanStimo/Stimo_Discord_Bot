@@ -265,6 +265,14 @@ async def safe_interaction_respond(interaction: discord.Interaction, **kwargs):
         print(f"[ERROR] Failed to respond to interaction: {e}")
         return None
 
+async def send_temporary_message(destination, content=None, embed=None, view=None, delay=60):
+    try:
+        message = await destination.send(content=content, embed=embed, view=view)
+        await asyncio.sleep(delay)
+        await message.delete()
+    except Exception as e:
+        print(f"[ERROR] Failed to auto-delete message: {e}")
+
 # - THIS IS FOR THE /RECORD COMMAND.
 @tree.command(name="record", description="Show xNever Enoughx's current record.")
 async def record_command(interaction: discord.Interaction):
@@ -414,12 +422,12 @@ async def versus_command(interaction: discord.Interaction, club: str):
             search_response = await client.get(search_url, headers=headers)
 
             if search_response.status_code != 200:
-                await interaction.followup.send("Club not found or EA API failed.")
+                await send_temporary_message(interaction.followup, content="Club not found or EA API failed.")
                 return
 
             search_data = search_response.json()
             if not search_data or not isinstance(search_data, list):
-                await interaction.followup.send("No matching clubs found.")
+                await send_temporary_message(interaction.followup, content="No matching clubs found.")
                 return
 
             # Filter out bad names
@@ -481,7 +489,7 @@ async def versus_command(interaction: discord.Interaction, club: str):
 
         except Exception as e:
             print(f"Error in /versus: {e}")
-            await interaction.followup.send("An error occurred while fetching opponent stats.")
+            await send_temporary_message(interaction.followup, content="An error occurred while fetching opponent stats.")
 
 # - THIS IS FOR THE VS ALIAS OF VERSUS.
 @tree.command(name="vs", description="Alias for /versus")
@@ -508,12 +516,12 @@ async def handle_lastmatch(interaction: discord.Interaction, club: str, from_dro
                 search_response = await client.get(search_url, headers=headers)
 
                 if search_response.status_code != 200:
-                    await interaction.followup.send("Club not found or EA API failed.")
+                    await send_temporary_message(interaction.followup, content="Club not found or EA API failed.")
                     return
 
                 search_data = search_response.json()
                 if not search_data or not isinstance(search_data, list):
-                    await interaction.followup.send("No matching clubs found.")
+                    await send_temporary_message(interaction.followup, content="No matching clubs found.")
                     return
 
                 valid_clubs = [
@@ -617,7 +625,7 @@ async def handle_lastmatch(interaction: discord.Interaction, club: str, from_dro
 
         except Exception as e:
             print(f"[ERROR] Failed to fetch last match: {e}")
-            await interaction.followup.send("An error occurred while fetching the last match.")
+            await send_temporary_message(interaction.followup, content="An error occurred while fetching opponent stats.")
     
 @tree.command(name="lastmatch", description="Show the last match stats for a club.")
 @app_commands.describe(club="Club name or club ID")
@@ -724,7 +732,7 @@ async def top100_command(interaction: discord.Interaction):
 
     except Exception as e:
         print(f"[ERROR] Failed to fetch Top 100: {e}")
-        await interaction.followup.send("❌ An error occurred while fetching the Top 100 clubs.")
+        await send_temporary_message(interaction.followup, content"❌ An error occurred while fetching the Top 100 clubs.")
 
 @client.event
 async def on_ready():
