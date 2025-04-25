@@ -267,7 +267,11 @@ async def safe_interaction_respond(interaction: discord.Interaction, **kwargs):
 
 async def send_temporary_message(destination, content=None, embed=None, view=None, delay=60):
     try:
-        message = await destination.send(content=content, embed=embed, view=view)
+        if view:
+            message = await destination.send(content=content, embed=embed, view=view)
+        else:
+            message = await destination.send(content=content, embed=embed)
+
         await asyncio.sleep(delay)
         await message.delete()
     except Exception as e:
