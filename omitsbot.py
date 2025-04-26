@@ -467,22 +467,21 @@ async def fetch_and_display_last5(interaction, club_id, club_name="Club", origin
 
     for idx, match in enumerate(last_5, 1):
         clubs = match.get("clubs", {})
-        club_data = clubs.get(str(club_id))
+        club_data = clubs.get(str(club_id)) or {}
         opponent_id = next((cid for cid in clubs if cid != str(club_id)), None)
-    
-        if opponent_id:
-            opponent_data = clubs.get(opponent_id) or {}
-            opponent_name = opponent_data.get("details", {}).get("name") or opponent_data.get("name") or "Unknown"
-            opponent_score = int(opponent_data.get("goals", 0))
-        else:
-            opponent_data = {}
-            opponent_name = "Unknown"
-            opponent_score = 0
-    
-        our_score = int(club_data.get("goals", 0)) if club_data else 0
-    
+        opponent_data = clubs.get(opponent_id) if opponent_id else {}
+
+        opponent_name = (
+            (opponent_data.get("details") or {}).get("name")
+            or opponent_data.get("name")
+            or "Unknown"
+        )
+
+        our_score = int(club_data.get("goals", 0))
+        opponent_score = int(opponent_data.get("goals", 0)) if opponent_data else 0
+
         result = "✅" if our_score > opponent_score else "❌" if our_score < opponent_score else "➖"
-    
+
         embed.add_field(
             name=f"{idx}⃣ {result} vs {opponent_name}",
             value=f"Score: {our_score}-{opponent_score}",
@@ -491,24 +490,18 @@ async def fetch_and_display_last5(interaction, club_id, club_name="Club", origin
 
     if original_message:
         await original_message.edit(content=None, embed=embed, view=None)
-    
-        async def delete_after_timeout():
-            await asyncio.sleep(180)
-            try:
-                await original_message.delete()
-            except Exception as e:
-                print(f"[ERROR] Failed to auto-delete dropdown message: {e}")
-    
-        asyncio.create_task(delete_after_timeout())
+        asyncio.create_task(delete_after_delay(original_message))
     else:
         message = await interaction.followup.send(embed=embed)
-    
-        async def delete_after_timeout():
-            await asyncio.sleep(180)
-            try:
-                await message.delete()
-            except Exception as e:
-                print(f"[ERROR] Failed to auto-delete /last5 message: {e}")
+        asyncio.create_task(delete_after_delay(message))
+
+
+async def delete_after_delay(message, delay=180):
+    await asyncio.sleep(delay)
+    try:
+        await message.delete()
+    except Exception as e:
+        print(f"[ERROR] Failed to auto-delete message: {e}")
     
         asyncio.create_task(delete_after_timeout())
 
