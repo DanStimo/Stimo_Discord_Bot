@@ -835,24 +835,35 @@ async def last5_command(interaction: discord.Interaction, club: str):
             return
 
         data = response.json()
-        valid_clubs = [c for c in data if c.get("clubInfo", {}).get("name", "").strip().lower() != "none of these"]
 
+        # Ensure data is a list
+        if not data or not isinstance(data, list):
+            await interaction.followup.send("No matching clubs found.")
+            return
+        
+        # Filter out invalid clubs
+        valid_clubs = [
+            c for c in data
+            if c.get("clubInfo", {}).get("name", "").strip().lower() != "none of these"
+        ]
+        
+        if len(valid_clubs) == 0:
+            await interaction.followup.send("No matching clubs found.")
+            return
+        
         if len(valid_clubs) == 1:
             club_id = str(valid_clubs[0]["clubInfo"]["clubId"])
             club_name = valid_clubs[0]["clubInfo"]["name"]
             await fetch_and_display_last5(interaction, club_id, club_name)
-
-        elif len(valid_clubs) > 1:
+        else:
             options = [
                 discord.SelectOption(label=c["clubInfo"]["name"], value=str(c["clubInfo"]["clubId"]))
                 for c in valid_clubs[:25]
             ]
             options.append(discord.SelectOption(label="None of these", value="none"))
-
+        
             view = Last5DropdownView(options, valid_clubs)
             await interaction.followup.send("Multiple clubs found. Please select:", view=view)
-        else:
-            await interaction.followup.send("No matching clubs found.")
 
 # - THIS IS FOR THE L5 ALIAS OF LAST5.
 @tree.command(name="l5", description="Alias for /last5")
