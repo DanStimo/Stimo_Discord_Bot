@@ -329,7 +329,16 @@ class ClubDropdown(discord.ui.Select):
         await interaction.response.defer()
 
         if self.values[0] == "none":
-            await interaction.message.edit(content="Okay, request canceled.", view=None)
+            await interaction.message.edit(content="Okay, request cancelled.", view=None)
+        
+            async def delete_after_cancel():
+                await asyncio.sleep(60)
+                try:
+                    await interaction.message.delete()
+                except Exception as e:
+                    print(f"[ERROR] Failed to auto-delete cancel message: {e}")
+        
+            asyncio.create_task(delete_after_cancel())
             return
 
         chosen = self.values[0]
@@ -396,7 +405,16 @@ class LastMatchDropdown(discord.ui.Select):
         await interaction.response.defer()
 
         if self.values[0] == "none":
-            await interaction.message.edit(content="Okay, request canceled.", view=None)
+            await interaction.message.edit(content="Okay, request cancelled.", view=None)
+        
+            async def delete_after_cancel():
+                await asyncio.sleep(60)
+                try:
+                    await interaction.message.delete()
+                except Exception as e:
+                    print(f"[ERROR] Failed to auto-delete cancel message: {e}")
+        
+            asyncio.create_task(delete_after_cancel())
             return
 
         chosen = self.values[0]
@@ -428,9 +446,19 @@ class Last5Dropdown(discord.ui.Select):
 
         chosen = self.values[0]
 
-        if chosen == "none":
-            await interaction.message.edit(content="Okay, request canceled.", view=None)
+        if self.values[0] == "none":
+            await interaction.message.edit(content="Okay, request cancelled.", view=None)
+        
+            async def delete_after_cancel():
+                await asyncio.sleep(60)
+                try:
+                    await interaction.message.delete()
+                except Exception as e:
+                    print(f"[ERROR] Failed to auto-delete cancel message: {e}")
+        
+            asyncio.create_task(delete_after_cancel())
             return
+
 
         club_name = next((c["clubInfo"]["name"] for c in self.club_data if str(c["clubInfo"]["clubId"]) == chosen), "Club")
         await fetch_and_display_last5(interaction, chosen, club_name, original_message=interaction.message)
