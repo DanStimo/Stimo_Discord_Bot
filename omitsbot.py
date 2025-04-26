@@ -824,8 +824,8 @@ async def last5_command(interaction: discord.Interaction, club: str):
 
     async with httpx.AsyncClient(timeout=10) as client:
         if club.isdigit():
-        await fetch_and_display_last5(interaction, club, "Club")
-        return
+            await fetch_and_display_last5(interaction, club, "Club")
+            return
 
         search_url = f"https://proclubs.ea.com/api/fc/allTimeLeaderboard/search?platform={PLATFORM}&clubName={club.replace(' ', '%20')}"
         response = await client.get(search_url, headers=headers)
