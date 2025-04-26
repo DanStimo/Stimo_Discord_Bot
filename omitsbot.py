@@ -411,6 +411,81 @@ class LastMatchDropdownView(discord.ui.View):
     def __init__(self, interaction, options, club_data):
         super().__init__()
         self.add_item(LastMatchDropdown(interaction, options, club_data))
+        
+# - THIS IS FOR THE LAST5 DROPDOWN
+class Last5Dropdown(discord.ui.Select):
+    def __init__(self, options, club_data):
+        self.club_data = club_data
+        super().__init__(
+            placeholder="Select the correct club...",
+            options=options,
+            min_values=1,
+            max_values=1,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        chosen = self.values[0]
+        await fetch_and_display_last5(interaction, chosen)
+
+class Last5DropdownView(discord.ui.View):
+    def __init__(self, options, club_data):
+        super().__init__(timeout=180)
+        self.add_item(Last5Dropdown(options, club_data))
+
+async def fetch_and_display_last5(interaction, club_id):
+    base_url = "https://proclubs.ea.com/api/fc/clubs/matches"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    match_types = ["leagueMatch", "playoffMatch"]
+    matches = []
+
+    async with httpx.AsyncClient(timeout=10) as client:
+        for match_type in match_types:
+            url = f"{base_url}?matchType={match_type}&platform={PLATFORM}&clubIds={club_id}"
+            response = await client.get(url, headers=headers)
+            if response.status_code == 200:
+                matches.extend(response.json())
+
+    matches.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
+    last_5 = matches[:5]
+
+    if not last_5:
+        await interaction.followup.send("No recent matches found.")
+        return
+
+    embed = discord.Embed(
+        title=f"📅 Last 5 Matches",
+        color=discord.Color.blue()
+    )
+
+    for idx, match in enumerate(last_5, 1):
+        clubs = match.get("clubs", {})
+        club_data = clubs.get(str(club_id))
+        opponent_id = next((cid for cid in clubs if cid != str(club_id)), None)
+        opponent_data = clubs.get(opponent_id, {})
+
+        our_score = int(club_data.get("goals", 0)) if club_data else 0
+        opponent_score = int(opponent_data.get("goals", 0)) if opponent_data else 0
+        opponent_name = opponent_data.get("details", {}).get("name", opponent_data.get("name", "Unknown"))
+
+        result = "✅" if our_score > opponent_score else "❌" if our_score < opponent_score else "➖"
+
+        embed.add_field(
+            name=f"{idx}⃣ {result} vs {opponent_name}",
+            value=f"Score: {our_score}-{opponent_score}",
+            inline=False
+        )
+
+    message = await interaction.followup.send(embed=embed)
+
+    async def delete_after_timeout():
+        await asyncio.sleep(180)
+        try:
+            await message.delete()
+        except Exception as e:
+            print(f"[ERROR] Failed to auto-delete /last5 message: {e}")
+
+    asyncio.create_task(delete_after_timeout())
 
 # - THIS IS FOR THE /VERSUS COMMAND.
 @tree.command(name="versus", description="Check another club's stats by name or ID.")
@@ -737,6 +812,49 @@ async def top100_command(interaction: discord.Interaction):
     except Exception as e:
         print(f"[ERROR] Failed to fetch Top 100: {e}")
         await send_temporary_message(interaction.followup, content="❌ An error occurred while fetching the Top 100 clubs.")
+
+# - THIS IS FOR LAST5 COMMAND.
+@tree.command(name="last5", description="Show the last 5 matches for a club.")
+@discord.app_commands.describe(club="Club name or club ID")
+async def last5_command(interaction: discord.Interaction, club: str):
+    await interaction.response.defer()
+    headers = {"User-Agent": "Mozilla/5.0"}
+
+    async with httpx.AsyncClient(timeout=10) as client:
+        if club.isdigit():
+            await fetch_and_display_last5(interaction, club)
+            return
+
+        search_url = f"https://proclubs.ea.com/api/fc/allTimeLeaderboard/search?platform={PLATFORM}&clubName={club.replace(' ', '%20')}"
+        response = await client.get(search_url, headers=headers)
+
+        if response.status_code != 200:
+            await interaction.followup.send("Club not found or EA API failed.")
+            return
+
+        data = response.json()
+        valid_clubs = [c for c in data if c.get("clubInfo", {}).get("name", "").strip().lower() != "none of these"]
+
+        if len(valid_clubs) == 1:
+            club_id = str(valid_clubs[0]["clubInfo"]["clubId"])
+            await fetch_and_display_last5(interaction, club_id)
+        elif len(valid_clubs) > 1:
+            options = [
+                discord.SelectOption(label=c["clubInfo"]["name"], value=str(c["clubInfo"]["clubId"]))
+                for c in valid_clubs[:25]
+            ]
+            options.append(discord.SelectOption(label="None of these", value="none"))
+
+            view = Last5DropdownView(options, valid_clubs)
+            await interaction.followup.send("Multiple clubs found. Please select:", view=view)
+        else:
+            await interaction.followup.send("No matching clubs found.")
+
+# - THIS IS FOR THE L5 ALIAS OF LAST5.
+@tree.command(name="l5", description="Alias for /last5")
+@app_commands.describe(club="Club name or club ID")
+async def l5_command(interaction: discord.Interaction, club: str):
+    await handle_last5(interaction, club, from_dropdown=False, original_message=None)
 
 @client.event
 async def on_ready():
