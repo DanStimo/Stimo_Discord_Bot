@@ -465,16 +465,15 @@ async def fetch_and_display_last5(interaction, club_id, club_name="Club", origin
         color=discord.Color.blue()
     )
 
-    
     for idx, match in enumerate(last_5, 1):
         clubs = match.get("clubs", {})
         club_data = clubs.get(str(club_id))
         opponent_id = next((cid for cid in clubs if cid != str(club_id)), None)
-        opponent_data = clubs.get(opponent_id, {})
+        opponent_data = clubs.get(opponent_id) or {}
+        opponent_name = opponent_data.get("details", {}).get("name") or opponent_data.get("name") or "Unknown"
 
         our_score = int(club_data.get("goals", 0)) if club_data else 0
         opponent_score = int(opponent_data.get("goals", 0)) if opponent_data else 0
-        opponent_name = opponent_data.get("details", {}).get("name", opponent_data.get("name", "Unknown"))
 
         result = "✅" if our_score > opponent_score else "❌" if our_score < opponent_score else "➖"
 
