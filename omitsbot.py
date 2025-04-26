@@ -854,7 +854,7 @@ async def last5_command(interaction: discord.Interaction, club: str):
 
         # Ensure data is a list
         if not data or not isinstance(data, list):
-            await interaction.followup.send("No matching clubs found.")
+            await send_temporary_message(interaction.followup, content="No matching clubs found.", delay=60)
             return
         
         # Filter out invalid clubs
@@ -864,7 +864,7 @@ async def last5_command(interaction: discord.Interaction, club: str):
         ]
         
         if len(valid_clubs) == 0:
-            await interaction.followup.send("No matching clubs found.")
+            await send_temporary_message(interaction.followup, content="No matching clubs found.", delay=60)
             return
         
         if len(valid_clubs) == 1:
