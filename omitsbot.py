@@ -489,7 +489,7 @@ async def fetch_and_display_last5(interaction, club_id, club_name="Club", origin
         return
 
     embed = discord.Embed(
-        title=f"📅 {club_name.upper()}'s Last 5 Matches",
+        title=f"📅 {club_name.upper()}'s Last 5",
         color=discord.Color.blue()
     )
 
