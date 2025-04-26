@@ -854,7 +854,7 @@ async def last5_command(interaction: discord.Interaction, club: str):
 @tree.command(name="l5", description="Alias for /last5")
 @app_commands.describe(club="Club name or club ID")
 async def l5_command(interaction: discord.Interaction, club: str):
-    await handle_last5(interaction, club, from_dropdown=False, original_message=None)
+    await last5_command.callback(interaction, club)
 
 @client.event
 async def on_ready():
