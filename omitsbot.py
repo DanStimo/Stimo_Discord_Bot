@@ -423,18 +423,23 @@ class Last5Dropdown(discord.ui.Select):
             max_values=1,
         )
 
-    async def callback(self, interaction: discord.Interaction):
-        await interaction.response.defer()
-        chosen = self.values[0]
-        club_name = next((c["clubInfo"]["name"] for c in self.club_data if str(c["clubInfo"]["clubId"]) == chosen), "Club")
-        await fetch_and_display_last5(interaction, chosen, club_name)
+        async def callback(self, interaction: discord.Interaction):
+            await interaction.response.defer()
+            chosen = self.values[0]
+    
+            if chosen == "none":
+                await interaction.message.edit(content="Okay, request canceled.", view=None)
+                return
+    
+            club_name = next((c["clubInfo"]["name"] for c in self.club_data if str(c["clubInfo"]["clubId"]) == chosen), "Club")
+            await fetch_and_display_last5(interaction, chosen, club_name, original_message=interaction.message)
 
 class Last5DropdownView(discord.ui.View):
     def __init__(self, options, club_data):
         super().__init__(timeout=180)
         self.add_item(Last5Dropdown(options, club_data))
 
-async def fetch_and_display_last5(interaction, club_id, club_name="Club"):
+async def fetch_and_display_last5(interaction, club_id, club_name="Club", original_message=None):
     base_url = "https://proclubs.ea.com/api/fc/clubs/matches"
     headers = {"User-Agent": "Mozilla/5.0"}
     match_types = ["leagueMatch", "playoffMatch"]
@@ -478,16 +483,28 @@ async def fetch_and_display_last5(interaction, club_id, club_name="Club"):
             inline=False
         )
 
-    message = await interaction.followup.send(embed=embed)
-
-    async def delete_after_timeout():
-        await asyncio.sleep(180)
-        try:
-            await message.delete()
-        except Exception as e:
-            print(f"[ERROR] Failed to auto-delete /last5 message: {e}")
-
-    asyncio.create_task(delete_after_timeout())
+    if original_message:
+        await original_message.edit(content=None, embed=embed, view=None)
+    
+        async def delete_after_timeout():
+            await asyncio.sleep(180)
+            try:
+                await original_message.delete()
+            except Exception as e:
+                print(f"[ERROR] Failed to auto-delete dropdown message: {e}")
+    
+        asyncio.create_task(delete_after_timeout())
+    else:
+        message = await interaction.followup.send(embed=embed)
+    
+        async def delete_after_timeout():
+            await asyncio.sleep(180)
+            try:
+                await message.delete()
+            except Exception as e:
+                print(f"[ERROR] Failed to auto-delete /last5 message: {e}")
+    
+        asyncio.create_task(delete_after_timeout())
 
 # - THIS IS FOR THE /VERSUS COMMAND.
 @tree.command(name="versus", description="Check another club's stats by name or ID.")
