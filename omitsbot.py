@@ -423,16 +423,17 @@ class Last5Dropdown(discord.ui.Select):
             max_values=1,
         )
 
-        async def callback(self, interaction: discord.Interaction):
-            await interaction.response.defer()
-            chosen = self.values[0]
-    
-            if chosen == "none":
-                await interaction.message.edit(content="Okay, request canceled.", view=None)
-                return
-    
-            club_name = next((c["clubInfo"]["name"] for c in self.club_data if str(c["clubInfo"]["clubId"]) == chosen), "Club")
-            await fetch_and_display_last5(interaction, chosen, club_name, original_message=interaction.message)
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+
+        chosen = self.values[0]
+
+        if chosen == "none":
+            await interaction.message.edit(content="Okay, request canceled.", view=None)
+            return
+
+        club_name = next((c["clubInfo"]["name"] for c in self.club_data if str(c["clubInfo"]["clubId"]) == chosen), "Club")
+        await fetch_and_display_last5(interaction, chosen, club_name, original_message=interaction.message)
 
 class Last5DropdownView(discord.ui.View):
     def __init__(self, options, club_data):
