@@ -426,14 +426,15 @@ class Last5Dropdown(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         await interaction.response.defer()
         chosen = self.values[0]
-        await fetch_and_display_last5(interaction, chosen)
+        club_name = next((c["clubInfo"]["name"] for c in self.club_data if str(c["clubInfo"]["clubId"]) == chosen), "Club")
+        await fetch_and_display_last5(interaction, chosen, club_name)
 
 class Last5DropdownView(discord.ui.View):
     def __init__(self, options, club_data):
         super().__init__(timeout=180)
         self.add_item(Last5Dropdown(options, club_data))
 
-async def fetch_and_display_last5(interaction, club_id):
+async def fetch_and_display_last5(interaction, club_id, club_name="Club"):
     base_url = "https://proclubs.ea.com/api/fc/clubs/matches"
     headers = {"User-Agent": "Mozilla/5.0"}
     match_types = ["leagueMatch", "playoffMatch"]
@@ -454,9 +455,10 @@ async def fetch_and_display_last5(interaction, club_id):
         return
 
     embed = discord.Embed(
-        title=f"📅 {selected['clubInfo']['name'].upper()}'s Last 5 Matches",
+        title=f"📅 {club_name.upper()}'s Last 5 Matches",
         color=discord.Color.blue()
     )
+
     
     for idx, match in enumerate(last_5, 1):
         clubs = match.get("clubs", {})
@@ -822,8 +824,8 @@ async def last5_command(interaction: discord.Interaction, club: str):
 
     async with httpx.AsyncClient(timeout=10) as client:
         if club.isdigit():
-            await fetch_and_display_last5(interaction, club)
-            return
+        await fetch_and_display_last5(interaction, club, "Club")
+        return
 
         search_url = f"https://proclubs.ea.com/api/fc/allTimeLeaderboard/search?platform={PLATFORM}&clubName={club.replace(' ', '%20')}"
         response = await client.get(search_url, headers=headers)
@@ -837,7 +839,9 @@ async def last5_command(interaction: discord.Interaction, club: str):
 
         if len(valid_clubs) == 1:
             club_id = str(valid_clubs[0]["clubInfo"]["clubId"])
-            await fetch_and_display_last5(interaction, club_id)
+            club_name = valid_clubs[0]["clubInfo"]["name"]
+            await fetch_and_display_last5(interaction, club_id, club_name)
+
         elif len(valid_clubs) > 1:
             options = [
                 discord.SelectOption(label=c["clubInfo"]["name"], value=str(c["clubInfo"]["clubId"]))
