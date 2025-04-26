@@ -454,10 +454,10 @@ async def fetch_and_display_last5(interaction, club_id):
         return
 
     embed = discord.Embed(
-        title=f"📅 Last 5 Matches",
+        title=f"📅 {selected['clubInfo']['name'].upper()}'s Last 5 Matches",
         color=discord.Color.blue()
     )
-
+    
     for idx, match in enumerate(last_5, 1):
         clubs = match.get("clubs", {})
         club_data = clubs.get(str(club_id))
