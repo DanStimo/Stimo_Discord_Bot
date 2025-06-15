@@ -277,6 +277,34 @@ async def send_temporary_message(destination, content=None, embed=None, view=Non
     except Exception as e:
         print(f"[ERROR] Failed to auto-delete message: {e}")
 
+async def log_command_output(interaction: discord.Interaction, command_name: str, message: discord.Message = None, extra_text: str = None):
+    archive_channel_id = int(os.getenv("ARCHIVE_CHANNEL_ID", "0"))
+    archive_channel = client.get_channel(archive_channel_id)
+
+    if not archive_channel:
+        print(f"[WARN] Archive channel not found for ID {archive_channel_id}")
+        return
+
+    embed = discord.Embed(
+        title=f"📦 Command Archive: /{command_name}",
+        color=discord.Color.dark_grey()
+    )
+    embed.add_field(name="User", value=f"{interaction.user.mention}", inline=False)
+    embed.add_field(name="Used In", value=f"{interaction.channel.mention}", inline=False)
+    embed.add_field(name="Timestamp", value=discord.utils.format_dt(interaction.created_at, style='F'), inline=False)
+
+    if message:
+        if message.embeds:
+            for i, em in enumerate(message.embeds):
+                await archive_channel.send(content=f"📥 `/`{command_name} by {interaction.user.mention} in {interaction.channel.mention}:", embed=em)
+        elif message.content:
+            embed.add_field(name="Output", value=message.content[:1000], inline=False)
+            await archive_channel.send(embed=embed)
+    elif extra_text:
+        embed.add_field(name="Output", value=extra_text[:1000], inline=False)
+        await archive_channel.send(embed=embed)
+
+
 # - THIS IS FOR THE /RECORD COMMAND.
 @tree.command(name="record", description="Show xNever Enoughx's current record.")
 async def record_command(interaction: discord.Interaction):
@@ -300,6 +328,8 @@ async def record_command(interaction: discord.Interaction):
         embed.add_field(name="Recent Form", value=form_string, inline=False)
 
         message = await safe_interaction_respond(interaction, embed=embed)
+        await log_command_output(interaction, "record", message)
+
         if message:
             async def delete_after_timeout():
                 await asyncio.sleep(180)
@@ -519,8 +549,11 @@ async def fetch_and_display_last5(interaction, club_id, club_name="Club", origin
     if original_message:
         await original_message.edit(content=None, embed=embed, view=None)
         asyncio.create_task(delete_after_delay(original_message))
+        await log_command_output(interaction, "last5", original_message)
+
     else:
         message = await interaction.followup.send(embed=embed)
+        await log_command_output(interaction, "last5", message)
         asyncio.create_task(delete_after_delay(message))
 
 
@@ -589,6 +622,7 @@ async def versus_command(interaction: discord.Interaction, club: str):
             
                 view = PrintRecordButton(stats, selected['clubInfo']['name'].upper())
                 message = await interaction.followup.send(embed=embed, view=view)
+                await log_command_output(interaction, "versus", message)
 
                 async def delete_after_timeout():
                     await asyncio.sleep(180)
@@ -726,6 +760,7 @@ async def handle_lastmatch(interaction: discord.Interaction, club: str, from_dro
 
             if from_dropdown and original_message:
                 await original_message.edit(content=None, embed=embed, view=None)
+                await log_command_output(interaction, "lastmatch", original_message)
             
                 async def delete_after_timeout():
                     await asyncio.sleep(180)
@@ -738,6 +773,7 @@ async def handle_lastmatch(interaction: discord.Interaction, club: str, from_dro
             
             else:
                 message = await interaction.followup.send(embed=embed)
+                await log_command_output(interaction, "lastmatch", message)
             
                 async def delete_after_timeout():
                     await asyncio.sleep(180)
@@ -853,6 +889,7 @@ async def top100_command(interaction: discord.Interaction):
             embed = view.get_embed()
 
             message = await interaction.followup.send(embed=embed, view=view)
+            await log_command_output(interaction, "t100", message)
             view.message = message  # Store message for deletion on timeout
 
     except Exception as e:
