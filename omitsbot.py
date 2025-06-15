@@ -304,44 +304,6 @@ async def log_command_output(interaction: discord.Interaction, command_name: str
         embed.add_field(name="Output", value=extra_text[:1000], inline=False)
         await archive_channel.send(embed=embed)
 
-
-# - THIS IS FOR THE /RECORD COMMAND.
-@tree.command(name="record", description="Show xNever Enoughx's current record.")
-async def record_command(interaction: discord.Interaction):
-    stats = await get_club_stats(CLUB_ID)
-    recent_form = await get_recent_form(CLUB_ID)
-    rank = await get_club_rank(CLUB_ID)
-    last_match = await get_last_match(CLUB_ID)
-    form_string = ' '.join(recent_form) if recent_form else "No recent matches found."
-
-    if stats:
-        embed = discord.Embed(title="📊 xNever Enoughx Club Stats", color=0xB30000)
-        embed.add_field(name="Leaderboard Rank", value=f"📈 #{rank}", inline=False)
-        embed.add_field(name="Skill Rating", value=f"🏅 {stats['skillRating']}", inline=False)
-        embed.add_field(name="Matches Played", value=f"📊 {stats['matchesPlayed']}", inline=False)
-        embed.add_field(name="Wins", value=f"✅ {stats['wins']}", inline=False)
-        embed.add_field(name="Draws", value=f"➖ {stats['draws']}", inline=False)
-        embed.add_field(name="Losses", value=f"❌ {stats['losses']}", inline=False)
-        embed.add_field(name="Win Streak", value=f"{stats['winStreak']} {streak_emoji(stats['winStreak'])}", inline=False)
-        embed.add_field(name="Unbeaten Streak", value=f"{stats['unbeatenStreak']} {streak_emoji(stats['unbeatenStreak'])}", inline=False)
-        embed.add_field(name="Last Match", value=last_match, inline=False)
-        embed.add_field(name="Recent Form", value=form_string, inline=False)
-
-        message = await safe_interaction_respond(interaction, embed=embed)
-        await log_command_output(interaction, "record", message)
-
-        if message:
-            async def delete_after_timeout():
-                await asyncio.sleep(180)
-                try:
-                    await message.delete()
-                except Exception as e:
-                    print(f"[ERROR] Failed to auto-delete /record message: {e}")
-
-            asyncio.create_task(delete_after_timeout())
-    else:
-        await safe_interaction_respond(interaction, content="Could not fetch club stats.")
-
 # - THIS IS FOR THE DROPDOWN IF MULTIPLE CLUBS ARE FOUND USING THE VERSUS COMMAND.
 class ClubDropdown(discord.ui.Select):
     def __init__(self, interaction, options, club_data):
@@ -449,6 +411,9 @@ class LastMatchDropdown(discord.ui.Select):
             asyncio.create_task(delete_after_cancel())
             return
 
+        # ✅ Add logging
+        await log_command_output(interaction, "versus", view.message)
+
         chosen = self.values[0]
         selected = next((c for c in self.club_data if str(c['clubInfo']['clubId']) == chosen), None)
         if not selected:
@@ -490,6 +455,9 @@ class Last5Dropdown(discord.ui.Select):
         
             asyncio.create_task(delete_after_cancel())
             return
+
+        # ✅ Add logging
+        await log_command_output(interaction, "versus", view.message)
 
 
         club_name = next((c["clubInfo"]["name"] for c in self.club_data if str(c["clubInfo"]["clubId"]) == chosen), "Club")
