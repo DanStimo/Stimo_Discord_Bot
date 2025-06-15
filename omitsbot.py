@@ -413,6 +413,8 @@ class ClubDropdown(discord.ui.Select):
 
         asyncio.create_task(delete_after_timeout())
 
+        # ✅ Add logging
+        await log_command_output(interaction, "versus", view.message)
 
 class ClubDropdownView(discord.ui.View):
     def __init__(self, interaction, options, club_data):
@@ -889,8 +891,10 @@ async def top100_command(interaction: discord.Interaction):
             embed = view.get_embed()
 
             message = await interaction.followup.send(embed=embed, view=view)
-            await log_command_output(interaction, "t100", message)
             view.message = message  # Store message for deletion on timeout
+
+            # ✅ Add logging
+            await log_command_output(interaction, "versus", view.message)
 
     except Exception as e:
         print(f"[ERROR] Failed to fetch Top 100: {e}")
