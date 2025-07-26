@@ -624,7 +624,7 @@ async def versus_command(interaction: discord.Interaction, club: str):
                 embed.add_field(name="Win Streak", value=f"{stats['winStreak']} {streak_emoji(stats['winStreak'])}", inline=False)
                 embed.add_field(name="Unbeaten Streak", value=f"{stats['unbeatenStreak']} {streak_emoji(stats['unbeatenStreak'])}", inline=False)
                 embed.add_field(name="Last Match", value=last_match, inline=False)
-                embed.add_field(name="Days Since Last Match", value=📅 days_display, inline=False)
+                embed.add_field(name="Days Since Last Match", value=f"📅 days_display", inline=False)
                 embed.add_field(name="Recent Form", value=form_string, inline=False)
             
                 view = PrintRecordButton(stats, selected['clubInfo']['name'].upper())
