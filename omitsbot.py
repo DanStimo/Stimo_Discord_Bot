@@ -379,6 +379,9 @@ class ClubDropdown(discord.ui.Select):
         rank = await get_club_rank(chosen)
         rank_display = f"#{rank}" if isinstance(rank, int) else "Unranked"
         form_string = ' '.join(recent_form) if recent_form else "No recent matches found."
+        days_since_last = await get_days_since_last_match(chosen)
+        days_display = f"🗓️ {days_since_last} day(s) ago" if days_since_last is not None else "🗓️ Unavailable"
+
 
         embed = discord.Embed(
             title=f"📋 {selected['clubInfo']['name'].upper()} Club Stats",
