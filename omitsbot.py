@@ -201,6 +201,40 @@ async def get_club_rank(club_id):
     
     return "Unranked"
 
+from datetime import datetime, timezone
+
+async def get_days_since_last_match(club_id):
+    base_url = "https://proclubs.ea.com/api/fc/clubs/matches"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    match_types = ["leagueMatch", "playoffMatch"]
+    all_matches = []
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            for match_type in match_types:
+                url = f"{base_url}?matchType={match_type}&platform={PLATFORM}&clubIds={club_id}"
+                response = await client.get(url, headers=headers)
+                if response.status_code == 200:
+                    matches = response.json()
+                    all_matches.extend(matches)
+
+        # Sort by most recent
+        all_matches.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
+
+        if not all_matches:
+            return None  # or return a string like "No matches found"
+
+        last_timestamp = all_matches[0].get("timestamp", 0)
+        last_datetime = datetime.fromtimestamp(last_timestamp, tz=timezone.utc)
+        now = datetime.now(timezone.utc)
+
+        delta_days = (now - last_datetime).days
+        return delta_days
+
+    except Exception as e:
+        print(f"[ERROR] Failed to calculate days since last match: {e}")
+        return None
+
 async def get_squad_names(club_id):
     url = f"https://proclubs.ea.com/api/fc/club/members?platform={PLATFORM}&clubId={club_id}"
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -571,6 +605,8 @@ async def versus_command(interaction: discord.Interaction, club: str):
                 stats = await get_club_stats(opponent_id)
                 recent_form = await get_recent_form(opponent_id)
                 last_match = await get_last_match(opponent_id)
+                days_since_last = await get_days_since_last_match(opponent_id)
+                days_display = f"{days_since_last} day(s) ago" if days_since_last is not None else "Unavailable"
                 rank = await get_club_rank(opponent_id)
                 rank_display = f"#{rank}" if isinstance(rank, int) else "Unranked"
                 form_string = ' '.join(recent_form) if recent_form else "No recent matches found."
@@ -588,6 +624,7 @@ async def versus_command(interaction: discord.Interaction, club: str):
                 embed.add_field(name="Win Streak", value=f"{stats['winStreak']} {streak_emoji(stats['winStreak'])}", inline=False)
                 embed.add_field(name="Unbeaten Streak", value=f"{stats['unbeatenStreak']} {streak_emoji(stats['unbeatenStreak'])}", inline=False)
                 embed.add_field(name="Last Match", value=last_match, inline=False)
+                embed.add_field(name="Days Since Last Match", value=days_display, inline=False)
                 embed.add_field(name="Recent Form", value=form_string, inline=False)
             
                 view = PrintRecordButton(stats, selected['clubInfo']['name'].upper())
