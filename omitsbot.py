@@ -7,15 +7,83 @@ import os
 import random
 import asyncio
 from dotenv import load_dotenv
+from datetime import datetime, timezone
 load_dotenv()
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 CLUB_ID = os.getenv("CLUB_ID", "167054")  # fallback/default
 PLATFORM = os.getenv("PLATFORM", "common-gen5")
 
+# --- Intents ---
 intents = discord.Intents.default()
+intents.members = True  # ✅ REQUIRED for on_member_join
 client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
+
+# === Welcome Feature ===
+# Config (env support + runtime updates via slash commands)
+WELCOME_CHANNEL_ID = int(os.getenv("WELCOME_CHANNEL_ID", "0"))   # e.g. 123456789012345678
+WELCOME_COLOR_HEX = os.getenv("WELCOME_COLOR_HEX", "#2ecc71")    # hex color
+
+welcome_config = {
+    "channel_id": WELCOME_CHANNEL_ID,
+    "color_hex": WELCOME_COLOR_HEX,
+}
+
+def _color_from_hex(h: str) -> discord.Color:
+    h = (h or "#2ecc71").strip().lstrip("#")
+    return discord.Color(int(h, 16))
+
+@client.event
+async def on_member_join(member: discord.Member):
+    """Send a tagged, colored welcome embed into the configured channel."""
+    channel_id = welcome_config.get("channel_id", 0)
+    if not channel_id:
+        return  # not configured yet
+
+    try:
+        channel = member.guild.get_channel(channel_id) or await member.guild.fetch_channel(channel_id)
+    except Exception as e:
+        print(f"[ERROR] Welcome channel fetch failed: {e}")
+        return
+
+    if not isinstance(channel, (discord.TextChannel, discord.Thread, discord.ForumChannel)):
+        return
+
+    embed = discord.Embed(
+        title="Welcome aboard! 🎉",
+        description=(
+            f"{member.mention}, great to have you in **{member.guild.name}**!\n\n"
+            "• Read the rules: <#YOUR_RULES_CHANNEL_ID>\n"
+            "• Grab roles: <#YOUR_ROLES_CHANNEL_ID>\n"
+            "• Say hi in <#YOUR_CHAT_CHANNEL_ID> 👋"
+        ),
+        color=_color_from_hex(welcome_config.get("color_hex")),
+    )
+    embed.set_thumbnail(url=member.display_avatar.url)
+    embed.set_footer(text=f"Member #{member.guild.member_count}")
+
+    try:
+        await channel.send(content=member.mention, embed=embed)
+    except Exception as e:
+        print(f"[ERROR] Failed to send welcome embed: {e}")
+
+@tree.command(name="setwelcomechannel", description="Set the channel for welcome messages")
+@app_commands.checks.has_permissions(manage_guild=True)
+async def setwelcomechannel(interaction: discord.Interaction, channel: discord.TextChannel):
+    welcome_config["channel_id"] = channel.id
+    await interaction.response.send_message(f"✅ Welcome channel set to {channel.mention}", ephemeral=True)
+
+@tree.command(name="setwelcomecolor", description="Set the welcome embed color (hex like #5865F2)")
+@app_commands.checks.has_permissions(manage_guild=True)
+async def setwelcomecolor(interaction: discord.Interaction, hex_color: str):
+    try:
+        _ = _color_from_hex(hex_color)
+        welcome_config["color_hex"] = hex_color
+        await interaction.response.send_message(f"✅ Welcome color set to `{hex_color}`", ephemeral=True)
+    except Exception:
+        await interaction.response.send_message("❌ Please provide a valid hex color like `#2ecc71`.", ephemeral=True)
+# === End Welcome Feature ===
 
 # Load or initialize club mapping
 try:
@@ -73,8 +141,8 @@ async def get_club_stats(club_id):
     url = f"https://proclubs.ea.com/api/fc/clubs/overallStats?platform={PLATFORM}&clubIds={club_id}"
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.get(url, headers=headers)
+        async with httpx.AsyncClient(timeout=10) as client_http:
+            response = await client_http.get(url, headers=headers)
             if response.status_code == 200:
                 data = response.json()
                 if isinstance(data, list) and len(data) > 0:
@@ -99,10 +167,10 @@ async def get_recent_form(club_id):
     all_matches = []
 
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=10) as client_http:
             for match_type in match_types:
                 url = f"{base_url}?matchType={match_type}&platform={PLATFORM}&clubIds={club_id}"
-                response = await client.get(url, headers=headers)
+                response = await client_http.get(url, headers=headers)
                 if response.status_code == 200:
                     matches = response.json()
                     all_matches.extend(matches)
@@ -143,10 +211,10 @@ async def get_last_match(club_id):
     all_matches = []
 
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=10) as client_http:
             for match_type in match_types:
                 url = f"{base_url}?matchType={match_type}&platform={PLATFORM}&clubIds={club_id}"
-                response = await client.get(url, headers=headers)
+                response = await client_http.get(url, headers=headers)
                 if response.status_code == 200:
                     matches = response.json()
                     all_matches.extend(matches)
@@ -187,8 +255,8 @@ async def get_club_rank(club_id):
     headers = {"User-Agent": "Mozilla/5.0"}
     
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            response = await client.get(url, headers=headers)
+        async with httpx.AsyncClient(timeout=15) as client_http:
+            response = await client_http.get(url, headers=headers)
             if response.status_code == 200:
                 leaderboard = response.json()
                 for club in leaderboard:
@@ -201,8 +269,6 @@ async def get_club_rank(club_id):
     
     return "Unranked"
 
-from datetime import datetime, timezone
-
 async def get_days_since_last_match(club_id):
     base_url = "https://proclubs.ea.com/api/fc/clubs/matches"
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -210,10 +276,10 @@ async def get_days_since_last_match(club_id):
     all_matches = []
 
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=10) as client_http:
             for match_type in match_types:
                 url = f"{base_url}?matchType={match_type}&platform={PLATFORM}&clubIds={club_id}"
-                response = await client.get(url, headers=headers)
+                response = await client_http.get(url, headers=headers)
                 if response.status_code == 200:
                     matches = response.json()
                     all_matches.extend(matches)
@@ -239,8 +305,8 @@ async def get_squad_names(club_id):
     url = f"https://proclubs.ea.com/api/fc/club/members?platform={PLATFORM}&clubId={club_id}"
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.get(url, headers=headers)
+        async with httpx.AsyncClient(timeout=10) as client_http:
+            response = await client_http.get(url, headers=headers)
             if response.status_code == 200:
                 data = response.json()
                 members = data.get("members", [])
@@ -449,8 +515,8 @@ class LastMatchDropdown(discord.ui.Select):
             asyncio.create_task(delete_after_cancel())
             return
 
-        # ✅ Add logging
-        await log_command_output(interaction, "versus", view.message)
+        # NOTE: The original code referenced 'view.message' here, which doesn't exist in this scope.
+        # Logging will occur after the new message is sent by handle_lastmatch.
 
         chosen = self.values[0]
         selected = next((c for c in self.club_data if str(c['clubInfo']['clubId']) == chosen), None)
@@ -494,9 +560,8 @@ class Last5Dropdown(discord.ui.Select):
             asyncio.create_task(delete_after_cancel())
             return
 
-        # ✅ Add logging
-        await log_command_output(interaction, "versus", view.message)
-
+        # NOTE: The original code referenced 'view.message' here, which doesn't exist in this scope.
+        # Logging will occur inside fetch_and_display_last5.
 
         club_name = next((c["clubInfo"]["name"] for c in self.club_data if str(c["clubInfo"]["clubId"]) == chosen), "Club")
         await fetch_and_display_last5(interaction, chosen, club_name, original_message=interaction.message)
@@ -512,10 +577,10 @@ async def fetch_and_display_last5(interaction, club_id, club_name="Club", origin
     match_types = ["leagueMatch", "playoffMatch"]
     matches = []
 
-    async with httpx.AsyncClient(timeout=10) as client:
+    async with httpx.AsyncClient(timeout=10) as client_http:
         for match_type in match_types:
             url = f"{base_url}?matchType={match_type}&platform={PLATFORM}&clubIds={club_id}"
-            response = await client.get(url, headers=headers)
+            response = await client_http.get(url, headers=headers)
             if response.status_code == 200:
                 matches.extend(response.json())
 
@@ -581,11 +646,11 @@ async def versus_command(interaction: discord.Interaction, club: str):
     await interaction.response.defer(ephemeral=False)
     headers = {"User-Agent": "Mozilla/5.0"}
 
-    async with httpx.AsyncClient(timeout=10) as client:
+    async with httpx.AsyncClient(timeout=10) as client_http:
         try:
             encoded_name = club.replace(" ", "%20")
             search_url = f"https://proclubs.ea.com/api/fc/allTimeLeaderboard/search?platform={PLATFORM}&clubName={encoded_name}"
-            search_response = await client.get(search_url, headers=headers)
+            search_response = await client_http.get(search_url, headers=headers)
 
             if search_response.status_code != 200:
                 await send_temporary_message(interaction.followup, content="Club not found or EA API failed.")
@@ -677,13 +742,13 @@ async def handle_lastmatch(interaction: discord.Interaction, club: str, from_dro
     
     headers = {"User-Agent": "Mozilla/5.0"}
    
-    async with httpx.AsyncClient(timeout=10) as client:
+    async with httpx.AsyncClient(timeout=10) as client_http:
         try:
             if club.isdigit():
                 club_id = club
             else:
                 search_url = f"https://proclubs.ea.com/api/fc/allTimeLeaderboard/search?platform={PLATFORM}&clubName={club.replace(' ', '%20')}"
-                search_response = await client.get(search_url, headers=headers)
+                search_response = await client_http.get(search_url, headers=headers)
 
                 if search_response.status_code != 200:
                     await send_temporary_message(interaction.followup, content="Club not found or EA API failed.")
@@ -719,7 +784,7 @@ async def handle_lastmatch(interaction: discord.Interaction, club: str, from_dro
 
             for match_type in match_types:
                 url = f"{base_url}?matchType={match_type}&platform={PLATFORM}&clubIds={club_id}"
-                response = await client.get(url, headers=headers)
+                response = await client_http.get(url, headers=headers)
                 if response.status_code == 200:
                     matches.extend(response.json())
 
@@ -882,8 +947,8 @@ async def top100_command(interaction: discord.Interaction):
     headers = {"User-Agent": "Mozilla/5.0"}
 
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            response = await client.get(url, headers=headers)
+        async with httpx.AsyncClient(timeout=15) as client_http:
+            response = await client_http.get(url, headers=headers)
             if response.status_code != 200:
                 await interaction.followup.send("⚠️ Failed to fetch the leaderboard from EA.")
                 return
@@ -916,13 +981,13 @@ async def last5_command(interaction: discord.Interaction, club: str):
     await interaction.response.defer()
     headers = {"User-Agent": "Mozilla/5.0"}
 
-    async with httpx.AsyncClient(timeout=10) as client:
+    async with httpx.AsyncClient(timeout=10) as client_http:
         if club.isdigit():
             await fetch_and_display_last5(interaction, club, "Club")
             return
 
         search_url = f"https://proclubs.ea.com/api/fc/allTimeLeaderboard/search?platform={PLATFORM}&clubName={club.replace(' ', '%20')}"
-        response = await client.get(search_url, headers=headers)
+        response = await client_http.get(search_url, headers=headers)
 
         if response.status_code != 200:
             await interaction.followup.send("Club not found or EA API failed.")
