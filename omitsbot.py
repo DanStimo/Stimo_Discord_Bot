@@ -79,7 +79,7 @@ async def on_member_join(member: discord.Member):
         message = await channel.send(content=member.mention, embed=embed)
     
         # ✅ react with a custom emoji from the same server
-        emoji = discord.utils.get(member.guild.emojis, name=":Wave:")
+        emoji = discord.utils.get(member.guild.emojis, name="Wave")
         if emoji:
             await message.add_reaction(emoji)
         else:
