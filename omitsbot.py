@@ -334,32 +334,78 @@ async def get_squad_names(club_id):
     return []
 
 async def rotate_presence():
+    """Rotate presence by 'watching' a random member with a target role."""
     await client.wait_until_ready()
-    github_url = "https://raw.githubusercontent.com/DanStimo/Stimo_Discord_Bot/master/omitS_Squad.txt"
+
+    # Read config
+    guild_id = int(os.getenv("GUILD_ID", "0"))
+    role_id = int(os.getenv("WATCH_ROLE_ID", "0"))
+    role_name = os.getenv("WATCH_ROLE_NAME")  # optional fallback
+
+    if not guild_id:
+        print("[WARN] GUILD_ID not set – cannot rotate presence by role.")
+        return
+
+    # Get guild
+    guild = client.get_guild(guild_id)
+    if guild is None:
+        try:
+            guild = await client.fetch_guild(guild_id)
+        except Exception as e:
+            print(f"[ERROR] Could not fetch guild {guild_id}: {e}")
+            return
+
+    # Make sure we have a full member cache (needs Server Members Intent ON in portal)
+    try:
+        # fetch all members to ensure role.members is accurate
+        await guild.fetch_members(limit=None).flatten()
+    except AttributeError:
+        # discord.py 2.x: fetch_members returns an async iterator; no .flatten()
+        try:
+            async for _ in guild.fetch_members(limit=None):
+                pass
+        except Exception as e:
+            print(f"[WARN] Could not fully fetch members: {e}")
+    except Exception as e:
+        print(f"[WARN] Could not fully fetch members: {e}")
+
+    def get_candidates() -> list[discord.Member]:
+        # Resolve role (ID preferred)
+        role = None
+        if role_id:
+            role = guild.get_role(role_id)
+        if role is None and role_name:
+            role = discord.utils.get(guild.roles, name=role_name)
+
+        if role is None:
+            print("[WARN] Target role not found; presence rotation will skip.")
+            return []
+
+        # Filter: in this guild, has role, not a bot
+        members = [m for m in role.members if not m.bot]
+        return members
 
     while not client.is_closed():
         try:
-            async with httpx.AsyncClient(timeout=10) as http:
-                response = await http.get(github_url)
-                if response.status_code == 200:
-                    lines = response.text.strip().splitlines()
-                    valid_names = [line.strip() for line in lines if line.strip()]
+            candidates = get_candidates()
 
-                    if valid_names:
-                        gamertag = random.choice(valid_names)
-                        activity = discord.Activity(
-                            type=discord.ActivityType.watching,
-                            name=f"{gamertag} 👀"
-                        )
-                        await client.change_presence(activity=activity)
-                    else:
-                        print("[ERROR] Squad file is empty or badly formatted.")
-                else:
-                    print(f"[ERROR] GitHub file fetch failed: {response.status_code}")
+            if candidates:
+                pick = random.choice(candidates)
+                watching_text = f"{pick.display_name} 👀"
+            else:
+                # Fallback text if no eligible members
+                watching_text = "the club 👀"
+
+            activity = discord.Activity(
+                type=discord.ActivityType.watching,
+                name=watching_text
+            )
+            await client.change_presence(activity=activity)
+
         except Exception as e:
             print(f"[ERROR] Failed to rotate presence: {e}")
 
-        await asyncio.sleep(300)  # 5 minutes
+        await asyncio.sleep(300)  # every 5 minutes
 
 async def safe_interaction_edit(interaction, embed, view):
     try:
