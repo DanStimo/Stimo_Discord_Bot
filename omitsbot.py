@@ -51,7 +51,7 @@ async def on_member_join(member: discord.Member):
         return
 
     embed = discord.Embed(
-        title="Welcome aboard! <:Cheer:1369395430210801785>",
+        title="Welcome aboard! <a:stimoWiggle:1409891991969333309>",
         description=(
             f"{member.mention}, you've reached Stimo's Discord server!\n\n"
             "• **Read the rules:** <#1362311374293958856>\n"
