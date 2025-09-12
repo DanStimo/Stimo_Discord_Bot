@@ -62,6 +62,12 @@ async def on_member_join(member: discord.Member):
         timestamp=datetime.now(timezone.utc)  # adds timestamp at bottom
     )
 
+    # ✅ Author section (user who joined + their avatar)
+    embed.set_author(
+        name=f"{member.display_name} has arrived!",
+        icon_url=member.display_avatar.url
+    )
+
     # Thumbnail (right side): guild icon if available; otherwise the new member’s avatar
     if member.guild.icon:
         embed.set_thumbnail(url=member.guild.icon.url)
@@ -87,7 +93,6 @@ async def on_member_join(member: discord.Member):
     
     except Exception as e:
         print(f"[ERROR] Failed to send welcome embed or add reaction: {e}")
-
 
 @tree.command(name="setwelcomechannel", description="Set the channel for welcome messages")
 @app_commands.checks.has_permissions(manage_guild=True)
