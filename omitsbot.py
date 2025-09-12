@@ -75,10 +75,19 @@ async def on_member_join(member: discord.Member):
     )
 
     try:
-        # keep outside tag so the user gets pinged
-        await channel.send(content=member.mention, embed=embed)
+        # send the welcome message (still tags outside embed)
+        message = await channel.send(content=member.mention, embed=embed)
+    
+        # ✅ react with a custom emoji from the same server
+        emoji = discord.utils.get(member.guild.emojis, name=":Wave:")
+        if emoji:
+            await message.add_reaction(emoji)
+        else:
+            print("[WARN] Could not find the emoji by name in this server")
+    
     except Exception as e:
-        print(f"[ERROR] Failed to send welcome embed: {e}")
+        print(f"[ERROR] Failed to send welcome embed or add reaction: {e}")
+
 
 @tree.command(name="setwelcomechannel", description="Set the channel for welcome messages")
 @app_commands.checks.has_permissions(manage_guild=True)
