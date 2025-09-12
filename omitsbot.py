@@ -1,190 +1,3 @@
-import discord
-from discord import app_commands
-import httpx
-import json
-from fuzzywuzzy import process, fuzz
-import os
-import random
-import asyncio
-from dotenv import load_dotenv
-from datetime import datetime, timezone
-load_dotenv()
-
-TOKEN = os.getenv("DISCORD_TOKEN")
-CLUB_ID = os.getenv("CLUB_ID", "167054")  # fallback/default
-PLATFORM = os.getenv("PLATFORM", "common-gen5")
-
-# --- Intents ---
-intents = discord.Intents.default()
-intents.members = True  # ✅ REQUIRED for on_member_join
-client = discord.Client(intents=intents)
-tree = app_commands.CommandTree(client)
-
-# === Welcome Feature ===
-# Config (env support + runtime updates via slash commands)
-WELCOME_CHANNEL_ID = int(os.getenv("WELCOME_CHANNEL_ID", "0"))   # e.g. 123456789012345678
-WELCOME_COLOR_HEX = os.getenv("WELCOME_COLOR_HEX", "#2ecc71")    # hex color
-
-welcome_config = {
-    "channel_id": WELCOME_CHANNEL_ID,
-    "color_hex": WELCOME_COLOR_HEX,
-}
-
-def _color_from_hex(h: str) -> discord.Color:
-    h = (h or "#2ecc71").strip().lstrip("#")
-    return discord.Color(int(h, 16))
-
-@client.event
-async def on_member_join(member: discord.Member):
-    """Send a tagged, colored welcome embed into the configured channel."""
-    channel_id = welcome_config.get("channel_id", 0)
-    if not channel_id:
-        return  # not configured yet
-
-    try:
-        channel = member.guild.get_channel(channel_id) or await member.guild.fetch_channel(channel_id)
-    except Exception as e:
-        print(f"[ERROR] Welcome channel fetch failed: {e}")
-        return
-
-    if not isinstance(channel, (discord.TextChannel, discord.Thread, discord.ForumChannel)):
-        return
-
-    embed = discord.Embed(
-        title="Welcome aboard! 🎉",
-        description=(
-            f"{member.mention}, great to have you in **{member.guild.name}**!\n\n"
-            "• Read the rules: <#YOUR_RULES_CHANNEL_ID>\n"
-            "• Grab roles: <#YOUR_ROLES_CHANNEL_ID>\n"
-            "• Say hi in <#YOUR_CHAT_CHANNEL_ID> 👋"
-        ),
-        color=_color_from_hex(welcome_config.get("color_hex")),
-    )
-    embed.set_thumbnail(url=member.display_avatar.url)
-    embed.set_footer(text=f"Member #{member.guild.member_count}")
-
-    try:
-        await channel.send(content=member.mention, embed=embed)
-    except Exception as e:
-        print(f"[ERROR] Failed to send welcome embed: {e}")
-
-@tree.command(name="setwelcomechannel", description="Set the channel for welcome messages")
-@app_commands.checks.has_permissions(manage_guild=True)
-async def setwelcomechannel(interaction: discord.Interaction, channel: discord.TextChannel):
-    welcome_config["channel_id"] = channel.id
-    await interaction.response.send_message(f"✅ Welcome channel set to {channel.mention}", ephemeral=True)
-
-@tree.command(name="setwelcomecolor", description="Set the welcome embed color (hex like #5865F2)")
-@app_commands.checks.has_permissions(manage_guild=True)
-async def setwelcomecolor(interaction: discord.Interaction, hex_color: str):
-    try:
-        _ = _color_from_hex(hex_color)
-        welcome_config["color_hex"] = hex_color
-        await interaction.response.send_message(f"✅ Welcome color set to `{hex_color}`", ephemeral=True)
-    except Exception:
-        await interaction.response.send_message("❌ Please provide a valid hex color like `#2ecc71`.", ephemeral=True)
-# === End Welcome Feature ===
-
-# Load or initialize club mapping
-try:
-    with open('club_mapping.json', 'r') as f:
-        club_mapping = json.load(f)
-except FileNotFoundError:
-    club_mapping = {}
-
-def normalize(name):
-    return ''.join(name.lower().split())
-
-def streak_emoji(value):
-    try:
-        value = int(value)
-        if value <= 5:
-            return "❄️"
-        elif value <= 9:
-            return "🔥"
-        elif value <= 19:
-            return "🔥🔥"
-        else:
-            return "🔥🔥🔥"
-    except:
-        return "❓"
-
-class PrintRecordButton(discord.ui.View):
-    def __init__(self, stats, club_name):
-        super().__init__(timeout=900)  # 15 minutes
-        self.stats = stats
-        self.club_name = club_name
-        self.message = None  # store the original message
-
-    @discord.ui.button(label="🖨️ Print Record", style=discord.ButtonStyle.primary)
-    async def print_record(self, interaction: discord.Interaction, button: discord.ui.Button):
-        wins = self.stats.get("wins", "N/A")
-        draws = self.stats.get("draws", "N/A")
-        losses = self.stats.get("losses", "N/A")
-
-        embed = discord.Embed(
-            title=f"{self.club_name} W-D-L Record",
-            description=f"**{wins}** Wins | **{draws}** Draws | **{losses}** Losses",
-            color=0xB30000
-        )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-
-    async def on_timeout(self):
-        # After timeout, remove the view (i.e., the button)
-        if self.message:
-            try:
-                await self.message.edit(view=None)
-            except Exception as e:
-                print(f"[ERROR] Failed to remove view after timeout: {e}")
-
-async def get_club_stats(club_id):
-    url = f"https://proclubs.ea.com/api/fc/clubs/overallStats?platform={PLATFORM}&clubIds={club_id}"
-    headers = {"User-Agent": "Mozilla/5.0"}
-    try:
-        async with httpx.AsyncClient(timeout=10) as client_http:
-            response = await client_http.get(url, headers=headers)
-            if response.status_code == 200:
-                data = response.json()
-                if isinstance(data, list) and len(data) > 0:
-                    club = data[0]
-                    return {
-                        "matchesPlayed": club.get("gamesPlayed", "N/A"),
-                        "wins": club.get("wins", "N/A"),
-                        "draws": club.get("ties", "N/A"),
-                        "losses": club.get("losses", "N/A"),
-                        "winStreak": club.get("wstreak", "0"),
-                        "unbeatenStreak": club.get("unbeatenstreak", "0"),
-                        "skillRating": club.get("skillRating", "N/A")
-                    }
-    except Exception as e:
-        print(f"Error fetching club stats: {e}")
-    return None
-
-async def get_recent_form(club_id):
-    base_url = "https://proclubs.ea.com/api/fc/clubs/matches"
-    headers = {"User-Agent": "Mozilla/5.0"}
-    match_types = ["leagueMatch", "playoffMatch"]
-    all_matches = []
-
-    try:
-        async with httpx.AsyncClient(timeout=10) as client_http:
-            for match_type in match_types:
-                url = f"{base_url}?matchType={match_type}&platform={PLATFORM}&clubIds={club_id}"
-                response = await client_http.get(url, headers=headers)
-                if response.status_code == 200:
-                    matches = response.json()
-                    all_matches.extend(matches)
-
-        # Sort by match timestamp (most recent first)
-        all_matches.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
-
-        results = []
-        for match in all_matches[:5]:
-            clubs_data = match.get("clubs", {})
-            club_data = clubs_data.get(str(club_id))
-            opponent_id = next((cid for cid in clubs_data if cid != str(club_id)), None)
-            opponent_data = clubs_data.get(opponent_id) if opponent_id else None
-
             if not club_data or not opponent_data:
                 continue
 
@@ -448,7 +261,6 @@ class ClubDropdown(discord.ui.Select):
         days_since_last = await get_days_since_last_match(chosen)
         days_display = f"🗓️ {days_since_last} day(s) ago" if days_since_last is not None else "🗓️ Unavailable"
 
-
         embed = discord.Embed(
             title=f"📋 {selected['clubInfo']['name'].upper()} Club Stats",
             color=0xB30000
@@ -469,7 +281,6 @@ class ClubDropdown(discord.ui.Select):
         view = PrintRecordButton(stats, selected['clubInfo']['name'].upper())
         view.message = await interaction.message.edit(content=None, embed=embed, view=view)
 
-        # 🧹 Auto-delete the message after 60 seconds
         async def delete_after_timeout():
             try:
                 await asyncio.sleep(180)
@@ -515,9 +326,6 @@ class LastMatchDropdown(discord.ui.Select):
             asyncio.create_task(delete_after_cancel())
             return
 
-        # NOTE: The original code referenced 'view.message' here, which doesn't exist in this scope.
-        # Logging will occur after the new message is sent by handle_lastmatch.
-
         chosen = self.values[0]
         selected = next((c for c in self.club_data if str(c['clubInfo']['clubId']) == chosen), None)
         if not selected:
@@ -559,9 +367,6 @@ class Last5Dropdown(discord.ui.Select):
         
             asyncio.create_task(delete_after_cancel())
             return
-
-        # NOTE: The original code referenced 'view.message' here, which doesn't exist in this scope.
-        # Logging will occur inside fetch_and_display_last5.
 
         club_name = next((c["clubInfo"]["name"] for c in self.club_data if str(c["clubInfo"]["clubId"]) == chosen), "Club")
         await fetch_and_display_last5(interaction, chosen, club_name, original_message=interaction.message)
@@ -710,7 +515,6 @@ async def versus_command(interaction: discord.Interaction, club: str):
                 asyncio.create_task(delete_after_timeout())
 
                 return
-
 
             # Build options from top 25
             options = [
