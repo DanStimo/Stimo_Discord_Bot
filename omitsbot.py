@@ -51,12 +51,12 @@ async def on_member_join(member: discord.Member):
         return
 
     embed = discord.Embed(
-        title="Welcome aboard! 🎉",
+        title="Welcome aboard! <:Cheer:1369395430210801785>",
         description=(
-            f"{member.mention}, great to have you in **{member.guild.name}**!\n\n"
-            "• Read the rules: <#YOUR_RULES_CHANNEL_ID>\n"
-            "• Grab roles: <#YOUR_ROLES_CHANNEL_ID>\n"
-            "• Say hi in <#YOUR_CHAT_CHANNEL_ID> 👋"
+            f"{member.mention}, you've reached Stimo's Discord server!\n\n"
+            "• **Read the rules:** <#1362311374293958856>\n"
+            "• **Grab roles:** <#1361921570104283186>\n"
+            "• **Say hi!:** <#1361690632392933527> 👋"
         ),
         color=_color_from_hex(welcome_config.get("color_hex")),
         timestamp=datetime.now(timezone.utc)  # adds timestamp at bottom
