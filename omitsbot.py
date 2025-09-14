@@ -1222,7 +1222,7 @@ async def createfromtemplate_command(interaction: discord.Interaction, template_
         await safe_interaction_respond(interaction, content="❌ You do not have permission to create events.", ephemeral=True)
         return
 
-    key = template_name.strip()
+   key = template_name.strip()
    tpl = templates_store.get(key)
     if not tpl:
         await safe_interaction_respond(interaction, content="❌ Template not found.", ephemeral=True)
