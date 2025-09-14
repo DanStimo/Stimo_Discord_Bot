@@ -100,7 +100,7 @@ async def on_member_join(member: discord.Member):
 @app_commands.checks.has_permissions(manage_guild=True)
 async def setwelcomechannel(interaction: discord.Interaction, channel: discord.TextChannel):
     welcome_config["channel_id"] = channel.id
-    await interaction.response.send_message(f"✅ Welcome channel set to {channel.mention}", ephemeral=True)
+    await safe_interaction_respond(interaction, content=f"✅ Welcome channel set to {channel.mention}", ephemeral=True)
 
 @tree.command(name="setwelcomecolor", description="Set the welcome embed color (hex like #5865F2)")
 @app_commands.checks.has_permissions(manage_guild=True)
@@ -108,10 +108,10 @@ async def setwelcomecolor(interaction: discord.Interaction, hex_color: str):
     try:
         _ = _color_from_hex(hex_color)
         welcome_config["color_hex"] = hex_color
-        await interaction.response.send_message(f"✅ Welcome color set to `{hex_color}`", ephemeral=True)
+        await safe_interaction_respond(interaction, content=f"✅ Welcome color set to `{hex_color}`", ephemeral=True)
     except Exception:
-        await interaction.response.send_message("❌ Please provide a valid hex color like `#2ecc71`.", ephemeral=True)
-
+        await safe_interaction_respond(interaction, content="❌ Please provide a valid hex color like `#2ecc71`.", ephemeral=True)
+        
 # Load or initialize club mapping
 try:
     with open('club_mapping.json', 'r') as f:
@@ -1153,16 +1153,16 @@ def save_templates_store():
 async def createtemplate_command(interaction: discord.Interaction, template_name: str, event_name: str, description: str, channel: discord.TextChannel = None):
     member = interaction.user
     if not user_can_create_events(member):
-        await interaction.response.send_message("❌ You do not have permission to create templates.", ephemeral=True)
+        await safe_interaction_respond(interaction, content="❌ You do not have permission to create templates.", ephemeral=True)
         return
 
     key = template_name.strip()
     if not key:
-        await interaction.response.send_message("❌ Template name cannot be empty.", ephemeral=True)
+        await safe_interaction_respond(interaction, content="❌ Template name cannot be empty.", ephemeral=True)
         return
 
     if key in templates_store:
-        await interaction.response.send_message("❌ A template with that name already exists. Delete it first or choose another name.", ephemeral=True)
+        await safe_interaction_respond(interaction, content="❌ A template with that name already exists. Delete it first or choose another name.", ephemeral=True)
         return
 
     templates_store[key] = {
@@ -1173,12 +1173,12 @@ async def createtemplate_command(interaction: discord.Interaction, template_name
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     save_templates_store()
-    await interaction.response.send_message(f"✅ Template `{key}` created.", ephemeral=True)
+    await safe_interaction_respond(interaction, content=f"✅ Template `{key}` created.", ephemeral=True)
 
 @tree.command(name="listtemplates", description="List saved event templates.")
 async def listtemplates_command(interaction: discord.Interaction):
     if not templates_store:
-        await interaction.response.send_message("No templates saved.", ephemeral=True)
+        await safe_interaction_respond(interaction, content="No templates saved.", ephemeral=True)
         return
 
     lines = []
@@ -1186,24 +1186,28 @@ async def listtemplates_command(interaction: discord.Interaction):
         channel_part = f" • Channel: <#{t['channel_id']}>" if t.get("channel_id") else ""
         lines.append(f"**{k}** — {t.get('name')} {channel_part}\n{t.get('description')[:150]}")
     text = "\n\n".join(lines)
-    await interaction.response.send_message(embed=discord.Embed(title="Saved Templates", description=text, color=discord.Color.blue()), ephemeral=True)
+    await safe_interaction_respond(
+        interaction,
+        embed=discord.Embed(title="Saved Templates", description=text, color=discord.Color.blue()),
+        ephemeral=True
+    )
 
 @tree.command(name="deletetemplate", description="Delete a saved template (Moderator role required).")
 @app_commands.describe(template_name="Name of template to delete")
 async def deletetemplate_command(interaction: discord.Interaction, template_name: str):
     member = interaction.user
     if not user_can_create_events(member):
-        await interaction.response.send_message("❌ You do not have permission to delete templates.", ephemeral=True)
+        await safe_interaction_respond(interaction, content="❌ You do not have permission to delete templates.", ephemeral=True)
         return
 
     key = template_name.strip()
     if key not in templates_store:
-        await interaction.response.send_message("❌ Template not found.", ephemeral=True)
+        await safe_interaction_respond(interaction, content="❌ Template not found.", ephemeral=True)
         return
 
     templates_store.pop(key, None)
     save_templates_store()
-    await interaction.response.send_message(f"✅ Template `{key}` deleted.", ephemeral=True)
+    await safe_interaction_respond(interaction, content=f"✅ Template `{key}` deleted.", ephemeral=True)
 
 # -------------------------
 # Event creation from template
@@ -1211,15 +1215,16 @@ async def deletetemplate_command(interaction: discord.Interaction, template_name
 @tree.command(name="createfromtemplate", description="Create an event from a saved template (Moderator role required).")
 @app_commands.describe(template_name="Template to use", date="Date (DD-MM-YYYY) — local to Europe/London", time="Time (HH:MM 24-hour) — local to Europe/London", channel="Optional channel to post the event in (defaults to template channel or current channel)")
 async def createfromtemplate_command(interaction: discord.Interaction, template_name: str, date: str, time: str, channel: discord.TextChannel = None):
+    await interaction.response.defer(ephemeral=True)  # ← add this line
     member = interaction.user
     if not user_can_create_events(member):
-        await interaction.response.send_message("❌ You do not have permission to create events.", ephemeral=True)
+        await safe_interaction_respond(interaction, content="❌ You do not have permission to create events.", ephemeral=True)
         return
 
     key = template_name.strip()
     tpl = templates_store.get(key)
     if not tpl:
-        await interaction.response.send_message("❌ Template not found.", ephemeral=True)
+        await safe_interaction_respond(interaction, content="❌ Template not found.", ephemeral=True)
         return
 
     # parse date/time DD-MM-YYYY
@@ -1228,7 +1233,7 @@ async def createfromtemplate_command(interaction: discord.Interaction, template_
         dt_local = dt_local_naive.replace(tzinfo=DEFAULT_TZ)
         dt_utc = dt_local.astimezone(timezone.utc)
     except Exception:
-        await interaction.response.send_message("❌ Invalid date/time format. Please use `DD-MM-YYYY` for date and `HH:MM` (24-hour) for time.", ephemeral=True)
+        await safe_interaction_respond(interaction, content="❌ Invalid date/time format. Please use `DD-MM-YYYY` for date and `HH:MM` (24-hour) for time.", ephemeral=True)
         return
 
     target_channel = None
@@ -1242,7 +1247,7 @@ async def createfromtemplate_command(interaction: discord.Interaction, template_
     target_channel = target_channel or interaction.channel
 
     if not isinstance(target_channel, (discord.TextChannel, discord.Thread)):
-        await interaction.response.send_message("❌ Please specify a valid text channel.", ephemeral=True)
+        await safe_interaction_respond(interaction, content="❌ Please specify a valid text channel.", ephemeral=True)
         return
 
     eid = events_store.get("next_id", 1)
@@ -1286,7 +1291,7 @@ async def createfromtemplate_command(interaction: discord.Interaction, template_
             print(f"[WARN] Could not create thread for event {eid}: {te}")
 
     except Exception as e:
-        await interaction.response.send_message(f"❌ Failed to post event: {e}", ephemeral=True)
+        await safe_interaction_respond(interaction, content=f"❌ Failed to post event: {e}", ephemeral=True)
         return
 
     ev["message_id"] = sent.id
@@ -1308,12 +1313,13 @@ async def createfromtemplate_command(interaction: discord.Interaction, template_
     channel="Channel to post the event in (optional, defaults to current channel)"
 )
 async def createevent_command(interaction: discord.Interaction, name: str, description: str, date: str, time: str, channel: discord.TextChannel = None):
+    await interaction.response.defer(ephemeral=True)  # ← add this line
     member = interaction.user
     if not isinstance(member, discord.Member):
         member = interaction.guild.get_member(interaction.user.id)
 
     if not user_can_create_events(member):
-        await interaction.response.send_message("❌ You do not have permission to create events (Moderator role required).", ephemeral=True)
+        await safe_interaction_respond(interaction, content="❌ You do not have permission to create events (Moderator role required).", ephemeral=True)
         return
 
     # parse DD-MM-YYYY
@@ -1322,12 +1328,12 @@ async def createevent_command(interaction: discord.Interaction, name: str, descr
         dt_local = dt_local_naive.replace(tzinfo=DEFAULT_TZ)
         dt_utc = dt_local.astimezone(timezone.utc)
     except Exception:
-        await interaction.response.send_message("❌ Invalid date/time format. Please use `DD-MM-YYYY` for date and `HH:MM` (24-hour) for time.", ephemeral=True)
+        await safe_interaction_respond(interaction, content="❌ Invalid date/time format. Please use `DD-MM-YYYY` for date and `HH:MM` (24-hour) for time.", ephemeral=True)
         return
 
     target_channel = channel or interaction.channel
     if not isinstance(target_channel, (discord.TextChannel, discord.Thread)):
-        await interaction.response.send_message("❌ Please specify a valid text channel.", ephemeral=True)
+        await safe_interaction_respond(interaction, content="❌ Please specify a valid text channel.", ephemeral=True)
         return
 
     eid = events_store.get("next_id", 1)
@@ -1371,7 +1377,7 @@ async def createevent_command(interaction: discord.Interaction, name: str, descr
             print(f"[WARN] Could not create thread for event {eid}: {te}")
 
     except Exception as e:
-        await interaction.response.send_message(f"❌ Failed to post event: {e}", ephemeral=True)
+        await safe_interaction_respond(interaction, content=f"❌ Failed to post event: {e}", ephemeral=True)
         return
 
     ev["message_id"] = sent.id
@@ -1386,12 +1392,12 @@ async def createevent_command(interaction: discord.Interaction, name: str, descr
 async def cancelevent_command(interaction: discord.Interaction, event_id: int):
     member = interaction.user
     if not user_can_create_events(member):
-        await interaction.response.send_message("❌ You do not have permission to cancel events.", ephemeral=True)
+        await safe_interaction_respond(interaction, content="❌ You do not have permission to cancel events.", ephemeral=True)
         return
 
     ev = events_store.get("events", {}).get(str(event_id))
     if not ev:
-        await interaction.response.send_message("❌ Event ID not found.", ephemeral=True)
+        await safe_interaction_respond(interaction, content="❌ Event ID not found.", ephemeral=True)
         return
 
     # Delete message; archive/lock thread if present
@@ -1412,19 +1418,19 @@ async def cancelevent_command(interaction: discord.Interaction, event_id: int):
 
     events_store["events"].pop(str(event_id), None)
     save_events_store()
-    await interaction.response.send_message(f"✅ Event `{event_id}` cancelled and removed.", ephemeral=True)
+    await safe_interaction_respond(interaction, content=f"✅ Event `{event_id}` cancelled and removed.", ephemeral=True)
 
 @tree.command(name="closeevent", description="Close signups for an event (Moderator role required).")
 @app_commands.describe(event_id="Event ID")
 async def closeevent_command(interaction: discord.Interaction, event_id: int):
     member = interaction.user
     if not user_can_create_events(member):
-        await interaction.response.send_message("❌ You do not have permission to close events.", ephemeral=True)
+        await safe_interaction_respond(interaction, content="❌ You do not have permission to close events.", ephemeral=True)
         return
 
     ev = events_store.get("events", {}).get(str(event_id))
     if not ev:
-        await interaction.response.send_message("❌ Event ID not found.", ephemeral=True)
+        await safe_interaction_respond(interaction, content="❌ Event ID not found.", ephemeral=True)
         return
 
     ev["closed"] = True
@@ -1440,7 +1446,7 @@ async def closeevent_command(interaction: discord.Interaction, event_id: int):
     except Exception as e:
         print(f"[WARN] Could not edit event message when closing: {e}")
 
-    await interaction.response.send_message(f"✅ Event `{event_id}` is now closed for signups.", ephemeral=True)
+    await safe_interaction_respond(interaction, content=f"✅ Event `{event_id}` is now closed for signups.", ephemeral=True)
 
 @tree.command(name="openevent", description="Open signups for an event (Moderator role required).")
 @app_commands.describe(event_id="Event ID")
@@ -1479,10 +1485,10 @@ async def openevent_command(interaction: discord.Interaction, event_id: int):
 async def eventinfo_command(interaction: discord.Interaction, event_id: int):
     ev = events_store.get("events", {}).get(str(event_id))
     if not ev:
-        await interaction.response.send_message("❌ Event ID not found.", ephemeral=True)
+        await safe_interaction_respond(interaction, content="❌ Event ID not found.", ephemeral=True)
         return
     embed = make_event_embed(ev)
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    await safe_interaction_respond(interaction, embed=embed, ephemeral=True)
 
 # ---------- AUTOCOMPLETE: Event IDs ----------
 def _event_choices(prefix: str, limit: int = 25):
