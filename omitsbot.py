@@ -19,8 +19,8 @@ PLATFORM = os.getenv("PLATFORM", "common-gen5")
 # Event & template config
 EVENT_CREATOR_ROLE_ID = int(os.getenv("EVENT_CREATOR_ROLE_ID", "0")) if os.getenv("EVENT_CREATOR_ROLE_ID") else 0
 EVENT_CREATOR_ROLE_NAME = "Moderator"
-EVENTS_FILE = "events.json"
-TEMPLATES_FILE = "templates.json"
+EVENTS_FILE = os.getenv("EVENTS_FILE", "events.json")
+TEMPLATES_FILE = os.getenv("TEMPLATES_FILE", "templates.json")
 ATTEND_EMOJI = "✅"
 ABSENT_EMOJI = "❌"
 MAYBE_EMOJI = "🤷"
@@ -138,10 +138,10 @@ def streak_emoji(value):
 
 class PrintRecordButton(discord.ui.View):
     def __init__(self, stats, club_name):
-        super().__init__(timeout=900)  # 15 minutes
+        super().__init__(timeout=900)
         self.stats = stats
         self.club_name = club_name
-        self.message = None  # store the original message
+        self.message = None
 
     @discord.ui.button(label="🖨️ Print Record", style=discord.ButtonStyle.primary)
     async def print_record(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -163,7 +163,7 @@ class PrintRecordButton(discord.ui.View):
             except Exception as e:
                 print(f"[ERROR] Failed to remove view after timeout: {e}")
 
-# --- EA Pro Clubs helpers ---
+# --- Web helpers for EA endpoints ---
 async def get_club_stats(club_id):
     url = f"https://proclubs.ea.com/api/fc/clubs/overallStats?platform={PLATFORM}&clubIds={club_id}"
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -466,7 +466,7 @@ async def log_command_output(interaction: discord.Interaction, command_name: str
         embed.add_field(name="Output", value=extra_text[:1000], inline=False)
         await archive_channel.send(embed=embed)
 
-# - Dropdowns & helpers for Versus / LastMatch / Last5 -
+# --- Dropdowns and views for existing features (unchanged logic) ---
 class ClubDropdown(discord.ui.Select):
     def __init__(self, interaction, options, club_data):
         self.interaction = interaction
@@ -531,7 +531,7 @@ class ClubDropdown(discord.ui.Select):
                 await asyncio.sleep(180)
                 await view.message.delete()
             except Exception as e:
-                print(f"[ERROR] Failed to delete message after timeout: {e}")
+                print(f("[ERROR] Failed to delete message after timeout: {e}"))
         asyncio.create_task(delete_after_timeout())
 
         await log_command_output(interaction, "versus", view.message)
@@ -678,7 +678,7 @@ async def delete_after_delay(message, delay=180):
     except Exception as e:
         print(f"[ERROR] Failed to auto-delete message: {e}")
 
-# - /versus command
+# - /versus & aliases
 @tree.command(name="versus", description="Check another club's stats by name or ID.")
 @app_commands.describe(club="Club name or club ID")
 async def versus_command(interaction: discord.Interaction, club: str):
@@ -764,7 +764,7 @@ async def versus_command(interaction: discord.Interaction, club: str):
 async def vs_command(interaction: discord.Interaction, club: str):
     await versus_command.callback(interaction, club)
 
-# - /lastmatch helper & command
+# - /lastmatch & alias
 async def handle_lastmatch(interaction: discord.Interaction, club: str, from_dropdown: bool = False, original_message=None):
     try:
         if not interaction.response.is_done():
@@ -1074,7 +1074,7 @@ templates_store = load_json_file(TEMPLATES_FILE, {})  # mapping template_name ->
 def make_event_embed(ev: dict) -> discord.Embed:
     """
     Build the embed for an event from the stored event dict.
-    Adds a bold "Event Info" heading above the event description and uses guild icon as thumbnail when available.
+    Adds a bold "Event Info" heading above the event description and tries to use guild icon as thumbnail.
     """
     color = discord.Color(int(EVENT_EMBED_COLOR_HEX.strip().lstrip("#"), 16))
 
@@ -1272,7 +1272,7 @@ async def createfromtemplate_command(interaction: discord.Interaction, template_
     await interaction.response.send_message(f"✅ Event created from template `{key}` with ID `{eid}` and posted in {target_channel.mention}.", ephemeral=True)
 
 # -------------------------
-# Event commands (createevent, cancelevent, closeevent, openevent, eventinfo)
+# Event slash commands
 # -------------------------
 @tree.command(name="createevent", description="Create an event (Moderator role required).")
 @app_commands.describe(
@@ -1431,135 +1431,26 @@ async def eventinfo_command(interaction: discord.Interaction, event_id: int):
     embed = make_event_embed(ev)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-# -------------------------
-# AUTOCOMPLETE HANDLERS (TAB suggestions)
-# -------------------------
+# ---------------------------------------------------
+# Reaction removal suppression so bot-initiated removals don't unregister users
+# ---------------------------------------------------
+pending_reaction_removals: set[tuple[int, int, str]] = set()
 
-def _event_choices_from_current(current: str):
-    """Build up to 25 app_commands.Choice[int] from events_store filtered by current query."""
-    current = (current or "").lower().strip()
-    events = events_store.get("events", {})
-    choices = []
-    for eid, ev in events.items():
-        name = ev.get("name", "")
-        label = f"{eid}: {name}" if name else f"{eid}"
-        if not current or current in eid.lower() or current in name.lower():
-            try:
-                choices.append(app_commands.Choice(name=label[:100], value=int(eid)))
-            except Exception:
-                # skip any non-int keys just in case
-                continue
-        if len(choices) >= 25:
-            break
-    # sort by numeric ID descending (most recent first)
-    try:
-        choices.sort(key=lambda c: c.value, reverse=True)
-    except Exception:
-        pass
-    return choices[:25]
-
-@cancelevent_command.autocomplete("event_id")
-async def cancelevent_autocomplete(interaction: discord.Interaction, current: str):
-    return _event_choices_from_current(current)
-
-@closeevent_command.autocomplete("event_id")
-async def closeevent_autocomplete(interaction: discord.Interaction, current: str):
-    return _event_choices_from_current(current)
-
-@openevent_command.autocomplete("event_id")
-async def openevent_autocomplete(interaction: discord.Interaction, current: str):
-    return _event_choices_from_current(current)
-
-@eventinfo_command.autocomplete("event_id")
-async def eventinfo_autocomplete(interaction: discord.Interaction, current: str):
-    return _event_choices_from_current(current)
-
-@createfromtemplate_command.autocomplete("template_name")
-async def createfromtemplate_autocomplete(interaction: discord.Interaction, current: str):
-    current = (current or "").lower().strip()
-    choices = []
-    for name, tpl in templates_store.items():
-        if not current or current in name.lower():
-            choices.append(app_commands.Choice(name=name[:100], value=name))
-        if len(choices) >= 25:
-            break
-    # sort alpha
-    choices.sort(key=lambda c: c.name.lower())
-    return choices[:25]
-
-@deletetemplate_command.autocomplete("template_name")
-async def deletetemplate_autocomplete(interaction: discord.Interaction, current: str):
-    current = (current or "").lower().strip()
-    choices = []
-    for name in templates_store.keys():
-        if not current or current in name.lower():
-            choices.append(app_commands.Choice(name=name[:100], value=name))
-        if len(choices) >= 25:
-            break
-    choices.sort(key=lambda c: c.name.lower())
-    return choices[:25]
+async def mark_suppressed_reaction(message_id: int, user_id: int, emoji_str: str, ttl: int = 10):
+    """
+    Remember that we (the bot) are removing this user's reaction for this emoji,
+    so on_raw_reaction_remove should ignore it. Auto-clear after ttl seconds.
+    """
+    key = (message_id, user_id, emoji_str)
+    pending_reaction_removals.add(key)
+    async def _clear():
+        await asyncio.sleep(ttl)
+        pending_reaction_removals.discard(key)
+    asyncio.create_task(_clear())
 
 # Reaction add/remove handling (raw events to support uncached messages)
 @client.event
 async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
-    # ignore bot reactions
-    if payload.user_id == client.user.id:
-        return
-
-    ev = None
-    for eid, e in events_store.get("events", {}).items():
-        if e.get("message_id") == payload.message_id:
-            ev = e
-            break
-
-    if not ev or ev.get("closed"):
-        return  # not an event message or signups closed
-
-    emoji_str = str(payload.emoji)
-    key = emoji_to_key(emoji_str)
-    if not key:
-        return  # unrecognized emoji
-
-    try:
-        ch = client.get_channel(ev["channel_id"]) or await client.fetch_channel(ev["channel_id"])
-        msg = await ch.fetch_message(ev["message_id"])
-    except Exception:
-        msg = None
-
-    uid = payload.user_id
-    changed = False
-
-    # Remove user from all lists first
-    for k in ("attend", "absent", "maybe"):
-        if uid in ev.get(k, []) and k != key:
-            ev[k].remove(uid)
-            changed = True
-
-    # Add user to chosen list
-    if uid not in ev.get(key, []):
-        ev.setdefault(key, []).append(uid)
-        changed = True
-
-    if changed:
-        events_store["events"][str(ev["id"])] = ev
-        save_events_store()
-
-        # Update embed
-        if msg:
-            try:
-                embed = make_event_embed(ev)
-                await msg.edit(embed=embed)
-
-                # ✅ Remove the user's reaction so the counter stays at 1
-                guild = client.get_guild(payload.guild_id)
-                user_obj = guild.get_member(uid) or await client.fetch_user(uid)
-                await msg.remove_reaction(payload.emoji, user_obj)
-
-            except Exception as e:
-                print(f"[ERROR] Failed to update embed or remove reaction: {e}")
-
-@client.event
-async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
     if payload.user_id == client.user.id:
         return
 
@@ -1572,7 +1463,91 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
     if not ev:
         return
 
+    if ev.get("closed"):
+        return
+
     emoji_str = str(payload.emoji)
+    key = emoji_to_key(emoji_str)
+    if not key:
+        return
+
+    try:
+        ch = client.get_channel(ev["channel_id"]) or await client.fetch_channel(ev["channel_id"])
+        msg = await ch.fetch_message(ev["message_id"])
+    except Exception:
+        msg = None
+
+    uid = payload.user_id
+    changed = False
+
+    # Remove user from other lists and remove their old reactions (with suppression)
+    for k in ("attend", "absent", "maybe"):
+        if uid in ev.get(k, []) and k != key:
+            ev[k].remove(uid)
+            changed = True
+            if msg:
+                try:
+                    guild = client.get_guild(payload.guild_id)
+                    member_obj = None
+                    if guild:
+                        member_obj = guild.get_member(uid)
+                        if member_obj is None:
+                            try:
+                                member_obj = await guild.fetch_member(uid)
+                            except Exception:
+                                member_obj = None
+                    user_obj = member_obj if member_obj else await client.fetch_user(uid)
+                    old_emoji = ATTEND_EMOJI if k == "attend" else ABSENT_EMOJI if k == "absent" else MAYBE_EMOJI
+                    try:
+                        await mark_suppressed_reaction(ev["message_id"], uid, str(old_emoji))
+                        await msg.remove_reaction(old_emoji, user_obj)
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+
+    # Add user to chosen list
+    if uid not in ev.get(key, []):
+        ev.setdefault(key, []).append(uid)
+        changed = True
+
+    if changed:
+        events_store["events"][str(ev["id"])] = ev
+        save_events_store()
+        if msg:
+            try:
+                embed = make_event_embed(ev)
+                await msg.edit(embed=embed)
+
+                # Remove the current reaction too, while keeping the signup (suppress removal)
+                guild = client.get_guild(payload.guild_id)
+                user_obj = (guild.get_member(uid) if guild else None) or await client.fetch_user(uid)
+                await mark_suppressed_reaction(ev["message_id"], uid, str(payload.emoji))
+                await msg.remove_reaction(payload.emoji, user_obj)
+
+            except Exception as e:
+                print(f"[ERROR] Failed to update event embed or remove reaction: {e}")
+
+@client.event
+async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
+    if payload.user_id == client.user.id:
+        return
+
+    emoji_str = str(payload.emoji)
+    key_tuple = (payload.message_id, payload.user_id, emoji_str)
+    if key_tuple in pending_reaction_removals:
+        pending_reaction_removals.discard(key_tuple)
+        return  # ignore bot-initiated removals
+
+    ev = None
+    for eid, e in events_store.get("events", {}).items():
+        if e.get("message_id") == payload.message_id:
+            ev = e
+            break
+
+    if not ev:
+        return
+
     key = emoji_to_key(emoji_str)
     if not key:
         return
@@ -1591,27 +1566,33 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
             print(f"[ERROR] Failed to update event embed after reaction remove: {e}")
 
 # -------------------------
-# on_ready with dual sync (guild + global)
+# Command sync (global + optional guild)
 # -------------------------
 @client.event
 async def on_ready():
-    guild_id = int(os.getenv("GUILD_ID", "0"))
-
-    # Sync guild commands for instant availability
-    if guild_id:
-        guild = discord.Object(id=guild_id)
-        try:
-            synced = await tree.sync(guild=guild)
-            print(f"✅ Synced {len(synced)} commands to guild {guild_id}")
-        except Exception as e:
-            print(f"[ERROR] Guild sync failed: {e}")
-
-    # Sync global commands (may take up to ~1 hour to appear)
+    # Sync both: guild (if provided) for instant availability, and global
+    synced_counts = {"guild": 0, "global": 0}
     try:
-        synced_global = await tree.sync()
-        print(f"🌍 Synced {len(synced_global)} global commands")
+        guild_id_env = os.getenv("GUILD_ID")
+        if guild_id_env:
+            gid = int(guild_id_env)
+            guild = client.get_guild(gid)
+            if guild is None:
+                try:
+                    guild = await client.fetch_guild(gid)
+                except Exception:
+                    guild = None
+            if guild:
+                cmds = await tree.sync(guild=guild)
+                synced_counts["guild"] = len(cmds)
+                print(f"✅ Synced {len(cmds)} commands to guild {gid}")
+            else:
+                print(f"[WARN] Could not resolve guild {gid} for guild sync")
+        cmds_global = await tree.sync()
+        synced_counts["global"] = len(cmds_global)
+        print(f"🌍 Synced {len(cmds_global)} global commands")
     except Exception as e:
-        print(f"[ERROR] Global sync failed: {e}")
+        print(f"[ERROR] Command sync failed: {e}")
 
     print(f"Bot is ready as {client.user}")
 
