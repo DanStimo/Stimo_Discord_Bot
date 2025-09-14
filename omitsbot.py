@@ -1299,7 +1299,12 @@ async def createfromtemplate_command(interaction: discord.Interaction, template_
     events_store["next_id"] = eid + 1
     save_events_store()
 
-    await interaction.response.send_message(f"✅ Event created from template `{key}` with ID `{eid}` and posted in {target_channel.mention}.", ephemeral=True)
+    await safe_interaction_respond(
+        interaction,
+        content=f"✅ Event created from template `{key}` with ID `{eid}` and posted in {target_channel.mention}.",
+        ephemeral=True
+    )
+
 
 # -------------------------
 # Event slash commands
@@ -1385,7 +1390,11 @@ async def createevent_command(interaction: discord.Interaction, name: str, descr
     events_store["next_id"] = eid + 1
     save_events_store()
 
-    await interaction.response.send_message(f"✅ Event created with ID `{eid}` and posted in {target_channel.mention}.", ephemeral=True)
+    await safe_interaction_respond(
+        interaction,
+        content=f"✅ Event created with ID `{eid}` and posted in {target_channel.mention}.",
+        ephemeral=True
+    )
 
 @tree.command(name="cancelevent", description="Cancel (delete) an event by ID (Moderator role required).")
 @app_commands.describe(event_id="Event ID")
@@ -1453,7 +1462,7 @@ async def closeevent_command(interaction: discord.Interaction, event_id: int):
 async def openevent_command(interaction: discord.Interaction, event_id: int):
     member = interaction.user
     if not user_can_create_events(member):
-        await interaction.response.send_message("❌ You do not have permission to open events.", ephemeral=True)
+        await safe_interaction_respond(interaction, content="❌ You do not have permission to open events.", ephemeral=True)
         return
 
     ev = events_store.get("events", {}).get(str(event_id))
