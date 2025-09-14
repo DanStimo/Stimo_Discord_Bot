@@ -1502,6 +1502,7 @@ async def deletetemplate_autocomplete(interaction: discord.Interaction, current:
 # Reaction add/remove handling (raw events to support uncached messages)
 @client.event
 async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
+    # ignore bot reactions
     if payload.user_id == client.user.id:
         return
 
@@ -1511,16 +1512,13 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             ev = e
             break
 
-    if not ev:
-        return
-
-    if ev.get("closed"):
-        return
+    if not ev or ev.get("closed"):
+        return  # not an event message or signups closed
 
     emoji_str = str(payload.emoji)
     key = emoji_to_key(emoji_str)
     if not key:
-        return
+        return  # unrecognized emoji
 
     try:
         ch = client.get_channel(ev["channel_id"]) or await client.fetch_channel(ev["channel_id"])
@@ -1531,30 +1529,13 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     uid = payload.user_id
     changed = False
 
+    # Remove user from all lists first
     for k in ("attend", "absent", "maybe"):
         if uid in ev.get(k, []) and k != key:
             ev[k].remove(uid)
             changed = True
-            if msg:
-                try:
-                    guild = client.get_guild(payload.guild_id)
-                    member_obj = None
-                    if guild:
-                        member_obj = guild.get_member(uid)
-                        if member_obj is None:
-                            try:
-                                member_obj = await guild.fetch_member(uid)
-                            except Exception:
-                                member_obj = None
-                    user_obj = member_obj if member_obj else await client.fetch_user(uid)
-                    old_emoji = ATTEND_EMOJI if k == "attend" else ABSENT_EMOJI if k == "absent" else MAYBE_EMOJI
-                    try:
-                        await msg.remove_reaction(old_emoji, user_obj)
-                    except Exception:
-                        pass
-                except Exception:
-                    pass
 
+    # Add user to chosen list
     if uid not in ev.get(key, []):
         ev.setdefault(key, []).append(uid)
         changed = True
@@ -1562,12 +1543,20 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     if changed:
         events_store["events"][str(ev["id"])] = ev
         save_events_store()
+
+        # Update embed
         if msg:
             try:
                 embed = make_event_embed(ev)
                 await msg.edit(embed=embed)
+
+                # ✅ Remove the user's reaction so the counter stays at 1
+                guild = client.get_guild(payload.guild_id)
+                user_obj = guild.get_member(uid) or await client.fetch_user(uid)
+                await msg.remove_reaction(payload.emoji, user_obj)
+
             except Exception as e:
-                print(f"[ERROR] Failed to update event embed after reaction add: {e}")
+                print(f"[ERROR] Failed to update embed or remove reaction: {e}")
 
 @client.event
 async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
