@@ -466,7 +466,7 @@ async def log_command_output(interaction: discord.Interaction, command_name: str
         embed.add_field(name="Output", value=extra_text[:1000], inline=False)
         await archive_channel.send(embed=embed)
 
-# --- Dropdowns and views for existing features (unchanged logic) ---
+# --- Dropdowns and views (versus/lastmatch/last5) remain the same as previously supplied ---
 class ClubDropdown(discord.ui.Select):
     def __init__(self, interaction, options, club_data):
         self.interaction = interaction
@@ -1074,7 +1074,8 @@ templates_store = load_json_file(TEMPLATES_FILE, {})  # mapping template_name ->
 def make_event_embed(ev: dict) -> discord.Embed:
     """
     Build the embed for an event from the stored event dict.
-    Adds a bold "Event Info" heading above the event description and tries to use guild icon as thumbnail.
+    Adds a bold "Event Info" heading above the event description,
+    uses guild icon as thumbnail, and shows a Thread jump link if present.
     """
     color = discord.Color(int(EVENT_EMBED_COLOR_HEX.strip().lstrip("#"), 16))
 
@@ -1095,6 +1096,11 @@ def make_event_embed(ev: dict) -> discord.Embed:
     except Exception:
         embed.add_field(name="When", value="Unknown", inline=False)
 
+    # Thread field if created
+    if ev.get("thread_id"):
+        embed.add_field(name="Thread", value=f"<#{ev['thread_id']}>", inline=False)
+
+    # Columns: Attend / Absent / Maybe
     def users_to_text(user_ids):
         if not user_ids:
             return "—"
@@ -1246,6 +1252,7 @@ async def createfromtemplate_command(interaction: discord.Interaction, template_
         "description": tpl.get("description"),
         "channel_id": target_channel.id,
         "message_id": None,
+        "thread_id": None,
         "creator_id": interaction.user.id,
         "datetime": dt_utc.isoformat(),
         "closed": False,
@@ -1260,6 +1267,24 @@ async def createfromtemplate_command(interaction: discord.Interaction, template_
         await sent.add_reaction(ATTEND_EMOJI)
         await sent.add_reaction(ABSENT_EMOJI)
         await sent.add_reaction(MAYBE_EMOJI)
+
+        # Create a thread tied to the event message (same name as event)
+        try:
+            thread = await sent.create_thread(name=ev["name"], auto_archive_duration=10080)
+            ev["thread_id"] = thread.id
+            # Add the creator to the thread
+            try:
+                await thread.add_user(interaction.user)
+            except Exception:
+                pass
+            # Update the embed now that thread exists
+            try:
+                await sent.edit(embed=make_event_embed(ev))
+            except Exception:
+                pass
+        except Exception as te:
+            print(f"[WARN] Could not create thread for event {eid}: {te}")
+
     except Exception as e:
         await interaction.response.send_message(f"❌ Failed to post event: {e}", ephemeral=True)
         return
@@ -1312,6 +1337,7 @@ async def createevent_command(interaction: discord.Interaction, name: str, descr
         "description": description,
         "channel_id": target_channel.id,
         "message_id": None,
+        "thread_id": None,
         "creator_id": interaction.user.id,
         "datetime": dt_utc.isoformat(),
         "closed": False,
@@ -1326,6 +1352,24 @@ async def createevent_command(interaction: discord.Interaction, name: str, descr
         await sent.add_reaction(ATTEND_EMOJI)
         await sent.add_reaction(ABSENT_EMOJI)
         await sent.add_reaction(MAYBE_EMOJI)
+
+        # Create a thread tied to the event message (same name as event)
+        try:
+            thread = await sent.create_thread(name=ev["name"], auto_archive_duration=10080)
+            ev["thread_id"] = thread.id
+            # Add the creator to the thread
+            try:
+                await thread.add_user(interaction.user)
+            except Exception:
+                pass
+            # Update the embed now that thread exists
+            try:
+                await sent.edit(embed=make_event_embed(ev))
+            except Exception:
+                pass
+        except Exception as te:
+            print(f"[WARN] Could not create thread for event {eid}: {te}")
+
     except Exception as e:
         await interaction.response.send_message(f"❌ Failed to post event: {e}", ephemeral=True)
         return
@@ -1350,12 +1394,21 @@ async def cancelevent_command(interaction: discord.Interaction, event_id: int):
         await interaction.response.send_message("❌ Event ID not found.", ephemeral=True)
         return
 
+    # Delete message; archive/lock thread if present
     try:
         ch = client.get_channel(ev["channel_id"]) or await client.fetch_channel(ev["channel_id"])
         msg = await ch.fetch_message(ev["message_id"])
         await msg.delete()
     except Exception as e:
         print(f"[WARN] Could not delete event message: {e}")
+
+    try:
+        if ev.get("thread_id"):
+            thread = client.get_channel(ev["thread_id"])
+            if isinstance(thread, discord.Thread):
+                await thread.edit(archived=True, locked=True)
+    except Exception as e:
+        print(f"[WARN] Could not archive/lock thread for event {event_id}: {e}")
 
     events_store["events"].pop(str(event_id), None)
     save_events_store()
@@ -1437,16 +1490,62 @@ async def eventinfo_command(interaction: discord.Interaction, event_id: int):
 pending_reaction_removals: set[tuple[int, int, str]] = set()
 
 async def mark_suppressed_reaction(message_id: int, user_id: int, emoji_str: str, ttl: int = 10):
-    """
-    Remember that we (the bot) are removing this user's reaction for this emoji,
-    so on_raw_reaction_remove should ignore it. Auto-clear after ttl seconds.
-    """
     key = (message_id, user_id, emoji_str)
     pending_reaction_removals.add(key)
     async def _clear():
         await asyncio.sleep(ttl)
         pending_reaction_removals.discard(key)
     asyncio.create_task(_clear())
+
+# -------------------------
+# Helpers to manage thread membership
+# -------------------------
+async def add_user_to_event_thread(ev: dict, user_id: int):
+    try:
+        if not ev.get("thread_id"):
+            return
+        thread = client.get_channel(ev["thread_id"])
+        if not isinstance(thread, discord.Thread):
+            return
+        guild = thread.guild
+        member = guild.get_member(user_id) if guild else None
+        if member is None and guild:
+            try:
+                member = await guild.fetch_member(user_id)
+            except Exception:
+                member = None
+        if member:
+            try:
+                await thread.add_user(member)
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"[WARN] add_user_to_event_thread failed: {e}")
+
+async def remove_user_from_event_thread_if_needed(ev: dict, user_id: int):
+    try:
+        if not ev.get("thread_id"):
+            return
+        still_should_be_in = (user_id in ev.get("attend", [])) or (user_id in ev.get("maybe", []))
+        if still_should_be_in:
+            return
+        thread = client.get_channel(ev["thread_id"])
+        if not isinstance(thread, discord.Thread):
+            return
+        guild = thread.guild
+        member = guild.get_member(user_id) if guild else None
+        if member is None and guild:
+            try:
+                member = await guild.fetch_member(user_id)
+            except Exception:
+                member = None
+        if member:
+            try:
+                await thread.remove_user(member)
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"[WARN] remove_user_from_event_thread_if_needed failed: {e}")
 
 # Reaction add/remove handling (raw events to support uncached messages)
 @client.event
@@ -1511,6 +1610,12 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         ev.setdefault(key, []).append(uid)
         changed = True
 
+    # Thread membership updates
+    if key in ("attend", "maybe"):
+        asyncio.create_task(add_user_to_event_thread(ev, uid))
+    else:
+        asyncio.create_task(remove_user_from_event_thread_if_needed(ev, uid))
+
     if changed:
         events_store["events"][str(ev["id"])] = ev
         save_events_store()
@@ -1557,6 +1662,11 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
         ev[key].remove(uid)
         events_store["events"][str(ev["id"])] = ev
         save_events_store()
+
+        # If they removed Attend/Maybe and are no longer in either, remove from thread
+        if key in ("attend", "maybe"):
+            asyncio.create_task(remove_user_from_event_thread_if_needed(ev, uid))
+
         try:
             ch = client.get_channel(ev["channel_id"]) or await client.fetch_channel(ev["channel_id"])
             msg = await ch.fetch_message(ev["message_id"])
@@ -1571,7 +1681,6 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
 @client.event
 async def on_ready():
     # Sync both: guild (if provided) for instant availability, and global
-    synced_counts = {"guild": 0, "global": 0}
     try:
         guild_id_env = os.getenv("GUILD_ID")
         if guild_id_env:
@@ -1584,12 +1693,10 @@ async def on_ready():
                     guild = None
             if guild:
                 cmds = await tree.sync(guild=guild)
-                synced_counts["guild"] = len(cmds)
                 print(f"✅ Synced {len(cmds)} commands to guild {gid}")
             else:
                 print(f"[WARN] Could not resolve guild {gid} for guild sync")
         cmds_global = await tree.sync()
-        synced_counts["global"] = len(cmds_global)
         print(f"🌍 Synced {len(cmds_global)} global commands")
     except Exception as e:
         print(f"[ERROR] Command sync failed: {e}")
