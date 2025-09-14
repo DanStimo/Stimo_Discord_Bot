@@ -1484,6 +1484,62 @@ async def eventinfo_command(interaction: discord.Interaction, event_id: int):
     embed = make_event_embed(ev)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
+# ---------- AUTOCOMPLETE: Event IDs ----------
+def _event_choices(prefix: str, limit: int = 25):
+    items = []
+    for eid_str, ev in events_store.get("events", {}).items():
+        try:
+            eid = int(eid_str)
+        except Exception:
+            continue
+        name = ev.get("name", "Event")
+        when_txt = ""
+        try:
+            dt = datetime.fromisoformat(ev.get("datetime", "")).astimezone(timezone.utc)
+            when_txt = discord.utils.format_dt(dt, style="F")
+        except Exception:
+            pass
+        display = f"{eid} — {name}" + (f" — {when_txt}" if when_txt else "")
+        items.append((display, eid))
+
+    prefix_l = (prefix or "").lower()
+    if prefix_l:
+        items = [x for x in items if prefix_l in str(x[1]).lower() or prefix_l in x[0].lower()]
+    return items[:limit]
+
+@cancelevent_command.autocomplete("event_id")
+async def cancelevent_autocomplete(interaction: discord.Interaction, current: str):
+    return [app_commands.Choice(name=disp, value=val) for disp, val in _event_choices(current)]
+
+@closeevent_command.autocomplete("event_id")
+async def closeevent_autocomplete(interaction: discord.Interaction, current: str):
+    return [app_commands.Choice(name=disp, value=val) for disp, val in _event_choices(current)]
+
+@openevent_command.autocomplete("event_id")
+async def openevent_autocomplete(interaction: discord.Interaction, current: str):
+    return [app_commands.Choice(name=disp, value=val) for disp, val in _event_choices(current)]
+
+@eventinfo_command.autocomplete("event_id")
+async def eventinfo_autocomplete(interaction: discord.Interaction, current: str):
+    return [app_commands.Choice(name=disp, value=val) for disp, val in _event_choices(current)]
+
+# ---------- AUTOCOMPLETE: Template names ----------
+def _template_choices(prefix: str, limit: int = 25):
+    keys = list(templates_store.keys())
+    prefix_l = (prefix or "").lower()
+    if prefix_l:
+        keys = [k for k in keys if prefix_l in k.lower()]
+    keys = keys[:limit]
+    return [app_commands.Choice(name=k, value=k) for k in keys]
+
+@createfromtemplate_command.autocomplete("template_name")
+async def createfromtemplate_autocomplete(interaction: discord.Interaction, current: str):
+    return _template_choices(current)
+
+@deletetemplate_command.autocomplete("template_name")
+async def deletetemplate_autocomplete(interaction: discord.Interaction, current: str):
+    return _template_choices(current)
+
 # ---------------------------------------------------
 # Reaction removal suppression so bot-initiated removals don't unregister users
 # ---------------------------------------------------
