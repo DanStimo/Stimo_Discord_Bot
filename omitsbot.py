@@ -8,11 +8,23 @@ import random
 import asyncio
 from dotenv import load_dotenv
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+
 load_dotenv()
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 CLUB_ID = os.getenv("CLUB_ID", "167054")  # fallback/default
 PLATFORM = os.getenv("PLATFORM", "common-gen5")
+
+# Event config
+EVENT_CREATOR_ROLE_ID = int(os.getenv("EVENT_CREATOR_ROLE_ID", "0")) if os.getenv("EVENT_CREATOR_ROLE_ID") else 0
+EVENT_CREATOR_ROLE_NAME = "Moderator"
+EVENTS_FILE = "events.json"
+ATTEND_EMOJI = "✅"
+ABSENT_EMOJI = "❌"
+MAYBE_EMOJI = "🤷"
+EVENT_EMBED_COLOR_HEX = os.getenv("EVENT_EMBED_COLOR_HEX", "#3498DB")
+DEFAULT_TZ = ZoneInfo("Europe/London")
 
 # --- Intents ---
 intents = discord.Intents.default()
@@ -1057,6 +1069,314 @@ async def last5_command(interaction: discord.Interaction, club: str):
 @app_commands.describe(club="Club name or club ID")
 async def l5_command(interaction: discord.Interaction, club: str):
     await last5_command.callback(interaction, club)
+
+# -------------------------
+# Event system persistence
+# -------------------------
+def load_events():
+    try:
+        if not os.path.exists(EVENTS_FILE):
+            return {"next_id": 1, "events": {}}
+        with open(EVENTS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"[ERROR] Failed to load events: {e}")
+        return {"next_id": 1, "events": {}}
+
+def save_events(data):
+    try:
+        with open(EVENTS_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"[ERROR] Failed to save events: {e}")
+
+events_store = load_events()
+
+def make_event_embed(ev: dict) -> discord.Embed:
+    color = discord.Color(int(EVENT_EMBED_COLOR_HEX.strip().lstrip("#"), 16))
+    embed = discord.Embed(
+        title=f"📅 {ev.get('name')}",
+        description=ev.get("description", "\u200b"),
+        color=color
+    )
+
+    dt_iso = ev.get("datetime")
+    try:
+        # fromisoformat preserves tzinfo if present
+        dt = datetime.fromisoformat(dt_iso)
+        # ensure UTC for display tag
+        dt_utc = dt.astimezone(timezone.utc)
+        embed.add_field(name="When", value=discord.utils.format_dt(dt_utc, style='F'), inline=False)
+    except Exception:
+        embed.add_field(name="When", value="Unknown", inline=False)
+
+    def users_to_text(user_ids):
+        if not user_ids:
+            return "—"
+        return "\n".join(f"<@{uid}>" for uid in user_ids)
+
+    embed.add_field(name=f"{ATTEND_EMOJI} Attend", value=users_to_text(ev.get("attend", [])), inline=True)
+    embed.add_field(name=f"{ABSENT_EMOJI} Absent", value=users_to_text(ev.get("absent", [])), inline=True)
+    embed.add_field(name=f"{MAYBE_EMOJI} Maybe", value=users_to_text(ev.get("maybe", [])), inline=True)
+
+    embed.set_footer(text=f"Event ID: {ev.get('id')} • Created by: {ev.get('creator_id')}")
+    return embed
+
+def user_can_create_events(member: discord.Member) -> bool:
+    if not member:
+        return False
+    if EVENT_CREATOR_ROLE_ID:
+        return any(r.id == EVENT_CREATOR_ROLE_ID for r in member.roles)
+    else:
+        return any(r.name == EVENT_CREATOR_ROLE_NAME for r in member.roles)
+
+def emoji_to_key(emoji: str):
+    if emoji == ATTEND_EMOJI:
+        return "attend"
+    if emoji == ABSENT_EMOJI:
+        return "absent"
+    if emoji == MAYBE_EMOJI:
+        return "maybe"
+    return None
+
+def save_events_store():
+    save_events(events_store)
+
+# -------------------------
+# Event slash commands
+# -------------------------
+@tree.command(name="createevent", description="Create an event (Moderator role required).")
+@app_commands.describe(
+    name="Event name",
+    description="Event description",
+    date="Date (YYYY-MM-DD) — local to Europe/London",
+    time="Time (HH:MM 24-hour) — local to Europe/London",
+    channel="Channel to post the event in (optional, defaults to current channel)"
+)
+async def createevent_command(interaction: discord.Interaction, name: str, description: str, date: str, time: str, channel: discord.TextChannel = None):
+    member = interaction.user
+    if not isinstance(member, discord.Member):
+        member = interaction.guild.get_member(interaction.user.id)
+
+    if not user_can_create_events(member):
+        await interaction.response.send_message("❌ You do not have permission to create events (Moderator role required).", ephemeral=True)
+        return
+
+    try:
+        dt_local_naive = datetime.strptime(f"{date} {time}", "%Y-%m-%d %H:%M")
+        dt_local = dt_local_naive.replace(tzinfo=DEFAULT_TZ)
+        dt_utc = dt_local.astimezone(timezone.utc)
+    except Exception:
+        await interaction.response.send_message("❌ Invalid date/time format. Please use `YYYY-MM-DD` for date and `HH:MM` (24-hour) for time.", ephemeral=True)
+        return
+
+    target_channel = channel or interaction.channel
+    if not isinstance(target_channel, (discord.TextChannel, discord.Thread)):
+        await interaction.response.send_message("❌ Please specify a valid text channel.", ephemeral=True)
+        return
+
+    eid = events_store.get("next_id", 1)
+    ev = {
+        "id": eid,
+        "name": name,
+        "description": description,
+        "channel_id": target_channel.id,
+        "message_id": None,
+        "creator_id": interaction.user.id,
+        "datetime": dt_utc.isoformat(),
+        "closed": False,
+        "attend": [],
+        "absent": [],
+        "maybe": []
+    }
+
+    embed = make_event_embed(ev)
+    try:
+        sent = await target_channel.send(embed=embed)
+        await sent.add_reaction(ATTEND_EMOJI)
+        await sent.add_reaction(ABSENT_EMOJI)
+        await sent.add_reaction(MAYBE_EMOJI)
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Failed to post event: {e}", ephemeral=True)
+        return
+
+    ev["message_id"] = sent.id
+    events_store.setdefault("events", {})[str(eid)] = ev
+    events_store["next_id"] = eid + 1
+    save_events_store()
+
+    await interaction.response.send_message(f"✅ Event created with ID `{eid}` and posted in {target_channel.mention}.", ephemeral=True)
+
+@tree.command(name="cancelevent", description="Cancel (delete) an event by ID (Moderator role required).")
+@app_commands.describe(event_id="Event ID")
+async def cancelevent_command(interaction: discord.Interaction, event_id: int):
+    member = interaction.user
+    if not user_can_create_events(member):
+        await interaction.response.send_message("❌ You do not have permission to cancel events.", ephemeral=True)
+        return
+
+    ev = events_store.get("events", {}).get(str(event_id))
+    if not ev:
+        await interaction.response.send_message("❌ Event ID not found.", ephemeral=True)
+        return
+
+    try:
+        ch = client.get_channel(ev["channel_id"]) or await client.fetch_channel(ev["channel_id"])
+        msg = await ch.fetch_message(ev["message_id"])
+        await msg.delete()
+    except Exception as e:
+        print(f"[WARN] Could not delete event message: {e}")
+
+    events_store["events"].pop(str(event_id), None)
+    save_events_store()
+    await interaction.response.send_message(f"✅ Event `{event_id}` cancelled and removed.", ephemeral=True)
+
+@tree.command(name="closeevent", description="Close signups for an event (Moderator role required).")
+@app_commands.describe(event_id="Event ID")
+async def closeevent_command(interaction: discord.Interaction, event_id: int):
+    member = interaction.user
+    if not user_can_create_events(member):
+        await interaction.response.send_message("❌ You do not have permission to close events.", ephemeral=True)
+        return
+
+    ev = events_store.get("events", {}).get(str(event_id))
+    if not ev:
+        await interaction.response.send_message("❌ Event ID not found.", ephemeral=True)
+        return
+
+    ev["closed"] = True
+    save_events_store()
+
+    try:
+        ch = client.get_channel(ev["channel_id"]) or await client.fetch_channel(ev["channel_id"])
+        msg = await ch.fetch_message(ev["message_id"])
+        embed = make_event_embed(ev)
+        embed.color = discord.Color.dark_grey()
+        embed.set_footer(text=f"Event ID: {ev.get('id')} • CLOSED • Created by: {ev.get('creator_id')}")
+        await msg.edit(embed=embed)
+    except Exception as e:
+        print(f"[WARN] Could not edit event message when closing: {e}")
+
+    await interaction.response.send_message(f"✅ Event `{event_id}` is now closed for signups.", ephemeral=True)
+
+@tree.command(name="eventinfo", description="Show event info by ID.")
+@app_commands.describe(event_id="Event ID")
+async def eventinfo_command(interaction: discord.Interaction, event_id: int):
+    ev = events_store.get("events", {}).get(str(event_id))
+    if not ev:
+        await interaction.response.send_message("❌ Event ID not found.", ephemeral=True)
+        return
+    embed = make_event_embed(ev)
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+# Reaction add/remove handling (raw events to support uncached messages)
+@client.event
+async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
+    # ignore bot reactions
+    if payload.user_id == client.user.id:
+        return
+
+    ev = None
+    for eid, e in events_store.get("events", {}).items():
+        if e.get("message_id") == payload.message_id:
+            ev = e
+            break
+
+    if not ev:
+        return  # not an event message
+
+    if ev.get("closed"):
+        return  # signups closed
+
+    emoji_str = str(payload.emoji)
+    key = emoji_to_key(emoji_str)
+    if not key:
+        return  # unrecognized emoji
+
+    # fetch message and guild
+    try:
+        ch = client.get_channel(ev["channel_id"]) or await client.fetch_channel(ev["channel_id"])
+        msg = await ch.fetch_message(ev["message_id"])
+    except Exception:
+        msg = None
+
+    uid = payload.user_id
+    changed = False
+
+    # Remove user from other lists and optionally remove the other reaction from the message
+    for k in ("attend", "absent", "maybe"):
+        if uid in ev.get(k, []) and k != key:
+            ev[k].remove(uid)
+            changed = True
+            # try to remove their old reaction from the message
+            if msg:
+                try:
+                    guild = client.get_guild(payload.guild_id)
+                    member_obj = None
+                    if guild:
+                        member_obj = guild.get_member(uid)
+                        if member_obj is None:
+                            try:
+                                member_obj = await guild.fetch_member(uid)
+                            except Exception:
+                                member_obj = None
+                    user_obj = member_obj if member_obj else await client.fetch_user(uid)
+                    old_emoji = ATTEND_EMOJI if k == "attend" else ABSENT_EMOJI if k == "absent" else MAYBE_EMOJI
+                    try:
+                        await msg.remove_reaction(old_emoji, user_obj)
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+
+    # Add user to chosen list
+    if uid not in ev.get(key, []):
+        ev.setdefault(key, []).append(uid)
+        changed = True
+
+    if changed:
+        events_store["events"][str(ev["id"])] = ev
+        save_events_store()
+        # update embed
+        if msg:
+            try:
+                embed = make_event_embed(ev)
+                await msg.edit(embed=embed)
+            except Exception as e:
+                print(f"[ERROR] Failed to update event embed after reaction add: {e}")
+
+@client.event
+async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
+    # ignore bot
+    if payload.user_id == client.user.id:
+        return
+
+    ev = None
+    for eid, e in events_store.get("events", {}).items():
+        if e.get("message_id") == payload.message_id:
+            ev = e
+            break
+
+    if not ev:
+        return
+
+    emoji_str = str(payload.emoji)
+    key = emoji_to_key(emoji_str)
+    if not key:
+        return
+
+    uid = payload.user_id
+    if uid in ev.get(key, []):
+        ev[key].remove(uid)
+        events_store["events"][str(ev["id"])] = ev
+        save_events_store()
+        try:
+            ch = client.get_channel(ev["channel_id"]) or await client.fetch_channel(ev["channel_id"])
+            msg = await ch.fetch_message(ev["message_id"])
+            embed = make_event_embed(ev)
+            await msg.edit(embed=embed)
+        except Exception as e:
+            print(f"[ERROR] Failed to update event embed after reaction remove: {e}")
 
 @client.event
 async def on_ready():
