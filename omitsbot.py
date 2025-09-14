@@ -1149,8 +1149,21 @@ def save_templates_store():
 # Template commands
 # -------------------------
 @tree.command(name="createtemplate", description="Create an event template (Moderator role required).")
-@app_commands.describe(template_name="Unique template name", event_name="Event display name", description="Event description", channel="Optional channel to save with the template")
-async def createtemplate_command(interaction: discord.Interaction, template_name: str, event_name: str, description: str, channel: discord.TextChannel = None, role: discord.Role = None):
+@app_commands.describe(
+    template_name="Unique template name",
+    event_name="Event display name",
+    description="Event description",
+    channel="Optional channel to save with the template",
+    role="Optional role to ping when this template is used"
+)
+async def createtemplate_command(
+    interaction: discord.Interaction,
+    template_name: str,
+    event_name: str,
+    description: str,
+    channel: discord.TextChannel = None,
+    role: discord.Role = None
+):
     member = interaction.user
     if not user_can_create_events(member):
         await safe_interaction_respond(interaction, content="❌ You do not have permission to create templates.", ephemeral=True)
@@ -1169,7 +1182,7 @@ async def createtemplate_command(interaction: discord.Interaction, template_name
         "name": event_name,
         "description": description,
         "channel_id": channel.id if channel else None,
-        "role_id": role.id if role else None,
+        "role_id": role.id if role else None,   # <-- store ONLY the ID
         "creator_id": interaction.user.id,
         "created_at": datetime.now(timezone.utc).isoformat()
     }
@@ -1214,8 +1227,21 @@ async def deletetemplate_command(interaction: discord.Interaction, template_name
 # Event creation from template
 # -------------------------
 @tree.command(name="createfromtemplate", description="Create an event from a saved template (Moderator role required).")
-@app_commands.describe(template_name="Template to use", date="Date (DD-MM-YYYY) — local to Europe/London", time="Time (HH:MM 24-hour) — local to Europe/London", channel="Optional channel to post the event in (defaults to template channel or current channel)")
-async def createfromtemplate_command(interaction: discord.Interaction, template_name: str, date: str, time: str, channel: discord.TextChannel = None, role: discord.Role = None):
+@app_commands.describe(
+    template_name="Template to use",
+    date="Date (DD-MM-YYYY) — local to Europe/London",
+    time="Time (HH:MM 24-hour) — local to Europe/London",
+    channel="Optional channel to post the event in (defaults to template channel or current channel)",
+    role="Optional role to ping (overrides template's saved role)"
+)
+async def createfromtemplate_command(
+    interaction: discord.Interaction,
+    template_name: str,
+    date: str,
+    time: str,
+    channel: discord.TextChannel = None,
+    role: discord.Role = None
+):
     await interaction.response.defer(ephemeral=True)
     member = interaction.user
     if not user_can_create_events(member):
@@ -1227,13 +1253,13 @@ async def createfromtemplate_command(interaction: discord.Interaction, template_
     if not tpl:
         await safe_interaction_respond(interaction, content="❌ Template not found.", ephemeral=True)
         return
-    
+
+    # Resolve role: prefer provided role, else template's saved role_id
     chosen_role = role
     if chosen_role is None:
         rid = tpl.get("role_id")
         if rid:
             chosen_role = interaction.guild.get_role(rid)
-
 
     # parse date/time DD-MM-YYYY
     try:
@@ -1249,7 +1275,7 @@ async def createfromtemplate_command(interaction: discord.Interaction, template_
         target_channel = channel
     elif tpl.get("channel_id"):
         try:
-            target_channel = client.get_channel(tpl.get("channel_id")) or await client.fetch_channel(tpl.get("channel_id"))
+            target_channel = client.get_channel(tpl["channel_id"]) or await client.fetch_channel(tpl["channel_id"])
         except Exception:
             target_channel = None
     target_channel = target_channel or interaction.channel
@@ -1261,40 +1287,43 @@ async def createfromtemplate_command(interaction: discord.Interaction, template_
     eid = events_store.get("next_id", 1)
     ev = {
         "id": eid,
-        "name": ...,
-        "description": ...,
+        "name": tpl.get("name"),
+        "description": tpl.get("description"),
         "channel_id": target_channel.id,
         "message_id": None,
         "thread_id": None,
         "creator_id": interaction.user.id,
         "datetime": dt_utc.isoformat(),
-        "role_id": (chosen_role.id if chosen_role else None),
         "closed": False,
         "attend": [],
         "absent": [],
-        "maybe": []
+        "maybe": [],
+        "role_id": (chosen_role.id if chosen_role else None)  # <-- store ONLY the ID
     }
 
     embed = make_event_embed(ev)
-    try:
-        content = f"||{chosen_role.mention}||" if chosen_role else None
-        allowed = discord.AllowedMentions(roles=[chosen_role]) if chosen_role else None
-        sent = await target_channel.send(content=content, embed=embed, allowed_mentions=allowed)
 
+    # Spoilered role mention outside the embed
+    content = f"||{chosen_role.mention}||" if chosen_role else None
+    allowed_mentions = discord.AllowedMentions(roles=[chosen_role]) if chosen_role else None
+
+    try:
+        sent = await target_channel.send(
+            content=content,
+            embed=embed,
+            allowed_mentions=allowed_mentions
+        )
         await sent.add_reaction(ATTEND_EMOJI)
         await sent.add_reaction(ABSENT_EMOJI)
         await sent.add_reaction(MAYBE_EMOJI)
 
-        # Create a thread tied to the event message (same name as event)
         try:
             thread = await sent.create_thread(name=ev["name"], auto_archive_duration=10080)
             ev["thread_id"] = thread.id
-            # Add the creator to the thread
             try:
                 await thread.add_user(interaction.user)
             except Exception:
                 pass
-            # Update the embed now that thread exists
             try:
                 await sent.edit(embed=make_event_embed(ev))
             except Exception:
@@ -1317,7 +1346,6 @@ async def createfromtemplate_command(interaction: discord.Interaction, template_
         ephemeral=True
     )
 
-
 # -------------------------
 # Event slash commands
 # -------------------------
@@ -1327,10 +1355,19 @@ async def createfromtemplate_command(interaction: discord.Interaction, template_
     description="Event description",
     date="Date (DD-MM-YYYY) — local to Europe/London",
     time="Time (HH:MM 24-hour) — local to Europe/London",
-    channel="Channel to post the event in (optional, defaults to current channel)"
+    channel="Channel to post the event in (optional, defaults to current channel)",
+    role="Optional role to ping (will be spoilered)"
 )
-async def createevent_command(interaction: discord.Interaction, name: str, description: str, date: str, time: str, channel: discord.TextChannel = None, role: discord.Role = None):
-    await interaction.response.defer(ephemeral=True)  # ← add this line
+async def createevent_command(
+    interaction: discord.Interaction,
+    name: str,
+    description: str,
+    date: str,
+    time: str,
+    channel: discord.TextChannel = None,
+    role: discord.Role = None
+):
+    await interaction.response.defer(ephemeral=True)
     member = interaction.user
     if not isinstance(member, discord.Member):
         member = interaction.guild.get_member(interaction.user.id)
@@ -1356,26 +1393,32 @@ async def createevent_command(interaction: discord.Interaction, name: str, descr
     eid = events_store.get("next_id", 1)
     ev = {
         "id": eid,
-        "name": ...,
-        "description": ...,
+        "name": name,
+        "description": description,
         "channel_id": target_channel.id,
         "message_id": None,
         "thread_id": None,
         "creator_id": interaction.user.id,
         "datetime": dt_utc.isoformat(),
-        "role_id": (role.id if role else None),
         "closed": False,
         "attend": [],
         "absent": [],
-        "maybe": []
+        "maybe": [],
+        "role_id": (role.id if role else None)   # <-- store ONLY the ID
     }
 
     embed = make_event_embed(ev)
-    try:
-        content = f"||{role.mention}||" if role else None
-        allowed = discord.AllowedMentions(roles=[role]) if role else None
-        sent = await target_channel.send(content=content, embed=embed, allowed_mentions=allowed)
 
+    # Prepare spoilered mention outside the embed (so it pings)
+    content = f"||{role.mention}||" if role else None
+    allowed_mentions = discord.AllowedMentions(roles=[role]) if role else None
+
+    try:
+        sent = await target_channel.send(
+            content=content,
+            embed=embed,
+            allowed_mentions=allowed_mentions
+        )
         await sent.add_reaction(ATTEND_EMOJI)
         await sent.add_reaction(ABSENT_EMOJI)
         await sent.add_reaction(MAYBE_EMOJI)
@@ -1406,11 +1449,7 @@ async def createevent_command(interaction: discord.Interaction, name: str, descr
     events_store["next_id"] = eid + 1
     save_events_store()
 
-    await safe_interaction_respond(
-        interaction,
-        content=f"✅ Event created with ID `{eid}` and posted in {target_channel.mention}.",
-        ephemeral=True
-    )
+    await safe_interaction_respond(interaction, content=f"✅ Event created with ID `{eid}` and posted in {target_channel.mention}.", ephemeral=True)
 
 @tree.command(name="cancelevent", description="Cancel (delete) an event by ID (Moderator role required).")
 @app_commands.describe(event_id="Event ID")
