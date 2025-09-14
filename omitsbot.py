@@ -1095,13 +1095,17 @@ events_store = load_events()
 def make_event_embed(ev: dict) -> discord.Embed:
     """
     Build the embed for an event from the stored event dict.
-    This version will attempt to use the guild icon as a thumbnail
-    (by looking up the channel_id recorded on the event).
+    Adds a bold "Event Info" heading above the event description.
     """
     color = discord.Color(int(EVENT_EMBED_COLOR_HEX.strip().lstrip("#"), 16))
+
+    # Add "Event Info" title above the description
+    desc_text = ev.get("description", "\u200b")
+    embed_description = f"**Event Info**\n{desc_text}"
+
     embed = discord.Embed(
         title=f"📅 {ev.get('name')}",
-        description=ev.get("description", "\u200b"),
+        description=embed_description,
         color=color
     )
 
