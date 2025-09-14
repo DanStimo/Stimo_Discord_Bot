@@ -1431,6 +1431,74 @@ async def eventinfo_command(interaction: discord.Interaction, event_id: int):
     embed = make_event_embed(ev)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
+# -------------------------
+# AUTOCOMPLETE HANDLERS (TAB suggestions)
+# -------------------------
+
+def _event_choices_from_current(current: str):
+    """Build up to 25 app_commands.Choice[int] from events_store filtered by current query."""
+    current = (current or "").lower().strip()
+    events = events_store.get("events", {})
+    choices = []
+    for eid, ev in events.items():
+        name = ev.get("name", "")
+        label = f"{eid}: {name}" if name else f"{eid}"
+        if not current or current in eid.lower() or current in name.lower():
+            try:
+                choices.append(app_commands.Choice(name=label[:100], value=int(eid)))
+            except Exception:
+                # skip any non-int keys just in case
+                continue
+        if len(choices) >= 25:
+            break
+    # sort by numeric ID descending (most recent first)
+    try:
+        choices.sort(key=lambda c: c.value, reverse=True)
+    except Exception:
+        pass
+    return choices[:25]
+
+@cancelevent_command.autocomplete("event_id")
+async def cancelevent_autocomplete(interaction: discord.Interaction, current: str):
+    return _event_choices_from_current(current)
+
+@closeevent_command.autocomplete("event_id")
+async def closeevent_autocomplete(interaction: discord.Interaction, current: str):
+    return _event_choices_from_current(current)
+
+@openevent_command.autocomplete("event_id")
+async def openevent_autocomplete(interaction: discord.Interaction, current: str):
+    return _event_choices_from_current(current)
+
+@eventinfo_command.autocomplete("event_id")
+async def eventinfo_autocomplete(interaction: discord.Interaction, current: str):
+    return _event_choices_from_current(current)
+
+@createfromtemplate_command.autocomplete("template_name")
+async def createfromtemplate_autocomplete(interaction: discord.Interaction, current: str):
+    current = (current or "").lower().strip()
+    choices = []
+    for name, tpl in templates_store.items():
+        if not current or current in name.lower():
+            choices.append(app_commands.Choice(name=name[:100], value=name))
+        if len(choices) >= 25:
+            break
+    # sort alpha
+    choices.sort(key=lambda c: c.name.lower())
+    return choices[:25]
+
+@deletetemplate_command.autocomplete("template_name")
+async def deletetemplate_autocomplete(interaction: discord.Interaction, current: str):
+    current = (current or "").lower().strip()
+    choices = []
+    for name in templates_store.keys():
+        if not current or current in name.lower():
+            choices.append(app_commands.Choice(name=name[:100], value=name))
+        if len(choices) >= 25:
+            break
+    choices.sort(key=lambda c: c.name.lower())
+    return choices[:25]
+
 # Reaction add/remove handling (raw events to support uncached messages)
 @client.event
 async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
