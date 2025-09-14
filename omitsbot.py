@@ -1567,7 +1567,18 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
     emoji_str = str(payload.emoji)
     key = emoji_to_key(emoji_str)
+    
+    # 🚫 Block any reaction that is not one of the 3 allowed (✅ ❌ 🤷)
     if not key:
+        try:
+            ch = client.get_channel(ev["channel_id"]) or await client.fetch_channel(ev["channel_id"])
+            msg = await ch.fetch_message(ev["message_id"])
+            # remove the unapproved reaction from the user
+            guild = client.get_guild(payload.guild_id)
+            user_obj = (guild.get_member(payload.user_id) if guild else None) or await client.fetch_user(payload.user_id)
+            await msg.remove_reaction(payload.emoji, user_obj)
+        except Exception as e:
+            print(f"[WARN] Failed to remove unapproved reaction: {e}")
         return
 
     try:
