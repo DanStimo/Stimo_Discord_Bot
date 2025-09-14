@@ -1093,6 +1093,11 @@ def save_events(data):
 events_store = load_events()
 
 def make_event_embed(ev: dict) -> discord.Embed:
+    """
+    Build the embed for an event from the stored event dict.
+    This version will attempt to use the guild icon as a thumbnail
+    (by looking up the channel_id recorded on the event).
+    """
     color = discord.Color(int(EVENT_EMBED_COLOR_HEX.strip().lstrip("#"), 16))
     embed = discord.Embed(
         title=f"📅 {ev.get('name')}",
@@ -1100,16 +1105,16 @@ def make_event_embed(ev: dict) -> discord.Embed:
         color=color
     )
 
+    # When (stored as ISO UTC)
     dt_iso = ev.get("datetime")
     try:
-        # fromisoformat preserves tzinfo if present
         dt = datetime.fromisoformat(dt_iso)
-        # ensure UTC for display tag
         dt_utc = dt.astimezone(timezone.utc)
         embed.add_field(name="When", value=discord.utils.format_dt(dt_utc, style='F'), inline=False)
     except Exception:
         embed.add_field(name="When", value="Unknown", inline=False)
 
+    # Columns: Attend / Absent / Maybe
     def users_to_text(user_ids):
         if not user_ids:
             return "—"
@@ -1118,6 +1123,16 @@ def make_event_embed(ev: dict) -> discord.Embed:
     embed.add_field(name=f"{ATTEND_EMOJI} Attend", value=users_to_text(ev.get("attend", [])), inline=True)
     embed.add_field(name=f"{ABSENT_EMOJI} Absent", value=users_to_text(ev.get("absent", [])), inline=True)
     embed.add_field(name=f"{MAYBE_EMOJI} Maybe", value=users_to_text(ev.get("maybe", [])), inline=True)
+
+    # Try to set guild icon as thumbnail (use channel -> guild)
+    try:
+        ch = client.get_channel(ev.get("channel_id"))
+        guild = ch.guild if ch is not None else None
+        if guild and guild.icon:
+            embed.set_thumbnail(url=guild.icon.url)
+    except Exception:
+        # ignore any failure and leave embed without thumbnail
+        pass
 
     embed.set_footer(text=f"Event ID: {ev.get('id')} • Created by: {ev.get('creator_id')}")
     return embed
@@ -1149,7 +1164,7 @@ def save_events_store():
 @app_commands.describe(
     name="Event name",
     description="Event description",
-    date="Date (YYYY-MM-DD) — local to Europe/London",
+    date="Date (DD-MM-YYYY) — local to Europe/London",
     time="Time (HH:MM 24-hour) — local to Europe/London",
     channel="Channel to post the event in (optional, defaults to current channel)"
 )
@@ -1162,12 +1177,13 @@ async def createevent_command(interaction: discord.Interaction, name: str, descr
         await interaction.response.send_message("❌ You do not have permission to create events (Moderator role required).", ephemeral=True)
         return
 
+    # NOTE: parse DD-MM-YYYY
     try:
-        dt_local_naive = datetime.strptime(f"{date} {time}", "%Y-%m-%d %H:%M")
+        dt_local_naive = datetime.strptime(f"{date} {time}", "%d-%m-%Y %H:%M")
         dt_local = dt_local_naive.replace(tzinfo=DEFAULT_TZ)
         dt_utc = dt_local.astimezone(timezone.utc)
     except Exception:
-        await interaction.response.send_message("❌ Invalid date/time format. Please use `YYYY-MM-DD` for date and `HH:MM` (24-hour) for time.", ephemeral=True)
+        await interaction.response.send_message("❌ Invalid date/time format. Please use `DD-MM-YYYY` for date and `HH:MM` (24-hour) for time.", ephemeral=True)
         return
 
     target_channel = channel or interaction.channel
@@ -1258,6 +1274,40 @@ async def closeevent_command(interaction: discord.Interaction, event_id: int):
         print(f"[WARN] Could not edit event message when closing: {e}")
 
     await interaction.response.send_message(f"✅ Event `{event_id}` is now closed for signups.", ephemeral=True)
+
+@tree.command(name="openevent", description="Open signups for an event (Moderator role required).")
+@app_commands.describe(event_id="Event ID")
+async def openevent_command(interaction: discord.Interaction, event_id: int):
+    """Re-open signups for a previously closed event."""
+    member = interaction.user
+    if not user_can_create_events(member):
+        await interaction.response.send_message("❌ You do not have permission to open events.", ephemeral=True)
+        return
+
+    ev = events_store.get("events", {}).get(str(event_id))
+    if not ev:
+        await interaction.response.send_message("❌ Event ID not found.", ephemeral=True)
+        return
+
+    if not ev.get("closed", False):
+        await interaction.response.send_message("ℹ️ Event is already open for signups.", ephemeral=True)
+        return
+
+    ev["closed"] = False
+    save_events_store()
+
+    try:
+        ch = client.get_channel(ev["channel_id"]) or await client.fetch_channel(ev["channel_id"])
+        msg = await ch.fetch_message(ev["message_id"])
+        embed = make_event_embed(ev)
+        # restore the embed color to configured color
+        embed.color = discord.Color(int(EVENT_EMBED_COLOR_HEX.strip().lstrip("#"), 16))
+        embed.set_footer(text=f"Event ID: {ev.get('id')} • Created by: {ev.get('creator_id')}")
+        await msg.edit(embed=embed)
+    except Exception as e:
+        print(f"[WARN] Could not edit event message when opening: {e}")
+
+    await interaction.response.send_message(f"✅ Event `{event_id}` is now open for signups.", ephemeral=True)
 
 @tree.command(name="eventinfo", description="Show event info by ID.")
 @app_commands.describe(event_id="Event ID")
