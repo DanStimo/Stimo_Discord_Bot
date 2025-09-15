@@ -2165,18 +2165,14 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
 # -------------------------
 @client.event
 async def on_ready():
-    # Sync both: guild (if provided) for instant availability, and global
     try:
         guild_id_env = os.getenv("GUILD_ID")
         if guild_id_env:
             gid = int(guild_id_env)
-            guild = client.get_guild(gid)
-            if guild is None:
-                try:
-                    guild = await client.fetch_guild(gid)
-                except Exception:
-                    guild = None
+            guild = client.get_guild(gid) or await client.fetch_guild(gid)
             if guild:
+                # 👇 this line makes your global commands appear instantly in that guild
+                tree.copy_global_to(guild=guild)
                 cmds = await tree.sync(guild=guild)
                 print(f"✅ Synced {len(cmds)} commands to guild {gid}")
             else:
