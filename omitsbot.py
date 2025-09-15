@@ -2301,25 +2301,16 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
 @client.event
 async def on_ready():
     try:
-        guild_id_env = os.getenv("GUILD_ID")
-        if guild_id_env:
-            gid = int(guild_id_env)
-            guild = client.get_guild(gid) or await client.fetch_guild(gid)
-
-            # 1) Publish commands to THIS GUILD only (fast)
-            tree.copy_global_to(guild=guild)
-            cmds = await tree.sync(guild=guild)
+        gid = int(os.getenv("GUILD_ID", "0"))
+        guild = client.get_guild(gid) or (await client.fetch_guild(gid) if gid else None)
+        if guild:
+            cmds = await tree.sync(guild=guild)   # publish to guild only
             print(f"✅ Synced {len(cmds)} commands to guild {gid}")
 
-            # 2) One-time cleanup: remove GLOBAL copies so they don’t show twice
-            #    (safe to leave in; it just keeps globals empty)
-            tree.clear_commands()          # clears *global* commands locally
-            await tree.sync()              # pushes empty set → deletes global commands
-            print("🧹 Cleared global commands.")
-        else:
-            # No GUILD_ID provided → fall back to global sync
-            cmds_global = await tree.sync()
-            print(f"🌍 Synced {len(cmds_global)} global commands")
+        # remove any global commands so they don't duplicate guild ones
+        tree.clear_commands(guild=None)           # NOTE: pass guild=None to clear GLOBALS
+        await tree.sync()                         # push the global deletion
+        print("🧹 Cleared global commands")
     except Exception as e:
         print(f"[ERROR] Command sync failed: {e}")
 
