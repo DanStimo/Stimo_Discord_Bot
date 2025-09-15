@@ -2150,9 +2150,50 @@ def _lineup_choices(prefix: str, limit: int = 25):
         items = [x for x in items if prefix_l in str(x[1]).lower() or prefix_l in x[0].lower()]
     return items[:limit]
 
+# ---------- AUTOCOMPLETE: Lineups (open only) ----------
+async def _lineup_open_choices(prefix: str, limit: int = 25):
+    """Return Choice(name, id) for lineups whose message still exists."""
+    prefix_l = (prefix or "").lower()
+    choices: list[app_commands.Choice[int]] = []
+
+    for lid_str, lp in lineups_store.get("lineups", {}).items():
+        # id parse
+        try:
+            lid = int(lid_str)
+        except Exception:
+            continue
+
+        # label text
+        name = lp.get("title") or lp.get("formation") or "Lineup"
+        display = f"{lid} — {name}"
+
+        # text filter (by id or label)
+        if prefix_l and (prefix_l not in str(lid) and prefix_l not in display.lower()):
+            continue
+
+        # only suggest if the original message still exists
+        ch = client.get_channel(lp.get("channel_id"))
+        if not isinstance(ch, (discord.TextChannel, discord.Thread)):
+            continue
+        try:
+            await ch.fetch_message(lp.get("message_id"))
+        except Exception:
+            # message gone -> treat as closed, skip
+            continue
+
+        choices.append(app_commands.Choice(name=display, value=lid))
+        if len(choices) >= limit:
+            break
+
+    return choices
+
 @editlineup_command.autocomplete("lineup_id")
 async def editlineup_autocomplete(interaction: discord.Interaction, current: str):
-    return [app_commands.Choice(name=disp, value=val) for disp, val in _lineup_choices(current)]
+    return await _lineup_open_choices(current)
+
+@deletelineup_command.autocomplete("lineup_id")
+async def deletelineup_autocomplete(interaction: discord.Interaction, current: str):
+    return await _lineup_open_choices(current)
 
 # ---------------------------------------------------
 # Reaction removal suppression so bot-initiated removals don't unregister users
