@@ -41,6 +41,29 @@ WELCOME_COLOR_HEX = os.getenv("WELCOME_COLOR_HEX", "#2ecc71")
 welcome_config = {
     "channel_id": WELCOME_CHANNEL_ID,
     "color_hex": WELCOME_COLOR_HEX,
+
+# --- Lineups config/persistence ---
+LINEUPS_FILE = os.getenv("LINEUPS_FILE", "lineups.json")
+
+# Common football formations -> ordered positions (11)
+FORMATIONS: dict[str, list[str]] = {
+    "4-3-3": ["GK", "RB", "RCB", "LCB", "LB", "RCM", "CDM", "LCM", "RW", "ST", "LW"],
+    "4-2-3-1": ["GK", "RB", "RCB", "LCB", "LB", "RDM", "LDM", "RAM", "CAM", "LAM", "ST"],
+    "4-4-2": ["GK", "RB", "RCB", "LCB", "LB", "RM", "RCM", "LCM", "LM", "RST", "LST"],
+    "3-5-2": ["GK", "RCB", "CB", "LCB", "RWB", "RCM", "CDM", "LCM", "LWB", "RST", "LST"],
+    "5-3-2": ["GK", "RWB", "RCB", "CB", "LCB", "LWB", "RCM", "CM", "LCM", "RST", "LST"],
+    "3-4-3": ["GK", "RCB", "CB", "LCB", "RM", "RCM", "LCM", "LM", "RW", "ST", "LW"],
+    "4-1-2-1-2": ["GK", "RB", "RCB", "LCB", "LB", "CDM", "RCM", "LCM", "CAM", "RST", "LST"],
+}
+
+def load_lineups_store():
+    return load_json_file(LINEUPS_FILE, {"next_id": 1, "lineups": {}})
+
+def save_lineups_store():
+    save_json_file(LINEUPS_FILE, lineups_store)
+
+lineups_store = load_lineups_store()
+    
 }
 
 def _color_from_hex(h: str) -> discord.Color:
@@ -708,6 +731,118 @@ async def delete_after_delay(message, delay=180):
     except Exception as e:
         print(f"[ERROR] Failed to auto-delete message: {e}")
 
+class PositionSelect(discord.ui.Select):
+    def __init__(self, lp: dict):
+        self.lp = lp
+        options = []
+        for idx, pos in enumerate(lp.get("positions", [])):
+            tag = f" — @{pos['user_id']}" if pos.get("user_id") else ""
+            options.append(discord.SelectOption(
+                label=pos["code"],
+                description=("Assigned" if pos.get("user_id") else "Unassigned"),
+                value=str(idx)
+            ))
+        super().__init__(
+            placeholder="Choose a position to assign...",
+            options=options,
+            min_values=1,
+            max_values=1
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        view: "LineupAssignView" = self.view  # type: ignore
+        view.current_index = int(self.values[0])
+        await interaction.response.defer()
+        # re-render only the footer note (we'll keep embed same)
+        try:
+            await interaction.message.edit(view=view)
+        except Exception:
+            pass
+
+class PlayerSelect(discord.ui.UserSelect):
+    def __init__(self, lp: dict):
+        self.lp = lp
+        super().__init__(placeholder="Pick a player for the selected position", min_values=1, max_values=1)
+
+    async def callback(self, interaction: discord.Interaction):
+        view: "LineupAssignView" = self.view  # type: ignore
+        position_index = view.current_index
+        positions = self.lp.get("positions", [])
+        if not (0 <= position_index < len(positions)):
+            await interaction.response.send_message("No position selected. Pick a position first.", ephemeral=True)
+            return
+
+        picked: discord.Member = self.values[0]  # type: ignore
+
+        # Role enforcement (if lineup has role_id)
+        role_id = self.lp.get("role_id")
+        if role_id:
+            has_role = any(r.id == role_id for r in picked.roles)
+            if not has_role:
+                await interaction.response.send_message(
+                    f"❌ {picked.mention} doesn't have the required role <@&{role_id}>.",
+                    ephemeral=True
+                )
+                return
+
+        # Assign and update
+        self.lp["positions"][position_index]["user_id"] = picked.id
+        self.lp["updated_at"] = datetime.now(timezone.utc).isoformat()
+        lineups_store["lineups"][str(self.lp["id"])] = self.lp
+        save_lineups_store()
+
+        # Refresh embed
+        embed = make_lineup_embed(self.lp)
+        await safe_interaction_edit(interaction, embed=embed, view=view)
+
+class LineupAssignView(discord.ui.View):
+    def __init__(self, lp: dict, editor_id: int, timeout: int = 600):
+        super().__init__(timeout=timeout)
+        self.lp = lp
+        self.editor_id = editor_id
+        self.current_index = 0  # controlled by PositionSelect
+        self.message: discord.Message | None = None
+
+        # Components
+        self.add_item(PositionSelect(lp))
+        self.add_item(PlayerSelect(lp))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        # Only allow editor/creator/moderator to manipulate
+        guild = interaction.guild
+        member = interaction.user if isinstance(interaction.user, discord.Member) else (guild.get_member(interaction.user.id) if guild else None)
+        allowed = user_can_edit_lineup(member, self.lp) if member else False
+        if not allowed:
+            await interaction.response.send_message("You can't edit this lineup.", ephemeral=True)
+        return allowed
+
+    @discord.ui.button(label="Clear Selected", style=discord.ButtonStyle.secondary)
+    async def clear_selected(self, interaction: discord.Interaction, button: discord.ui.Button):
+        idx = self.current_index
+        if 0 <= idx < len(self.lp.get("positions", [])):
+            self.lp["positions"][idx]["user_id"] = None
+            self.lp["updated_at"] = datetime.now(timezone.utc).isoformat()
+            lineups_store["lineups"][str(self.lp["id"])] = self.lp
+            save_lineups_store()
+        embed = make_lineup_embed(self.lp)
+        await safe_interaction_edit(interaction, embed=embed, view=self)
+
+    @discord.ui.button(label="Finish", style=discord.ButtonStyle.success)
+    async def finish(self, interaction: discord.Interaction, button: discord.ui.Button):
+        for item in list(self.children):
+            item.disabled = True  # disable all
+        embed = make_lineup_embed(self.lp)
+        await safe_interaction_edit(interaction, embed=embed, view=self)
+
+    async def on_timeout(self):
+        if self.message:
+            try:
+                for item in list(self.children):
+                    item.disabled = True
+                await self.message.edit(view=self)
+            except Exception:
+                pass
+
 # - /versus & aliases
 @tree.command(name="versus", description="Check another club's stats by name or ID.")
 @app_commands.describe(club="Club name or club ID")
@@ -1078,6 +1213,97 @@ async def last5_command(interaction: discord.Interaction, club: str):
 async def l5_command(interaction: discord.Interaction, club: str):
     await last5_command.callback(interaction, club)
 
+@tree.command(name="lineup", description="Create an interactive lineup from a formation.")
+@app_commands.describe(
+    formation="Choose a soccer formation",
+    title="Optional custom title for the lineup",
+    role="Optional role restriction: only members with this role can be assigned",
+    channel="Channel to post the lineup (defaults to current channel)"
+)
+@app_commands.choices(formation=[app_commands.Choice(name=f, value=f) for f in FORMATIONS.keys()])
+async def lineup_command(
+    interaction: discord.Interaction,
+    formation: app_commands.Choice[str],
+    title: str | None = None,
+    role: discord.Role | None = None,
+    channel: discord.TextChannel | None = None
+):
+    await interaction.response.defer(ephemeral=True)
+    target_channel = channel or interaction.channel
+    if not isinstance(target_channel, (discord.TextChannel, discord.Thread)):
+        await safe_interaction_respond(interaction, content="❌ Please specify a valid text channel.", ephemeral=True)
+        return
+
+    # Build lineup object
+    lid = lineups_store.get("next_id", 1)
+    lp = {
+        "id": lid,
+        "title": (title or "").strip() or None,
+        "formation": formation.value,
+        "positions": _build_positions_for_formation(formation.value),
+        "role_id": (role.id if role else None),
+        "channel_id": target_channel.id,
+        "message_id": None,
+        "creator_id": interaction.user.id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": None
+    }
+
+    embed = make_lineup_embed(lp)
+
+    # Post with interactive view
+    view = LineupAssignView(lp, editor_id=interaction.user.id)
+    try:
+        sent = await target_channel.send(embed=embed, view=view)
+        view.message = sent
+        lp["message_id"] = sent.id
+        lineups_store.setdefault("lineups", {})[str(lid)] = lp
+        lineups_store["next_id"] = lid + 1
+        save_lineups_store()
+    except Exception as e:
+        await safe_interaction_respond(interaction, content=f"❌ Failed to post lineup: {e}", ephemeral=True)
+        return
+
+    await safe_interaction_respond(interaction, content=f"✅ Lineup created (ID `{lid}`) in {target_channel.mention}.", ephemeral=True)
+    await log_command_output(interaction, "lineup", sent)
+
+
+@tree.command(name="editlineup", description="Edit an existing lineup by ID.")
+@app_commands.describe(
+    lineup_id="The lineup ID to edit"
+)
+async def editlineup_command(interaction: discord.Interaction, lineup_id: int):
+    await interaction.response.defer(ephemeral=True)
+
+    lp = lineups_store.get("lineups", {}).get(str(lineup_id))
+    if not lp:
+        await safe_interaction_respond(interaction, content="❌ Lineup ID not found.", ephemeral=True)
+        return
+
+    member = interaction.user if isinstance(interaction.user, discord.Member) else interaction.guild.get_member(interaction.user.id)
+    if not user_can_edit_lineup(member, lp):
+        await safe_interaction_respond(interaction, content="❌ You don't have permission to edit this lineup.", ephemeral=True)
+        return
+
+    try:
+        ch = client.get_channel(lp["channel_id"]) or await client.fetch_channel(lp["channel_id"])
+        msg = await ch.fetch_message(lp["message_id"])
+    except Exception as e:
+        await safe_interaction_respond(interaction, content=f"❌ Couldn't access the lineup message: {e}", ephemeral=True)
+        return
+
+    # Re-attach an active view
+    view = LineupAssignView(lp, editor_id=interaction.user.id)
+    view.message = msg
+    try:
+        await msg.edit(embed=make_lineup_embed(lp), view=view)
+    except Exception as e:
+        await safe_interaction_respond(interaction, content=f"❌ Failed to attach editor: {e}", ephemeral=True)
+        return
+
+    await safe_interaction_respond(interaction, content=f"✏️ Editing lineup `{lineup_id}`.", ephemeral=True)
+    await log_command_output(interaction, "editlineup", msg)
+
 # -------------------------
 # Event & Template persistence
 # -------------------------
@@ -1180,6 +1406,46 @@ def save_events_store():
 
 def save_templates_store():
     save_json_file(TEMPLATES_FILE, templates_store)
+
+def make_lineup_embed(lp: dict) -> discord.Embed:
+    """
+    Build an embed for a lineup. Styled like your event embed (blue trim + server icon).
+    """
+    color = discord.Color(int(EVENT_EMBED_COLOR_HEX.strip().lstrip("#"), 16))
+    ch = client.get_channel(lp.get("channel_id"))
+    guild = ch.guild if ch else None
+
+    title = lp.get("title") or f"{lp.get('formation')} Lineup"
+    formation = lp.get("formation")
+    role_id = lp.get("role_id")
+
+    embed = discord.Embed(
+        title=f"🧩 {title}",
+        description=f"**Formation:** `{formation}`" + (f"\n**Eligible Role:** <@&{role_id}>" if role_id else ""),
+        color=color
+    )
+
+    positions: list[dict] = lp.get("positions", [])
+    # Show positions in 2 columns for readability
+    left = []
+    right = []
+    for i, pos in enumerate(positions, start=1):
+        mention = f"<@{pos['user_id']}>" if pos.get("user_id") else "—"
+        line = f"**{pos['code']}** — {mention}"
+        (left if i % 2 else right).append(line)
+
+    embed.add_field(name="Positions (A)", value="\n".join(left) or "\u200b", inline=True)
+    embed.add_field(name="Positions (B)", value="\n".join(right) or "\u200b", inline=True)
+
+    # Thumbnail: server icon (fallback: none)
+    try:
+        if guild and guild.icon:
+            embed.set_thumbnail(url=guild.icon.url)
+    except Exception:
+        pass
+
+    embed.set_footer(text=f"Lineup ID: {lp.get('id')} • Created by: {lp.get('creator_id')}")
+    return embed
 
 # -------------------------
 # Template commands
@@ -1655,6 +1921,25 @@ async def createfromtemplate_autocomplete(interaction: discord.Interaction, curr
 async def deletetemplate_autocomplete(interaction: discord.Interaction, current: str):
     return _template_choices(current)
 
+def _lineup_choices(prefix: str, limit: int = 25):
+    items = []
+    for lid_str, lp in lineups_store.get("lineups", {}).items():
+        try:
+            lid = int(lid_str)
+        except Exception:
+            continue
+        name = lp.get("title") or lp.get("formation")
+        display = f"{lid} — {name}"
+        items.append((display, lid))
+    prefix_l = (prefix or "").lower()
+    if prefix_l:
+        items = [x for x in items if prefix_l in str(x[1]).lower() or prefix_l in x[0].lower()]
+    return items[:limit]
+
+@editlineup_command.autocomplete("lineup_id")
+async def editlineup_autocomplete(interaction: discord.Interaction, current: str):
+    return [app_commands.Choice(name=disp, value=val) for disp, val in _lineup_choices(current)]
+
 # ---------------------------------------------------
 # Reaction removal suppression so bot-initiated removals don't unregister users
 # ---------------------------------------------------
@@ -1667,7 +1952,27 @@ async def mark_suppressed_reaction(message_id: int, user_id: int, emoji_str: str
         await asyncio.sleep(ttl)
         pending_reaction_removals.discard(key)
     asyncio.create_task(_clear())
+# -------------------------
+# Helpers for lineups
+# -------------------------
+def user_can_edit_lineup(member: discord.Member, lp: dict) -> bool:
+    """Allow editors if they created it or they can create events (Moderator)."""
+    return (member and (member.id == lp.get("creator_id"))) or user_can_create_events(member)
 
+def _build_positions_for_formation(formation: str) -> list[dict]:
+    codes = FORMATIONS.get(formation, [])
+    return [{"code": c, "user_id": None} for c in codes]
+
+async def _resolve_member(guild: discord.Guild, user_id: int) -> discord.Member | None:
+    if not guild:
+        return None
+    m = guild.get_member(user_id)
+    if m:
+        return m
+    try:
+        return await guild.fetch_member(user_id)
+    except Exception:
+        return None
 # -------------------------
 # Helpers to manage thread membership
 # -------------------------
