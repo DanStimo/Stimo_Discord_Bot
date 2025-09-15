@@ -840,7 +840,7 @@ class RoleMemberSelect(discord.ui.Select):
         embed = make_lineup_embed(self.lp)
         await safe_interaction_edit(interaction, embed=embed, view=view)
 
-cclass LineupAssignView(discord.ui.View):
+class LineupAssignView(discord.ui.View):
     def __init__(self, lp: dict, editor_id: int, timeout: int = 600):
         super().__init__(timeout=timeout)
         self.lp = lp
