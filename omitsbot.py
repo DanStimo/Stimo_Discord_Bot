@@ -66,10 +66,11 @@ def has_admin_role(member: discord.Member) -> bool:
 
 # Common football formations -> ordered positions (11)
 FORMATIONS: dict[str, list[str]] = {
-    "4-3-3": ["GK", "RB", "RCB", "LCB", "LB", "RCM", "CDM", "LCM", "RW", "ST", "LW"],
+    "4-3-3 D": ["GK", "RB", "RCB", "LCB", "LB", "RCM", "CDM", "LCM", "RW", "ST", "LW"],
+    "4-3-3 A": ["GK", "RB", "RCB", "LCB", "LB", "RCM", "CAM", "LCM", "RW", "ST", "LW"],
     "4-2-3-1": ["GK", "RB", "RCB", "LCB", "LB", "RDM", "LDM", "RAM", "CAM", "LAM", "ST"],
     "4-4-2": ["GK", "RB", "RCB", "LCB", "LB", "RM", "RCM", "LCM", "LM", "RST", "LST"],
-    "3-5-2": ["GK", "RCB", "CB", "LCB", "RWB", "RCM", "CDM", "LCM", "LWB", "RST", "LST"],
+    "3-5-2": ["GK", "RCB", "CB", "LCB", "RM", "RCM", "CDM", "LCM", "LM", "RST", "LST"],
     "5-3-2": ["GK", "RWB", "RCB", "CB", "LCB", "LWB", "RCM", "CM", "LCM", "RST", "LST"],
     "3-4-3": ["GK", "RCB", "CB", "LCB", "RM", "RCM", "LCM", "LM", "RW", "ST", "LW"],
     "4-1-2-1-2": ["GK", "RB", "RCB", "LCB", "LB", "CDM", "RCM", "LCM", "CAM", "RST", "LST"],
@@ -1477,6 +1478,44 @@ async def editlineup_command(interaction: discord.Interaction, lineup_id: int):
 
     await safe_interaction_respond(interaction, content=f"✏️ Editing lineup `{lineup_id}`.", ephemeral=True)
     #await log_command_output(interaction, "editlineup", msg)
+
+@tree.command(name="deletelineup", description="Delete a lineup by ID.")
+@app_commands.describe(lineup_id="The lineup ID to delete")
+async def deletelineup_command(interaction: discord.Interaction, lineup_id: int):
+    await interaction.response.defer(ephemeral=True)
+
+    # Find lineup
+    lp = lineups_store.get("lineups", {}).get(str(lineup_id))
+    if not lp:
+        await safe_interaction_respond(interaction, content="❌ Lineup ID not found.", ephemeral=True)
+        return
+
+    # Permission: creator or Moderator (same as edit)
+    member = interaction.user if isinstance(interaction.user, discord.Member) else interaction.guild.get_member(interaction.user.id)
+    if not user_can_edit_lineup(member, lp):
+        await safe_interaction_respond(interaction, content="❌ You don't have permission to delete this lineup.", ephemeral=True)
+        return
+
+    # Try to delete the original lineup message
+    try:
+        ch = client.get_channel(lp["channel_id"]) or await client.fetch_channel(lp["channel_id"])
+        msg = await ch.fetch_message(lp["message_id"])
+        await msg.delete()
+    except Exception as e:
+        # It's okay if the message is gone; we'll still remove the record
+        print(f"[WARN] Could not delete lineup message {lineup_id}: {e}")
+
+    # Remove from store and persist
+    try:
+        lineups_store["lineups"].pop(str(lineup_id), None)
+        save_lineups_store()
+    except Exception as e:
+        await safe_interaction_respond(interaction, content=f"⚠️ Deleted message but failed to update storage: {e}", ephemeral=True)
+        return
+
+    await safe_interaction_respond(interaction, content=f"🗑️ Lineup `{lineup_id}` deleted.", ephemeral=True)
+    # (Optional) log to your archive channel:
+    # await log_command_output(interaction, "deletelineup", extra_text=f"Deleted lineup {lineup_id}.")
 
 # -------------------------
 # Event & Template persistence
