@@ -959,6 +959,30 @@ class LineupAssignView(discord.ui.View):
         embed = make_lineup_embed(self.lp)
         await safe_interaction_edit(interaction, embed=embed, view=self)
 
+    @discord.ui.button(label="Clear All", style=discord.ButtonStyle.danger)
+    async def clear_all(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # If nothing is assigned, tell the user and bail
+        if not any(p.get("user_id") for p in self.lp.get("positions", [])):
+            await interaction.response.send_message("Nothing to clear — all positions are already unassigned.", ephemeral=True)
+            return
+    
+        # Clear every assignment
+        for p in self.lp.get("positions", []):
+            p["user_id"] = None
+    
+        # Persist + timestamp
+        self.lp["updated_at"] = datetime.now(timezone.utc).isoformat()
+        lineups_store["lineups"][str(self.lp["id"])] = self.lp
+        save_lineups_store()
+    
+        # Reset picker state and refresh the position menu so descriptions show "Unassigned"
+        self.current_index = 0
+        self.refresh_position_options()
+    
+        # Update the embed in-place
+        embed = make_lineup_embed(self.lp)
+        await safe_interaction_edit(interaction, embed=embed, view=self)
+
     @discord.ui.button(label="Finish", style=discord.ButtonStyle.success)
     async def finish(self, interaction: discord.Interaction, button: discord.ui.Button):
         for item in list(self.children):
@@ -1397,7 +1421,7 @@ async def lineup_command(
         return
 
     await safe_interaction_respond(interaction, content=f"✅ Lineup created (ID `{lid}`) in {target_channel.mention}.", ephemeral=True)
-    await log_command_output(interaction, "lineup", sent)
+    #await log_command_output(interaction, "lineup", sent)
 
 
 @tree.command(name="editlineup", description="Edit an existing lineup by ID.")
@@ -1434,7 +1458,7 @@ async def editlineup_command(interaction: discord.Interaction, lineup_id: int):
         return
 
     await safe_interaction_respond(interaction, content=f"✏️ Editing lineup `{lineup_id}`.", ephemeral=True)
-    await log_command_output(interaction, "editlineup", msg)
+    #await log_command_output(interaction, "editlineup", msg)
 
 # -------------------------
 # Event & Template persistence
