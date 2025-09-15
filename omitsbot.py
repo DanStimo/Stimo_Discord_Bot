@@ -581,7 +581,7 @@ class ClubDropdown(discord.ui.Select):
                 await asyncio.sleep(180)
                 await view.message.delete()
             except Exception as e:
-                print(f"[ERROR] Failed to delete message after timeout: {e}"))
+                print(f"[ERROR] Failed to delete message after timeout: {e}")
         asyncio.create_task(delete_after_timeout())
 
         await log_command_output(interaction, "versus", view.message)
