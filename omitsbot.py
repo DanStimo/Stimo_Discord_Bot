@@ -9,6 +9,7 @@ import asyncio
 from dotenv import load_dotenv
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
+import re
 
 load_dotenv()
 
@@ -45,6 +46,35 @@ welcome_config = {
 def _color_from_hex(h: str) -> discord.Color:
     h = (h or "#2ecc71").strip().lstrip("#")
     return discord.Color(int(h, 16))
+
+def _twitch_url_from_input(value: str | None) -> str | None:
+    """
+    Accepts a Twitch username OR a full twitch URL and returns
+    a normalized 'https://twitch.tv/<username>' or None.
+    """
+    if not value:
+        return None
+    v = value.strip()
+    if not v:
+        return None
+
+    # Strip protocol and www
+    v = v.replace("https://", "").replace("http://", "")
+    if v.startswith("www."):
+        v = v[4:]
+
+    # If they pasted a URL, pull out the username
+    if v.lower().startswith("twitch.tv/"):
+        v = v.split("/", 1)[1]
+
+    # Keep only the username (alnum + underscore)
+    m = re.match(r"^([A-Za-z0-9_]+)$", v)
+    if not m:
+        # fallback: take the first path segment
+        v = v.split("/", 1)[0]
+
+    username = v
+    return f"https://twitch.tv/{username}"
 
 @client.event
 async def on_member_join(member: discord.Member):
@@ -1096,6 +1126,12 @@ def make_event_embed(ev: dict) -> discord.Embed:
     except Exception:
         embed.add_field(name="When", value="Unknown", inline=False)
 
+    # ✅ Stream Link (optional)
+    stream_url = ev.get("twitch_url")
+    if stream_url:
+        username = stream_url.rsplit("/", 1)[-1]
+        embed.add_field(name="Stream Link", value=f"[{username}]({stream_url})", inline=False)
+
     # Thread field if created
     if ev.get("thread_id"):
         embed.add_field(name="Thread", value=f"<#{ev['thread_id']}>", inline=False)
@@ -1154,7 +1190,8 @@ def save_templates_store():
     event_name="Event display name",
     description="Event description",
     channel="Optional channel to save with the template",
-    role="Optional role to ping when this template is used"
+    role="Optional role to ping when this template is used",
+    stream="Optional Twitch channel or URL (e.g. ninja or https://twitch.tv/ninja)"  # NEW
 )
 async def createtemplate_command(
     interaction: discord.Interaction,
@@ -1162,7 +1199,8 @@ async def createtemplate_command(
     event_name: str,
     description: str,
     channel: discord.TextChannel = None,
-    role: discord.Role = None
+    role: discord.Role = None,
+    stream: str = None
 ):
     member = interaction.user
     if not user_can_create_events(member):
@@ -1182,7 +1220,8 @@ async def createtemplate_command(
         "name": event_name,
         "description": description,
         "channel_id": channel.id if channel else None,
-        "role_id": role.id if role else None,   # <-- store ONLY the ID
+        "role_id": role.id if role else None,
+        "twitch_url": _twitch_url_from_input(stream),
         "creator_id": interaction.user.id,
         "created_at": datetime.now(timezone.utc).isoformat()
     }
@@ -1198,7 +1237,10 @@ async def listtemplates_command(interaction: discord.Interaction):
     lines = []
     for k, t in templates_store.items():
         channel_part = f" • Channel: <#{t['channel_id']}>" if t.get("channel_id") else ""
-        lines.append(f"**{k}** — {t.get('name')} {channel_part}\n{t.get('description')[:150]}")
+        stream_part = ""
+        if t.get("twitch_url"):
+            stream_part = f" • Stream: {t['twitch_url'].rsplit('/', 1)[-1]}"
+        lines.append(f"**{k}** — {t.get('name')} {channel_part}{stream_part}\n{t.get('description')[:150]}")
     text = "\n\n".join(lines)
     await safe_interaction_respond(
         interaction,
@@ -1232,7 +1274,8 @@ async def deletetemplate_command(interaction: discord.Interaction, template_name
     date="Date (DD-MM-YYYY) — local to Europe/London",
     time="Time (HH:MM 24-hour) — local to Europe/London",
     channel="Optional channel to post the event in (defaults to template channel or current channel)",
-    role="Optional role to ping (overrides template's saved role)"
+    role="Optional role to ping (overrides template's saved role)",
+    stream="Optional Twitch channel or URL (overrides template stream)"
 )
 async def createfromtemplate_command(
     interaction: discord.Interaction,
@@ -1240,7 +1283,8 @@ async def createfromtemplate_command(
     date: str,
     time: str,
     channel: discord.TextChannel = None,
-    role: discord.Role = None
+    role: discord.Role = None,
+    stream: str = None
 ):
     await interaction.response.defer(ephemeral=True)
     member = interaction.user
@@ -1254,20 +1298,23 @@ async def createfromtemplate_command(
         await safe_interaction_respond(interaction, content="❌ Template not found.", ephemeral=True)
         return
 
-    # Resolve role: prefer provided role, else template's saved role_id
+    # Resolve role
     chosen_role = role
     if chosen_role is None:
         rid = tpl.get("role_id")
         if rid:
             chosen_role = interaction.guild.get_role(rid)
 
-    # parse date/time DD-MM-YYYY
+    # Resolve stream (override if provided)
+    chosen_stream_url = _twitch_url_from_input(stream) if stream else tpl.get("twitch_url")
+
+    # parse date/time
     try:
         dt_local_naive = datetime.strptime(f"{date} {time}", "%d-%m-%Y %H:%M")
         dt_local = dt_local_naive.replace(tzinfo=DEFAULT_TZ)
         dt_utc = dt_local.astimezone(timezone.utc)
     except Exception:
-        await safe_interaction_respond(interaction, content="❌ Invalid date/time format. Please use `DD-MM-YYYY` for date and `HH:MM` (24-hour) for time.", ephemeral=True)
+        await safe_interaction_respond(interaction, content="❌ Invalid date/time format. Please use `DD-MM-YYYY` and `HH:MM` (24-hour).", ephemeral=True)
         return
 
     target_channel = None
@@ -1298,21 +1345,17 @@ async def createfromtemplate_command(
         "attend": [],
         "absent": [],
         "maybe": [],
-        "role_id": (chosen_role.id if chosen_role else None)  # <-- store ONLY the ID
+        "role_id": (chosen_role.id if chosen_role else None),
+        "twitch_url": chosen_stream_url
     }
 
     embed = make_event_embed(ev)
 
-    # Spoilered role mention outside the embed
     content = f"||{chosen_role.mention}||" if chosen_role else None
     allowed_mentions = discord.AllowedMentions(roles=[chosen_role]) if chosen_role else None
 
     try:
-        sent = await target_channel.send(
-            content=content,
-            embed=embed,
-            allowed_mentions=allowed_mentions
-        )
+        sent = await target_channel.send(content=content, embed=embed, allowed_mentions=allowed_mentions)
         await sent.add_reaction(ATTEND_EMOJI)
         await sent.add_reaction(ABSENT_EMOJI)
         await sent.add_reaction(MAYBE_EMOJI)
@@ -1356,7 +1399,8 @@ async def createfromtemplate_command(
     date="Date (DD-MM-YYYY) — local to Europe/London",
     time="Time (HH:MM 24-hour) — local to Europe/London",
     channel="Channel to post the event in (optional, defaults to current channel)",
-    role="Optional role to ping (will be spoilered)"
+    role="Optional role to ping (will be spoilered)",
+    stream="Optional Twitch channel or URL (e.g. ninja or https://twitch.tv/ninja)"  # NEW
 )
 async def createevent_command(
     interaction: discord.Interaction,
@@ -1365,7 +1409,8 @@ async def createevent_command(
     date: str,
     time: str,
     channel: discord.TextChannel = None,
-    role: discord.Role = None
+    role: discord.Role = None,
+    stream: str = None
 ):
     await interaction.response.defer(ephemeral=True)
     member = interaction.user
@@ -1404,9 +1449,9 @@ async def createevent_command(
         "attend": [],
         "absent": [],
         "maybe": [],
-        "role_id": (role.id if role else None)   # <-- store ONLY the ID
+        "role_id": (role.id if role else None),
+        "twitch_url": _twitch_url_from_input(stream),
     }
-
     embed = make_event_embed(ev)
 
     # Prepare spoilered mention outside the embed (so it pings)
