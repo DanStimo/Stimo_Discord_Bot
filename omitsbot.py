@@ -2305,15 +2305,21 @@ async def on_ready():
         if guild_id_env:
             gid = int(guild_id_env)
             guild = client.get_guild(gid) or await client.fetch_guild(gid)
-            if guild:
-                # 👇 this line makes your global commands appear instantly in that guild
-                tree.copy_global_to(guild=guild)
-                cmds = await tree.sync(guild=guild)
-                print(f"✅ Synced {len(cmds)} commands to guild {gid}")
-            else:
-                print(f"[WARN] Could not resolve guild {gid} for guild sync")
-        cmds_global = await tree.sync()
-        print(f"🌍 Synced {len(cmds_global)} global commands")
+
+            # 1) Publish commands to THIS GUILD only (fast)
+            tree.copy_global_to(guild=guild)
+            cmds = await tree.sync(guild=guild)
+            print(f"✅ Synced {len(cmds)} commands to guild {gid}")
+
+            # 2) One-time cleanup: remove GLOBAL copies so they don’t show twice
+            #    (safe to leave in; it just keeps globals empty)
+            tree.clear_commands()          # clears *global* commands locally
+            await tree.sync()              # pushes empty set → deletes global commands
+            print("🧹 Cleared global commands.")
+        else:
+            # No GUILD_ID provided → fall back to global sync
+            cmds_global = await tree.sync()
+            print(f"🌍 Synced {len(cmds_global)} global commands")
     except Exception as e:
         print(f"[ERROR] Command sync failed: {e}")
 
