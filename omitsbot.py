@@ -747,7 +747,7 @@ async def delete_after_delay(message, delay=180):
     except Exception as e:
         print(f"[ERROR] Failed to auto-delete message: {e}")
 
-def _position_options_from_lp(lp: dict) -> list[discord.SelectOption]:
+def _position_options_from_lp(lp: dict, selected_index: int | None = None) -> list[discord.SelectOption]:
     opts: list[discord.SelectOption] = []
     for idx, pos in enumerate(lp.get("positions", [])):
         status = "Assigned" if pos.get("user_id") else "Unassigned"
@@ -755,6 +755,7 @@ def _position_options_from_lp(lp: dict) -> list[discord.SelectOption]:
             label=pos["code"],
             description=status,
             value=str(idx),
+            default=(selected_index is not None and idx == selected_index)
         ))
     return opts
 
@@ -771,11 +772,13 @@ class PositionSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         view: "LineupAssignView" = self.view  # type: ignore
         view.current_index = int(self.values[0])
-        await interaction.response.defer()
-        try:
-            await interaction.message.edit(view=view)
-        except Exception:
-            pass
+    
+        # Keep the picked position visible + selected
+        pos_code = self.lp["positions"][view.current_index]["code"]
+        self.placeholder = f"Position: {pos_code}"
+        self.options = _position_options_from_lp(self.lp, selected_index=view.current_index)
+    
+        await interaction.response.edit_message(view=view)
 
 class PlayerSelect(discord.ui.UserSelect):
     def __init__(self, lp: dict):
@@ -809,8 +812,11 @@ class PlayerSelect(discord.ui.UserSelect):
         lineups_store["lineups"][str(self.lp["id"])] = self.lp
         save_lineups_store()
         
-        # 🔄 update the PositionSelect menu so the picked slot shows "Assigned"
-        view.refresh_position_options()
+        # Reflect the assignment, then reset both dropdowns to defaults
+        view.refresh_position_options(keep_selected=True)  # briefly keep the highlight
+        view.current_index = None
+        view.refresh_position_options(keep_selected=False)
+        view._reset_player_placeholder()
         
         # Refresh embed
         embed = make_lineup_embed(self.lp)
@@ -861,9 +867,12 @@ class RoleMemberSelect(discord.ui.Select):
         lineups_store["lineups"][str(self.lp["id"])] = self.lp
         save_lineups_store()
 
-        # 🔄 make the menu show "Assigned" for this slot
-        view.refresh_position_options()
-
+        # Reflect assignment then reset both dropdowns to defaults
+        view.refresh_position_options(keep_selected=True)
+        view.current_index = None
+        view.refresh_position_options(keep_selected=False)
+        view._reset_player_placeholder()
+        
         embed = make_lineup_embed(self.lp)
         await safe_interaction_edit(interaction, embed=embed, view=view)
 
@@ -872,7 +881,7 @@ class LineupAssignView(discord.ui.View):
         super().__init__(timeout=timeout)
         self.lp = lp
         self.editor_id = editor_id
-        self.current_index = 0
+        self.current_index: int | None = None
         self.message: discord.Message | None = None
 
         # For role-paged select
@@ -947,11 +956,24 @@ class LineupAssignView(discord.ui.View):
                 view._refresh_role_select()
             await interaction.response.edit_message(view=view)
 
-    def refresh_position_options(self):
-        # find the PositionSelect in this view and rebuild its options
+    def _reset_player_placeholder(self):
+    for child in self.children:
+        if isinstance(child, PlayerSelect):
+            child.placeholder = "Pick a player for the selected position"
+        elif isinstance(child, RoleMemberSelect):
+            child.placeholder = "Pick a player with the required role"
+
+    def refresh_position_options(self, keep_selected: bool = False):
+        """Rebuild top select; optionally keep the current selection highlighted."""
+        selected = self.current_index if keep_selected else None
         for child in self.children:
             if isinstance(child, PositionSelect):
-                child.options = _position_options_from_lp(self.lp)
+                if selected is not None:
+                    pos_code = self.lp["positions"][selected]["code"]
+                    child.placeholder = f"Position: {pos_code}"
+                else:
+                    child.placeholder = "Choose a position to assign..."
+                child.options = _position_options_from_lp(self.lp, selected_index=selected)
                 break
                 
     # ---------- Permissions + your existing buttons ----------
@@ -967,6 +989,9 @@ class LineupAssignView(discord.ui.View):
     @discord.ui.button(label="Clear Selected", style=discord.ButtonStyle.secondary)
     async def clear_selected(self, interaction: discord.Interaction, button: discord.ui.Button):
         idx = self.current_index
+        if idx is None:
+            await interaction.response.send_message("Pick a position first.", ephemeral=True)
+            return
         if 0 <= idx < len(self.lp.get("positions", [])):
             self.lp["positions"][idx]["user_id"] = None
             self.lp["updated_at"] = datetime.now(timezone.utc).isoformat()
@@ -995,9 +1020,10 @@ class LineupAssignView(discord.ui.View):
         save_lineups_store()
     
         # Reset picker state and refresh the position menu so descriptions show "Unassigned"
-        self.current_index = 0
-        self.refresh_position_options()
-    
+        self.current_index = None
+        self.refresh_position_options(False)
+        self._reset_player_placeholder()
+        
         # Update the embed in-place
         embed = make_lineup_embed(self.lp)
         await safe_interaction_edit(interaction, embed=embed, view=self)
