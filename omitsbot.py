@@ -581,7 +581,7 @@ class ClubDropdown(discord.ui.Select):
                 await asyncio.sleep(180)
                 await view.message.delete()
             except Exception as e:
-                print(f("[ERROR] Failed to delete message after timeout: {e}"))
+                print(f"[ERROR] Failed to delete message after timeout: {e}"))
         asyncio.create_task(delete_after_timeout())
 
         await log_command_output(interaction, "versus", view.message)
@@ -728,20 +728,23 @@ async def delete_after_delay(message, delay=180):
     except Exception as e:
         print(f"[ERROR] Failed to auto-delete message: {e}")
 
+def _position_options_from_lp(lp: dict) -> list[discord.SelectOption]:
+    opts: list[discord.SelectOption] = []
+    for idx, pos in enumerate(lp.get("positions", [])):
+        status = "Assigned" if pos.get("user_id") else "Unassigned"
+        opts.append(discord.SelectOption(
+            label=pos["code"],
+            description=status,
+            value=str(idx),
+        ))
+    return opts
+
 class PositionSelect(discord.ui.Select):
     def __init__(self, lp: dict):
         self.lp = lp
-        options = []
-        for idx, pos in enumerate(lp.get("positions", [])):
-            tag = f" — @{pos['user_id']}" if pos.get("user_id") else ""
-            options.append(discord.SelectOption(
-                label=pos["code"],
-                description=("Assigned" if pos.get("user_id") else "Unassigned"),
-                value=str(idx)
-            ))
         super().__init__(
             placeholder="Choose a position to assign...",
-            options=options,
+            options=_position_options_from_lp(lp),
             min_values=1,
             max_values=1
         )
@@ -750,7 +753,6 @@ class PositionSelect(discord.ui.Select):
         view: "LineupAssignView" = self.view  # type: ignore
         view.current_index = int(self.values[0])
         await interaction.response.defer()
-        # re-render only the footer note (we'll keep embed same)
         try:
             await interaction.message.edit(view=view)
         except Exception:
@@ -787,7 +789,10 @@ class PlayerSelect(discord.ui.UserSelect):
         self.lp["updated_at"] = datetime.now(timezone.utc).isoformat()
         lineups_store["lineups"][str(self.lp["id"])] = self.lp
         save_lineups_store()
-
+        
+        # 🔄 update the PositionSelect menu so the picked slot shows "Assigned"
+        view.refresh_position_options()
+        
         # Refresh embed
         embed = make_lineup_embed(self.lp)
         await safe_interaction_edit(interaction, embed=embed, view=view)
@@ -836,6 +841,9 @@ class RoleMemberSelect(discord.ui.Select):
         self.lp["updated_at"] = datetime.now(timezone.utc).isoformat()
         lineups_store["lineups"][str(self.lp["id"])] = self.lp
         save_lineups_store()
+
+        # 🔄 make the menu show "Assigned" for this slot
+        view.refresh_position_options()
 
         embed = make_lineup_embed(self.lp)
         await safe_interaction_edit(interaction, embed=embed, view=view)
@@ -920,6 +928,13 @@ class LineupAssignView(discord.ui.View):
                 view._refresh_role_select()
             await interaction.response.edit_message(view=view)
 
+    def refresh_position_options(self):
+        # find the PositionSelect in this view and rebuild its options
+        for child in self.children:
+            if isinstance(child, PositionSelect):
+                child.options = _position_options_from_lp(self.lp)
+                break
+                
     # ---------- Permissions + your existing buttons ----------
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -938,6 +953,9 @@ class LineupAssignView(discord.ui.View):
             self.lp["updated_at"] = datetime.now(timezone.utc).isoformat()
             lineups_store["lineups"][str(self.lp["id"])] = self.lp
             save_lineups_store()
+    
+            self.refresh_position_options()
+    
         embed = make_lineup_embed(self.lp)
         await safe_interaction_edit(interaction, embed=embed, view=self)
 
@@ -945,42 +963,6 @@ class LineupAssignView(discord.ui.View):
     async def finish(self, interaction: discord.Interaction, button: discord.ui.Button):
         for item in list(self.children):
             item.disabled = True
-        embed = make_lineup_embed(self.lp)
-        await safe_interaction_edit(interaction, embed=embed, view=self)
-
-    async def on_timeout(self):
-        if self.message:
-            try:
-                for item in list(self.children):
-                    item.disabled = True
-                await self.message.edit(view=self)
-            except Exception:
-                pass
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        # Only allow editor/creator/moderator to manipulate
-        guild = interaction.guild
-        member = interaction.user if isinstance(interaction.user, discord.Member) else (guild.get_member(interaction.user.id) if guild else None)
-        allowed = user_can_edit_lineup(member, self.lp) if member else False
-        if not allowed:
-            await interaction.response.send_message("You can't edit this lineup.", ephemeral=True)
-        return allowed
-
-    @discord.ui.button(label="Clear Selected", style=discord.ButtonStyle.secondary)
-    async def clear_selected(self, interaction: discord.Interaction, button: discord.ui.Button):
-        idx = self.current_index
-        if 0 <= idx < len(self.lp.get("positions", [])):
-            self.lp["positions"][idx]["user_id"] = None
-            self.lp["updated_at"] = datetime.now(timezone.utc).isoformat()
-            lineups_store["lineups"][str(self.lp["id"])] = self.lp
-            save_lineups_store()
-        embed = make_lineup_embed(self.lp)
-        await safe_interaction_edit(interaction, embed=embed, view=self)
-
-    @discord.ui.button(label="Finish", style=discord.ButtonStyle.success)
-    async def finish(self, interaction: discord.Interaction, button: discord.ui.Button):
-        for item in list(self.children):
-            item.disabled = True  # disable all
         embed = make_lineup_embed(self.lp)
         await safe_interaction_edit(interaction, embed=embed, view=self)
 
