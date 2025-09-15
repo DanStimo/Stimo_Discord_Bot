@@ -46,6 +46,24 @@ welcome_config = {
 # --- Lineups config/persistence ---
 LINEUPS_FILE = os.getenv("LINEUPS_FILE", "lineups.json")
 
+# ---- Admin role restriction for lineup controls ----
+ADMIN_ROLE_ID = int(os.getenv("ADMIN_ROLE_ID", "0")) if os.getenv("ADMIN_ROLE_ID") else 0
+ADMIN_ROLE_NAME = os.getenv("ADMIN_ROLE_NAME", "Administrator")
+
+def has_admin_role(member: discord.Member) -> bool:
+    if not member:
+        return False
+    # Prefer explicit role id if provided, else fall back to name
+    if ADMIN_ROLE_ID:
+        if any(r.id == ADMIN_ROLE_ID for r in member.roles):
+            return True
+    if any(r.name == ADMIN_ROLE_NAME for r in member.roles):
+        return True
+    # (Optional) also treat Discord permission as admin
+    if getattr(member.guild_permissions, "administrator", False):
+        return True
+    return False
+
 # Common football formations -> ordered positions (11)
 FORMATIONS: dict[str, list[str]] = {
     "4-3-3": ["GK", "RB", "RCB", "LCB", "LB", "RCM", "CDM", "LCM", "RW", "ST", "LW"],
@@ -940,10 +958,10 @@ class LineupAssignView(discord.ui.View):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         guild = interaction.guild
         member = interaction.user if isinstance(interaction.user, discord.Member) else (guild.get_member(interaction.user.id) if guild else None)
-        allowed = user_can_edit_lineup(member, self.lp) if member else False
-        if not allowed:
-            await interaction.response.send_message("You can't edit this lineup.", ephemeral=True)
-        return allowed
+        ok = has_admin_role(member) if member else False
+        if not ok:
+            await interaction.response.send_message("❌ Only **Administrators** can use the lineup controls.", ephemeral=True)
+        return ok
 
     @discord.ui.button(label="Clear Selected", style=discord.ButtonStyle.secondary)
     async def clear_selected(self, interaction: discord.Interaction, button: discord.ui.Button):
