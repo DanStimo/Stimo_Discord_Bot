@@ -41,6 +41,7 @@ WELCOME_COLOR_HEX = os.getenv("WELCOME_COLOR_HEX", "#2ecc71")
 welcome_config = {
     "channel_id": WELCOME_CHANNEL_ID,
     "color_hex": WELCOME_COLOR_HEX,
+}
 
 # --- Lineups config/persistence ---
 LINEUPS_FILE = os.getenv("LINEUPS_FILE", "lineups.json")
@@ -61,10 +62,6 @@ def load_lineups_store():
 
 def save_lineups_store():
     save_json_file(LINEUPS_FILE, lineups_store)
-
-lineups_store = load_lineups_store()
-    
-}
 
 def _color_from_hex(h: str) -> discord.Color:
     h = (h or "#2ecc71").strip().lstrip("#")
@@ -1325,7 +1322,8 @@ def save_json_file(path, data):
         print(f"[ERROR] Failed to save {path}: {e}")
 
 events_store = load_json_file(EVENTS_FILE, {"next_id": 1, "events": {}})
-templates_store = load_json_file(TEMPLATES_FILE, {})  # mapping template_name -> template dict
+templates_store = load_json_file(TEMPLATES_FILE, {})
+lineups_store = load_lineups_store()
 
 def make_event_embed(ev: dict) -> discord.Embed:
     """
