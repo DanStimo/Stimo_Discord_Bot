@@ -1560,7 +1560,7 @@ def save_templates_store():
 
 def make_lineup_embed(lp: dict) -> discord.Embed:
     """
-    Build an embed for a lineup. Styled like your event embed (blue trim + server icon).
+    Build an embed for a lineup. Single column: `Lineup` with all positions.
     """
     color = discord.Color(int(EVENT_EMBED_COLOR_HEX.strip().lstrip("#"), 16))
     ch = client.get_channel(lp.get("channel_id"))
@@ -1572,26 +1572,23 @@ def make_lineup_embed(lp: dict) -> discord.Embed:
 
     embed = discord.Embed(
         title=f"🧩 {title}",
-        description=f"**Formation:** `{formation}`" + (f"\n**Eligible Role:** <@&{role_id}>" if role_id else ""),
-        color=color
+        description=(
+            f"**Formation:** `{formation}`"
+            + (f"\n**Eligible Role:** <@&{role_id}>" if role_id else "")
+        ),
+        color=color,
     )
 
+    # Build one column list of positions
     positions: list[dict] = lp.get("positions", [])
-    # Show positions in 2 columns for readability
-    left = []
-    right = []
-    for i, pos in enumerate(positions, start=1):
+    lines = []
+    for pos in positions:
         mention = f"<@{pos['user_id']}>" if pos.get("user_id") else "—"
-        line = f"**{pos['code']}** — {mention}"
-        (left if i % 2 else right).append(line)
+        lines.append(f"**{pos['code']}** — {mention}")
 
-    embed.add_field(
-        name="Lineup",
-        value="\n".join(pos_text) or "—",
-        inline=False
-    )
+    embed.add_field(name="Lineup", value="\n".join(lines) or "—", inline=False)
 
-    # Thumbnail: server icon (fallback: none)
+    # Thumbnail: server icon if available
     try:
         if guild and guild.icon:
             embed.set_thumbnail(url=guild.icon.url)
