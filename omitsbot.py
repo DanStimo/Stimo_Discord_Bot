@@ -2303,14 +2303,25 @@ async def on_ready():
     try:
         gid = int(os.getenv("GUILD_ID", "0"))
         guild = client.get_guild(gid) or (await client.fetch_guild(gid) if gid else None)
+
         if guild:
-            cmds = await tree.sync(guild=guild)   # publish to guild only
+            # 1) Start clean: remove any existing guild-scoped registrations
+            tree.clear_commands(guild=guild)
+
+            # 2) Copy your global command definitions into the guild scope
+            tree.copy_global_to(guild=guild)
+
+            # 3) Publish guild-only commands (fast propagation)
+            cmds = await tree.sync(guild=guild)
             print(f"✅ Synced {len(cmds)} commands to guild {gid}")
 
-        # remove any global commands so they don't duplicate guild ones
-        tree.clear_commands(guild=None)           # NOTE: pass guild=None to clear GLOBALS
-        await tree.sync()                         # push the global deletion
-        print("🧹 Cleared global commands")
+            # 4) Remove GLOBAL registrations so you don't see duplicates
+            tree.clear_commands(guild=None)   # clears global
+            await tree.sync()                  # push the deletion
+            print("🧹 Cleared global commands")
+        else:
+            print("[WARN] GUILD_ID not set or guild not found")
+
     except Exception as e:
         print(f"[ERROR] Command sync failed: {e}")
 
