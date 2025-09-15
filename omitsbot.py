@@ -792,17 +792,170 @@ class PlayerSelect(discord.ui.UserSelect):
         embed = make_lineup_embed(self.lp)
         await safe_interaction_edit(interaction, embed=embed, view=view)
 
-class LineupAssignView(discord.ui.View):
+class RoleMemberSelect(discord.ui.Select):
+    def __init__(self, lp: dict, members: list[discord.Member], page: int = 0, per_page: int = 25):
+        self.lp = lp
+        self.members = members
+        self.page = page
+        self.per_page = per_page
+
+        start = page * per_page
+        chunk = members[start:start + per_page]
+
+        options = [
+            discord.SelectOption(
+                label=m.display_name[:100],
+                value=str(m.id),
+                description=(m.top_role.name if m.top_role else "Member"),
+            )
+            for m in chunk
+        ] or [discord.SelectOption(label="No eligible members", value="none", description=" ")]
+        
+        super().__init__(
+            placeholder="Pick a player with the required role",
+            min_values=1,
+            max_values=1,
+            options=options,
+            disabled=(options[0].value == "none"),
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        if self.values[0] == "none":
+            await interaction.response.send_message("No eligible members to select.", ephemeral=True)
+            return
+
+        view: "LineupAssignView" = self.view  # type: ignore
+        position_index = view.current_index
+        positions = self.lp.get("positions", [])
+        if not (0 <= position_index < len(positions)):
+            await interaction.response.send_message("No position selected. Pick a position first.", ephemeral=True)
+            return
+
+        picked_id = int(self.values[0])
+        self.lp["positions"][position_index]["user_id"] = picked_id
+        self.lp["updated_at"] = datetime.now(timezone.utc).isoformat()
+        lineups_store["lineups"][str(self.lp["id"])] = self.lp
+        save_lineups_store()
+
+        embed = make_lineup_embed(self.lp)
+        await safe_interaction_edit(interaction, embed=embed, view=view)
+
+cclass LineupAssignView(discord.ui.View):
     def __init__(self, lp: dict, editor_id: int, timeout: int = 600):
         super().__init__(timeout=timeout)
         self.lp = lp
         self.editor_id = editor_id
-        self.current_index = 0  # controlled by PositionSelect
+        self.current_index = 0
         self.message: discord.Message | None = None
 
-        # Components
+        # For role-paged select
+        self._role_page = 0
+        self._role_members: list[discord.Member] = []
+        self._role_picker_active = False
+
+        # Always include the position picker
         self.add_item(PositionSelect(lp))
-        self.add_item(PlayerSelect(lp))
+
+        # Decide which player picker to use
+        role_id = lp.get("role_id")
+        ch = client.get_channel(lp.get("channel_id"))
+        guild = ch.guild if isinstance(ch, (discord.TextChannel, discord.Thread)) else None
+
+        if role_id and guild:
+            role = guild.get_role(role_id)
+            if role:
+                # NOTE: Requires Server Members Intent ON and the cache to be reasonably warm.
+                self._role_members = sorted(
+                    [m for m in role.members if not m.bot],
+                    key=lambda m: m.display_name.lower()
+                )
+                self._role_picker_active = True
+                # Add the first page of the role-filtered select
+                self.add_item(RoleMemberSelect(self.lp, self._role_members, page=self._role_page))
+                # Add pager buttons
+                self.add_item(self._PrevButton())
+                self.add_item(self._NextButton())
+            else:
+                # Role not found – fallback to generic searchable picker
+                self.add_item(PlayerSelect(lp))
+        else:
+            # No role set – fallback to generic searchable picker
+            self.add_item(PlayerSelect(lp))
+
+    # ---------- Pager helpers ----------
+
+    def _refresh_role_select(self):
+        # Remove the old RoleMemberSelect (if any) and re-add with new page
+        for item in list(self.children):
+            if isinstance(item, RoleMemberSelect):
+                self.remove_item(item)
+        self.add_item(RoleMemberSelect(self.lp, self._role_members, page=self._role_page))
+
+    class _PrevButton(discord.ui.Button):
+        def __init__(self):
+            super().__init__(label="◀️ Prev", style=discord.ButtonStyle.secondary)
+
+        async def callback(self, interaction: discord.Interaction):
+            view: "LineupAssignView" = self.view  # type: ignore
+            if not view._role_picker_active:
+                await interaction.response.defer()
+                return
+            if view._role_page > 0:
+                view._role_page -= 1
+                view._refresh_role_select()
+            await interaction.response.edit_message(view=view)
+
+    class _NextButton(discord.ui.Button):
+        def __init__(self):
+            super().__init__(label="Next ▶️", style=discord.ButtonStyle.secondary)
+
+        async def callback(self, interaction: discord.Interaction):
+            view: "LineupAssignView" = self.view  # type: ignore
+            if not view._role_picker_active:
+                await interaction.response.defer()
+                return
+            max_page = (max(len(view._role_members) - 1, 0)) // 25
+            if view._role_page < max_page:
+                view._role_page += 1
+                view._refresh_role_select()
+            await interaction.response.edit_message(view=view)
+
+    # ---------- Permissions + your existing buttons ----------
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        guild = interaction.guild
+        member = interaction.user if isinstance(interaction.user, discord.Member) else (guild.get_member(interaction.user.id) if guild else None)
+        allowed = user_can_edit_lineup(member, self.lp) if member else False
+        if not allowed:
+            await interaction.response.send_message("You can't edit this lineup.", ephemeral=True)
+        return allowed
+
+    @discord.ui.button(label="Clear Selected", style=discord.ButtonStyle.secondary)
+    async def clear_selected(self, interaction: discord.Interaction, button: discord.ui.Button):
+        idx = self.current_index
+        if 0 <= idx < len(self.lp.get("positions", [])):
+            self.lp["positions"][idx]["user_id"] = None
+            self.lp["updated_at"] = datetime.now(timezone.utc).isoformat()
+            lineups_store["lineups"][str(self.lp["id"])] = self.lp
+            save_lineups_store()
+        embed = make_lineup_embed(self.lp)
+        await safe_interaction_edit(interaction, embed=embed, view=self)
+
+    @discord.ui.button(label="Finish", style=discord.ButtonStyle.success)
+    async def finish(self, interaction: discord.Interaction, button: discord.ui.Button):
+        for item in list(self.children):
+            item.disabled = True
+        embed = make_lineup_embed(self.lp)
+        await safe_interaction_edit(interaction, embed=embed, view=self)
+
+    async def on_timeout(self):
+        if self.message:
+            try:
+                for item in list(self.children):
+                    item.disabled = True
+                await self.message.edit(view=self)
+            except Exception:
+                pass
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         # Only allow editor/creator/moderator to manipulate
@@ -1432,8 +1585,11 @@ def make_lineup_embed(lp: dict) -> discord.Embed:
         line = f"**{pos['code']}** — {mention}"
         (left if i % 2 else right).append(line)
 
-    embed.add_field(name="Positions (A)", value="\n".join(left) or "\u200b", inline=True)
-    embed.add_field(name="Positions (B)", value="\n".join(right) or "\u200b", inline=True)
+    embed.add_field(
+        name="Lineup",
+        value="\n".join(pos_text) or "—",
+        inline=False
+    )
 
     # Thumbnail: server icon (fallback: none)
     try:
