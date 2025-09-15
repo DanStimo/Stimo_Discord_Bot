@@ -957,11 +957,11 @@ class LineupAssignView(discord.ui.View):
             await interaction.response.edit_message(view=view)
 
     def _reset_player_placeholder(self):
-    for child in self.children:
-        if isinstance(child, PlayerSelect):
-            child.placeholder = "Pick a player for the selected position"
-        elif isinstance(child, RoleMemberSelect):
-            child.placeholder = "Pick a player with the required role"
+        for child in self.children:
+            if isinstance(child, PlayerSelect):
+                child.placeholder = "Pick a player for the selected position"
+            elif isinstance(child, RoleMemberSelect):
+                child.placeholder = "Pick a player with the required role"
 
     def refresh_position_options(self, keep_selected: bool = False):
         """Rebuild top select; optionally keep the current selection highlighted."""
