@@ -2228,6 +2228,31 @@ async def editlineup_autocomplete(interaction: discord.Interaction, current: str
 async def deletelineup_autocomplete(interaction: discord.Interaction, current: str):
     return await _lineup_open_choices(current)
 
+@tree.command(name="offside", description="Increment and show the offside counter.")
+async def offside_command(interaction: discord.Interaction):
+    # Increment in DB
+    try:
+        count = await db_incr_offside()
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Failed to update counter: {e}", ephemeral=True)
+        return
+
+    # Build an embed with your standard color, but NO thumbnail
+    color = discord.Color(int(EVENT_EMBED_COLOR_HEX.strip().lstrip("#"), 16))
+    desc = f"🏃‍♂️‍➡️MistrCraven has been caught offside **{count}** times. 🏃‍♂️"
+
+    embed = discord.Embed(
+        title="🚩 Offside",
+        description=desc,
+        color=color,
+        timestamp=datetime.now(timezone.utc),
+    )
+    # (Deliberately NOT setting a thumbnail)
+
+    embed.set_footer(text=f"Triggered by {interaction.user.display_name}")
+
+    await interaction.response.send_message(embed=embed)
+
 # ---------------------------------------------------
 # Reaction removal suppression so bot-initiated removals don't unregister users
 # ---------------------------------------------------
@@ -2530,6 +2555,24 @@ async def db_save_json(name: str, obj):
               SET data = EXCLUDED.data,
                   updated_at = now();
         """, name, json.dumps(obj))
+
+async def db_incr_offside() -> int:
+    """
+    Atomically increment and return the offside counter.
+    Stored under name 'offside.json' in app_store (JSONB).
+    """
+    assert DB_POOL, "DB not initialized"
+    async with DB_POOL.acquire() as con:
+        row = await con.fetchrow("""
+            INSERT INTO app_store (name, data, updated_at)
+            VALUES ($1, '{"count":1}', now())
+            ON CONFLICT (name) DO UPDATE
+              SET data = jsonb_set(app_store.data, '{count}',
+                                   to_jsonb(COALESCE((app_store.data->>'count')::int, 0) + 1)),
+                  updated_at = now()
+            RETURNING (data->>'count')::int AS count;
+        """, "offside.json")
+        return int(row["count"])
 
 # -------------------------
 # Command sync (global + optional guild)
