@@ -3,4 +3,4 @@ httpx
 fuzzywuzzy
 python-Levenshtein
 python-dotenv
-asyncpg
+asyncpg>=0.29.0
