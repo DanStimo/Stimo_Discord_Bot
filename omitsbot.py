@@ -1033,19 +1033,24 @@ class LineupAssignView(discord.ui.View):
 
     @discord.ui.button(label="Finish", style=discord.ButtonStyle.success)
     async def finish(self, interaction: discord.Interaction, button: discord.ui.Button):
-        for item in list(self.children):
-            item.disabled = True
+        # Update the embed one last time
         embed = make_lineup_embed(self.lp)
-        await safe_interaction_edit(interaction, embed=embed, view=self)
-
-    async def on_timeout(self):
-        if self.message:
-            try:
-                for item in list(self.children):
-                    item.disabled = True
-                await self.message.edit(view=self)
-            except Exception:
-                pass
+    
+        # Remove all components from the message
+        await safe_interaction_edit(interaction, embed=embed, view=None)
+    
+        # Add a ✅ reaction so users can acknowledge they've seen the lineup.
+        # (If it's already there, adding again is a no-op we just ignore.)
+        try:
+            msg = interaction.message or self.message
+            if msg:
+                try:
+                    await msg.add_reaction("✅")
+                except Exception:
+                    # Already added by the bot or lacking perms — ignore
+                    pass
+        except Exception:
+            pass
 
 # - /versus & aliases
 @tree.command(name="versus", description="Check another club's stats by name or ID.")
