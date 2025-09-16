@@ -1075,8 +1075,8 @@ class LineupAssignView(discord.ui.View):
                       else self.message.channel if self.message
                       else interaction.channel)
                 await ch.send(content=content, allowed_mentions=allowed)
-        except Exception:
-            pass
+            except Exception:
+                pass
     
             # 4) Persist that we’ve pinged these users
             self.lp["pinged_user_ids"] = list(already_pinged.union(new_to_ping))
