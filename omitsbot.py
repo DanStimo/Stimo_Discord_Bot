@@ -1033,44 +1033,41 @@ class LineupAssignView(discord.ui.View):
 
     @discord.ui.button(label="Finish", style=discord.ButtonStyle.success)
     async def finish(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # 1) Update the embed and remove all components from the message
+        # 0) Backfill for old lineups
+        self.lp.setdefault("pinged_user_ids", [])
+    
+        # 1) Update embed & remove controls
         embed = make_lineup_embed(self.lp)
         await safe_interaction_edit(interaction, embed=embed, view=None)
     
-        # 2) Ensure the ✅ reaction is present for acknowledgements
+        # 2) Ensure ✅ is present
         try:
             msg = interaction.message or self.message
             if msg:
                 try:
                     await msg.add_reaction("✅")
                 except Exception:
-                    # Already present or insufficient perms; ignore
                     pass
         except Exception:
             pass
     
-        # 3) Ping the assigned users (outside the embed) so they get notified
-        #    - dedupe while preserving order
+        # 3) Compute newly-added users (assigned but never pinged before)
         assigned_ids: list[int] = []
-        for pos in self.lp.get("positions", []):
-            uid = pos.get("user_id")
+        for p in self.lp.get("positions", []):
+            uid = p.get("user_id")
             if uid and uid not in assigned_ids:
                 assigned_ids.append(uid)
     
-        if assigned_ids:
-            # Build a clean mention string
-            mentions = " ".join(f"<@{uid}>" for uid in assigned_ids)
+        already_pinged = set(self.lp.get("pinged_user_ids", []))
+        new_to_ping = [u for u in assigned_ids if u not in already_pinged]
     
-            # Friendly header with lineup title/formation
+        if new_to_ping:
             title = self.lp.get("title") or f"{self.lp.get('formation')} Lineup"
-            content = f"📣 **{title}** is finalized. Please confirm with ✅\n{mentions}"
+            content = f"📣 **{title}** updated. Please confirm with ✅\n" + " ".join(f"<@{u}>" for u in new_to_ping)
     
-            # Restrict allowed mentions to exactly these users (avoid role/everyone pings)
             allowed = discord.AllowedMentions(
-                users=[discord.Object(id=u) for u in assigned_ids],
-                roles=False,
-                everyone=False,
-                replied_user=False,
+                users=[discord.Object(id=u) for u in new_to_ping],
+                roles=False, everyone=False, replied_user=False
             )
     
             try:
@@ -1078,6 +1075,13 @@ class LineupAssignView(discord.ui.View):
                       else self.message.channel if self.message
                       else interaction.channel)
                 await ch.send(content=content, allowed_mentions=allowed)
+            except Exception:
+                pass
+    
+            # 4) Persist that we’ve pinged these users
+            self.lp["pinged_user_ids"] = list(already_pinged.union(new_to_ping))
+            lineups_store["lineups"][str(self.lp["id"])] = self.lp
+            save_lineups_store()
             except Exception:
                 # If something odd happens (e.g., missing perms), we just skip the ping gracefully
                 pass
@@ -1485,7 +1489,9 @@ async def lineup_command(
         "message_id": None,
         "creator_id": interaction.user.id,
         "created_at": datetime.now(timezone.utc).isoformat(),
-        "updated_at": None
+        "updated_at": None,
+        # NEW: track who we've pinged already for this lineup
+        "pinged_user_ids": []
     }
 
     embed = make_lineup_embed(lp)
