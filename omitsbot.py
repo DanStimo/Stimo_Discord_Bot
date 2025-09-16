@@ -11,13 +11,13 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 import re
 import asyncpg
+import logging
 
 load_dotenv()
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 CLUB_ID = os.getenv("CLUB_ID", "167054")  # fallback/default
 PLATFORM = os.getenv("PLATFORM", "common-gen5")
-DATABASE_URL = os.getenv("DATABASE_URL")
 
 # Event & template config
 EVENT_CREATOR_ROLE_ID = int(os.getenv("EVENT_CREATOR_ROLE_ID", "0")) if os.getenv("EVENT_CREATOR_ROLE_ID") else 0
@@ -2451,9 +2451,10 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
             print(f"[ERROR] Failed to update event embed after reaction remove: {e}")
 
 DB_POOL: asyncpg.pool.Pool | None = None
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 async def init_db():
-    """Create pool + table."""
+    """Create pool + table, and migrate data column to JSONB if needed."""
     global DB_POOL
     if DB_POOL:
         return
@@ -2462,6 +2463,7 @@ async def init_db():
 
     DB_POOL = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=5)
     async with DB_POOL.acquire() as con:
+        # 1) Ensure table exists
         await con.execute("""
             CREATE TABLE IF NOT EXISTS app_store (
                 name        TEXT PRIMARY KEY,
@@ -2469,6 +2471,30 @@ async def init_db():
                 updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
             );
         """)
+
+        # 2) If the existing `data` column is TEXT (from an earlier version), migrate it to JSONB.
+        col_type = await con.fetchval("""
+            SELECT data_type
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'app_store'
+              AND column_name = 'data';
+        """)
+
+        if (col_type or "").lower() != "jsonb":
+            # Attempt safe conversion:
+            # - If it looks like JSON already, cast it
+            # - Otherwise wrap the old text as a JSON string
+            await con.execute("""
+            ALTER TABLE app_store
+            ALTER COLUMN data TYPE JSONB USING
+              CASE
+                WHEN data IS NULL THEN '{}'::jsonb
+                WHEN data ~ '^[\\s]*[{\\[]' THEN data::jsonb
+                ELSE to_jsonb(data)
+              END;
+            """)
+            logging.info("Migrated app_store.data to JSONB")
 
 async def db_load_json(name: str, default_obj):
     """Load a JSON object by logical file name; insert default if missing."""
