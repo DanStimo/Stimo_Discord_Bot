@@ -1684,9 +1684,16 @@ def make_event_embed(ev: dict) -> discord.Embed:
     except Exception:
         pass
 
-    footer_icon = guild.icon.url if (guild and guild.icon) else None
-    embed.set_footer(text="omitS Bot", icon_url=footer_icon)
+    footer_icon = None
+    try:
+        ch = client.get_channel(ev.get("channel_id"))
+        guild = ch.guild if ch else None
+        if guild and guild.icon:
+            footer_icon = guild.icon.url
+    except Exception:
+        pass
 
+    embed.set_footer(text=f"omitS Bot • Event ID: {ev.get('id')}", icon_url=footer_icon)
     return embed
 
 def user_can_create_events(member: discord.Member) -> bool:
@@ -2123,7 +2130,10 @@ async def closeevent_command(interaction: discord.Interaction, event_id: int):
         msg = await ch.fetch_message(ev["message_id"])
         embed = make_event_embed(ev)
         embed.color = discord.Color.dark_grey()
-        embed.set_footer(text=f"Event ID: {ev.get('id')} • CLOSED • Created by: {ev.get('creator_id')}")
+        
+        ft = (embed.footer.text or f"omitS Bot • Event ID: {ev.get('id')}") + " • CLOSED"
+        embed.set_footer(text=ft, icon_url=embed.footer.icon_url)
+        
         await msg.edit(embed=embed)
     except Exception as e:
         print(f"[WARN] Could not edit event message when closing: {e}")
@@ -2155,7 +2165,7 @@ async def openevent_command(interaction: discord.Interaction, event_id: int):
         msg = await ch.fetch_message(ev["message_id"])
         embed = make_event_embed(ev)
         embed.color = discord.Color(int(EVENT_EMBED_COLOR_HEX.strip().lstrip("#"), 16))
-        embed.set_footer(text=f"Event ID: {ev.get('id')} • Created by: {ev.get('creator_id')}")
+        
         await msg.edit(embed=embed)
     except Exception as e:
         print(f"[WARN] Could not edit event message when opening: {e}")
