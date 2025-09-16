@@ -1058,10 +1058,10 @@ class LineupAssignView(discord.ui.View):
             uid = p.get("user_id")
             if uid and uid not in assigned_ids:
                 assigned_ids.append(uid)
-
+        
         already_pinged = set(self.lp.get("pinged_user_ids", []))
         to_ping = assigned_ids if first_time else [u for u in assigned_ids if u not in already_pinged]
-
+        
         # 4) Send finalize/update message with pings (if there’s anyone to ping)
         if to_ping:
             title = self.lp.get("title") or f"{self.lp.get('formation')} Lineup"
@@ -1070,12 +1070,12 @@ class LineupAssignView(discord.ui.View):
                 f"📣 **{title}** {header}. Please confirm with ✅\n"
                 + " ".join(f"<@{u}>" for u in to_ping)
             )
-
+        
             allowed = discord.AllowedMentions(
                 users=[discord.Object(id=u) for u in to_ping],
                 roles=False, everyone=False, replied_user=False
             )
-
+        
             try:
                 ch = (
                     interaction.message.channel if getattr(interaction, "message", None)
@@ -1086,16 +1086,13 @@ class LineupAssignView(discord.ui.View):
             except Exception:
                 # If sending fails (missing perms, etc.), just skip gracefully
                 pass
-
+        
         # 5) Persist state regardless (so second press becomes "updated")
         self.lp["finished_once"] = True
         if to_ping:
             self.lp["pinged_user_ids"] = list(already_pinged.union(to_ping))
         lineups_store["lineups"][str(self.lp["id"])] = self.lp
         save_lineups_store()
-            except Exception:
-                # If something odd happens (e.g., missing perms), skip the ping gracefully
-                pass
 
 # - /versus & aliases
 @tree.command(name="versus", description="Check another club's stats by name or ID.")
