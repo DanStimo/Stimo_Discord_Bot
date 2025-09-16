@@ -19,6 +19,7 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 CLUB_ID = os.getenv("CLUB_ID", "167054")  # fallback/default
 PLATFORM = os.getenv("PLATFORM", "common-gen5")
 OFFSIDE_KEY = "offside.json"
+DEFAULT_LINEUP_FORMATION = os.getenv("DEFAULT_LINEUP_FORMATION", "3-5-2")
 
 # Event & template config
 EVENT_CREATOR_ROLE_ID = int(os.getenv("EVENT_CREATOR_ROLE_ID", "0")) if os.getenv("EVENT_CREATOR_ROLE_ID") else 0
@@ -878,6 +879,57 @@ class RoleMemberSelect(discord.ui.Select):
         
         embed = make_lineup_embed(self.lp)
         await safe_interaction_edit(interaction, embed=embed, view=view)
+
+async def auto_post_lineup_in_thread(ev: dict, thread: discord.Thread, formation: str | None = None):
+    """
+    Create a lineup inside the provided event thread, save it, and pin the message.
+    Uses the event's role (if any) to restrict assignments. Title = "<event name> Lineup".
+    """
+    try:
+        # Resolve formation safely
+        formation_str = (formation or DEFAULT_LINEUP_FORMATION) or "4-2-3-1"
+        if formation_str not in FORMATIONS:
+            formation_str = next(iter(FORMATIONS.keys()), "4-2-3-1")
+
+        # Allocate lineup id
+        lid = lineups_store.get("next_id", 1)
+
+        lp = {
+            "id": lid,
+            "title": f"{ev.get('name')} Lineup",
+            "formation": formation_str,
+            "positions": _build_positions_for_formation(formation_str),
+            "role_id": ev.get("role_id"),              # restrict to same role as event (if any)
+            "channel_id": thread.id,                   # post in the event thread
+            "message_id": None,
+            "creator_id": ev.get("creator_id"),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": None,
+            "finished_once": False,
+            "pinged_user_ids": [],
+        }
+
+        embed = make_lineup_embed(lp)
+        view = LineupAssignView(lp, editor_id=lp["creator_id"] or 0)
+
+        # Send lineup to the thread
+        sent = await thread.send(embed=embed, view=view)
+        view.message = sent
+
+        # Persist lineup
+        lp["message_id"] = sent.id
+        lineups_store.setdefault("lineups", {})[str(lid)] = lp
+        lineups_store["next_id"] = lid + 1
+        save_lineups_store()
+
+        # Pin it
+        try:
+            await sent.pin(reason="Auto-pinned lineup for event thread")
+        except Exception as pe:
+            print(f"[WARN] Could not pin lineup message: {pe}")
+
+    except Exception as e:
+        print(f"[ERROR] auto_post_lineup_in_thread failed: {e}")
 
 class LineupAssignView(discord.ui.View):
     def __init__(self, lp: dict, editor_id: int, timeout: int = 600):
@@ -1951,6 +2003,13 @@ async def createfromtemplate_command(
                 await sent.edit(embed=make_event_embed(ev))
             except Exception:
                 pass
+
+            # 🚀 Auto-create + pin a lineup inside the new event thread
+            try:
+                await auto_post_lineup_in_thread(ev, thread)  # uses DEFAULT_LINEUP_FORMATION
+            except Exception as le:
+                print(f"[WARN] Failed to auto-create lineup in thread: {le}")
+
         except Exception as te:
             print(f"[WARN] Could not create thread for event {eid}: {te}")
 
@@ -2052,16 +2111,21 @@ async def createevent_command(
         try:
             thread = await sent.create_thread(name=ev["name"], auto_archive_duration=10080)
             ev["thread_id"] = thread.id
-            # Add the creator to the thread
             try:
                 await thread.add_user(interaction.user)
             except Exception:
                 pass
-            # Update the embed now that thread exists
             try:
                 await sent.edit(embed=make_event_embed(ev))
             except Exception:
                 pass
+
+            # 🚀 Auto-create + pin a lineup inside the new event thread
+            try:
+                await auto_post_lineup_in_thread(ev, thread)  # uses DEFAULT_LINEUP_FORMATION
+            except Exception as le:
+                print(f"[WARN] Failed to auto-create lineup in thread: {le}")
+
         except Exception as te:
             print(f"[WARN] Could not create thread for event {eid}: {te}")
 
