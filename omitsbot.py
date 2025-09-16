@@ -1033,24 +1033,54 @@ class LineupAssignView(discord.ui.View):
 
     @discord.ui.button(label="Finish", style=discord.ButtonStyle.success)
     async def finish(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Update the embed one last time
+        # 1) Update the embed and remove all components from the message
         embed = make_lineup_embed(self.lp)
-    
-        # Remove all components from the message
         await safe_interaction_edit(interaction, embed=embed, view=None)
     
-        # Add a ✅ reaction so users can acknowledge they've seen the lineup.
-        # (If it's already there, adding again is a no-op we just ignore.)
+        # 2) Ensure the ✅ reaction is present for acknowledgements
         try:
             msg = interaction.message or self.message
             if msg:
                 try:
                     await msg.add_reaction("✅")
                 except Exception:
-                    # Already added by the bot or lacking perms — ignore
+                    # Already present or insufficient perms; ignore
                     pass
         except Exception:
             pass
+    
+        # 3) Ping the assigned users (outside the embed) so they get notified
+        #    - dedupe while preserving order
+        assigned_ids: list[int] = []
+        for pos in self.lp.get("positions", []):
+            uid = pos.get("user_id")
+            if uid and uid not in assigned_ids:
+                assigned_ids.append(uid)
+    
+        if assigned_ids:
+            # Build a clean mention string
+            mentions = " ".join(f"<@{uid}>" for uid in assigned_ids)
+    
+            # Friendly header with lineup title/formation
+            title = self.lp.get("title") or f"{self.lp.get('formation')} Lineup"
+            content = f"📣 **{title}** is finalized. Please confirm with ✅\n{mentions}"
+    
+            # Restrict allowed mentions to exactly these users (avoid role/everyone pings)
+            allowed = discord.AllowedMentions(
+                users=[discord.Object(id=u) for u in assigned_ids],
+                roles=False,
+                everyone=False,
+                replied_user=False,
+            )
+    
+            try:
+                ch = (interaction.message.channel if interaction.message
+                      else self.message.channel if self.message
+                      else interaction.channel)
+                await ch.send(content=content, allowed_mentions=allowed)
+            except Exception:
+                # If something odd happens (e.g., missing perms), we just skip the ping gracefully
+                pass
 
 # - /versus & aliases
 @tree.command(name="versus", description="Check another club's stats by name or ID.")
