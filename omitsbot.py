@@ -1628,7 +1628,7 @@ def make_event_embed(ev: dict) -> discord.Embed:
     """
     Build the embed for an event from the stored event dict.
     Adds a bold "Event Info" heading above the event description,
-    uses guild icon as thumbnail, and shows a Thread jump link if present.
+    and uses the server icon for both thumbnail and footer.
     """
     color = discord.Color(int(EVENT_EMBED_COLOR_HEX.strip().lstrip("#"), 16))
 
@@ -1641,6 +1641,7 @@ def make_event_embed(ev: dict) -> discord.Embed:
         color=color
     )
 
+    # When
     dt_iso = ev.get("datetime")
     try:
         dt = datetime.fromisoformat(dt_iso)
@@ -1649,7 +1650,7 @@ def make_event_embed(ev: dict) -> discord.Embed:
     except Exception:
         embed.add_field(name="When", value="Unknown", inline=False)
 
-    # ✅ Stream Link (optional)
+    # Stream Link (optional)
     stream_url = ev.get("twitch_url")
     if stream_url:
         username = stream_url.rsplit("/", 1)[-1]
@@ -1669,16 +1670,23 @@ def make_event_embed(ev: dict) -> discord.Embed:
     embed.add_field(name=f"{ABSENT_EMOJI} Absent", value=users_to_text(ev.get("absent", [])), inline=True)
     embed.add_field(name=f"{MAYBE_EMOJI} Maybe", value=users_to_text(ev.get("maybe", [])), inline=True)
 
-    # Try to set guild icon as thumbnail (use channel -> guild)
+    # Server assets (thumbnail + footer icon)
+    guild = None
     try:
         ch = client.get_channel(ev.get("channel_id"))
         guild = ch.guild if ch is not None else None
+    except Exception:
+        pass
+
+    try:
         if guild and guild.icon:
             embed.set_thumbnail(url=guild.icon.url)
     except Exception:
         pass
 
-    embed.set_footer(text=f"Event ID: {ev.get('id')} • Created by: {ev.get('creator_id')}")
+    footer_icon = guild.icon.url if (guild and guild.icon) else None
+    embed.set_footer(text="omitS Bot", icon_url=footer_icon)
+
     return embed
 
 def user_can_create_events(member: discord.Member) -> bool:
@@ -1707,6 +1715,7 @@ def save_templates_store():
 def make_lineup_embed(lp: dict) -> discord.Embed:
     """
     Build an embed for a lineup. Single column: `Lineup` with all positions.
+    Footer is standardized to 'omitS Bot' with the server icon.
     """
     color = discord.Color(int(EVENT_EMBED_COLOR_HEX.strip().lstrip("#"), 16))
     ch = client.get_channel(lp.get("channel_id"))
@@ -1734,14 +1743,16 @@ def make_lineup_embed(lp: dict) -> discord.Embed:
 
     embed.add_field(name="Lineup", value="\n".join(lines) or "—", inline=False)
 
-    # Thumbnail: server icon if available
+    # Server icon as thumbnail (optional) + footer icon
     try:
         if guild and guild.icon:
             embed.set_thumbnail(url=guild.icon.url)
     except Exception:
         pass
 
-    embed.set_footer(text=f"Lineup ID: {lp.get('id')} • Created by: {lp.get('creator_id')}")
+    footer_icon = guild.icon.url if (guild and guild.icon) else None
+    embed.set_footer(text="omitS Bot", icon_url=footer_icon)
+
     return embed
 
 # -------------------------
