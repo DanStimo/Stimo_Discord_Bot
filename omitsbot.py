@@ -18,6 +18,7 @@ load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 CLUB_ID = os.getenv("CLUB_ID", "167054")  # fallback/default
 PLATFORM = os.getenv("PLATFORM", "common-gen5")
+OFFSIDE_KEY = "offside.json"
 
 # Event & template config
 EVENT_CREATOR_ROLE_ID = int(os.getenv("EVENT_CREATOR_ROLE_ID", "0")) if os.getenv("EVENT_CREATOR_ROLE_ID") else 0
@@ -2252,6 +2253,31 @@ async def offside_command(interaction: discord.Interaction):
     embed.set_footer(text=f"Triggered by {interaction.user.display_name}")
 
     await interaction.response.send_message(embed=embed)
+
+@tree.command(name="resetoffside", description="Admin: reset the offside counter to 0.")
+async def resetoffside_command(interaction: discord.Interaction):
+    # Only allow admins (uses your existing role helper)
+    member = interaction.user if isinstance(interaction.user, discord.Member) else interaction.guild.get_member(interaction.user.id)
+    if not has_admin_role(member):
+        await interaction.response.send_message("❌ Only **Administrators** can use /resetoffside.", ephemeral=True)
+        return
+
+    # Make the reply ephemeral so it doesn't spam the channel
+    await interaction.response.defer(ephemeral=True)
+
+    # Ensure DB is ready (it is once on_ready ran)
+    try:
+        # Load current value (create if missing)
+        data = await db_load_json(OFFSIDE_KEY, {"count": 0})
+        before = int(data.get("count", 0))
+
+        # Reset to zero
+        data["count"] = 0
+        await db_save_json(OFFSIDE_KEY, data)
+
+        await interaction.followup.send(f"✅ Offside counter reset (was **{before}**, now **0**).", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"⚠️ Failed to reset counter: {e}", ephemeral=True)
 
 # ---------------------------------------------------
 # Reaction removal suppression so bot-initiated removals don't unregister users
