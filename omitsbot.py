@@ -10,12 +10,14 @@ from dotenv import load_dotenv
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 import re
+import asyncpg
 
 load_dotenv()
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 CLUB_ID = os.getenv("CLUB_ID", "167054")  # fallback/default
 PLATFORM = os.getenv("PLATFORM", "common-gen5")
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 # Event & template config
 EVENT_CREATOR_ROLE_ID = int(os.getenv("EVENT_CREATOR_ROLE_ID", "0")) if os.getenv("EVENT_CREATOR_ROLE_ID") else 0
@@ -1557,15 +1559,20 @@ def load_json_file(path, default):
         return default
 
 def save_json_file(path, data):
+    """
+    Keep the same call sites, but persist to Postgres asynchronously.
+    'path' is our logical key (e.g., 'events.json', 'templates.json', 'lineups.json').
+    """
     try:
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        print(f"[ERROR] Failed to save {path}: {e}")
+        loop = asyncio.get_running_loop()
+        loop.create_task(db_save_json(path, data))
+    except RuntimeError:
+        # No running loop (very early import) — ignore
+        pass
 
-events_store = load_json_file(EVENTS_FILE, {"next_id": 1, "events": {}})
-templates_store = load_json_file(TEMPLATES_FILE, {})
-lineups_store = load_lineups_store()
+events_store = {"next_id": 1, "events": {}}
+templates_store = {}
+lineups_store = {"next_id": 1, "lineups": {}}
 
 def make_event_embed(ev: dict) -> discord.Embed:
     """
@@ -2443,11 +2450,71 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
         except Exception as e:
             print(f"[ERROR] Failed to update event embed after reaction remove: {e}")
 
+DB_POOL: asyncpg.pool.Pool | None = None
+
+async def init_db():
+    """Create pool + table."""
+    global DB_POOL
+    if DB_POOL:
+        return
+    if not DATABASE_URL:
+        raise RuntimeError("DATABASE_URL is not set")
+
+    DB_POOL = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=5)
+    async with DB_POOL.acquire() as con:
+        await con.execute("""
+            CREATE TABLE IF NOT EXISTS app_store (
+                name        TEXT PRIMARY KEY,
+                data        JSONB NOT NULL,
+                updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+            );
+        """)
+
+async def db_load_json(name: str, default_obj):
+    """Load a JSON object by logical file name; insert default if missing."""
+    assert DB_POOL, "DB not initialized"
+    async with DB_POOL.acquire() as con:
+        row = await con.fetchrow("SELECT data FROM app_store WHERE name=$1", name)
+        if row and row["data"] is not None:
+            # asyncpg returns JSONB as native dict
+            return dict(row["data"])
+        # seed with default if not present
+        await con.execute("INSERT INTO app_store (name, data) VALUES ($1, $2)", name, default_obj)
+        return default_obj
+
+async def db_save_json(name: str, obj):
+    """Upsert JSON by name."""
+    assert DB_POOL, "DB not initialized"
+    async with DB_POOL.acquire() as con:
+        await con.execute("""
+            INSERT INTO app_store (name, data, updated_at)
+            VALUES ($1, $2, now())
+            ON CONFLICT (name) DO UPDATE
+              SET data = EXCLUDED.data,
+                  updated_at = now();
+        """, name, obj)
+
+
 # -------------------------
 # Command sync (global + optional guild)
 # -------------------------
 @client.event
 async def on_ready():
+    # --- DB bootstrap + load persistent state ---
+    try:
+        await init_db()
+        # Pull latest snapshots for each store from Postgres
+        global events_store, templates_store, lineups_store
+        events_store   = await db_load_json(EVENTS_FILE,   {"next_id": 1, "events": {}})
+        templates_store = await db_load_json(TEMPLATES_FILE, {})
+        lineups_store  = await db_load_json(LINEUPS_FILE,  {"next_id": 1, "lineups": {}})
+        print("🗄️ Loaded stores from Postgres.")
+    except Exception as e:
+        print(f"[ERROR] Postgres init/load failed: {e}")
+        # (Optional) raise here if persistence is required
+        # raise
+
+    # --- your existing command sync logic (unchanged) ---
     try:
         gid = int(os.getenv("GUILD_ID", "0"))
         guild = client.get_guild(gid) or (await client.fetch_guild(gid) if gid else None)
@@ -2475,6 +2542,7 @@ async def on_ready():
 
     print(f"Bot is ready as {client.user}")
 
+    # --- keep the rest unchanged ---
     client.loop.create_task(rotate_presence())
 
     channel_id = int(os.getenv("ANNOUNCE_CHANNEL_ID", "0"))
