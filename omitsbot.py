@@ -1751,8 +1751,7 @@ def make_lineup_embed(lp: dict) -> discord.Embed:
         pass
 
     footer_icon = guild.icon.url if (guild and guild.icon) else None
-    embed.set_footer(text="omitS Bot", icon_url=footer_icon)
-
+    embed.set_footer(text=f"omitS Bot • Lineup ID: {lp.get('id')}", icon_url=footer_icon)
     return embed
 
 # -------------------------
