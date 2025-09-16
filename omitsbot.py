@@ -2502,10 +2502,21 @@ async def db_load_json(name: str, default_obj):
     async with DB_POOL.acquire() as con:
         row = await con.fetchrow("SELECT data FROM app_store WHERE name=$1", name)
         if row and row["data"] is not None:
-            # asyncpg returns JSONB as native dict
-            return dict(row["data"])
-        # seed with default if not present
-        await con.execute("INSERT INTO app_store (name, data) VALUES ($1, $2)", name, default_obj)
+            val = row["data"]
+            # Handle both cases: jsonb (dict) or text (str)
+            if isinstance(val, str):
+                try:
+                    return json.loads(val)
+                except Exception:
+                    return default_obj
+            return dict(val)
+        
+        # seed with default if not present (send JSON text, cast to jsonb)
+        await con.execute(
+            "INSERT INTO app_store (name, data) VALUES ($1, $2::jsonb)",
+            name,
+            json.dumps(default_obj),
+        )
         return default_obj
 
 async def db_save_json(name: str, obj):
@@ -2514,12 +2525,11 @@ async def db_save_json(name: str, obj):
     async with DB_POOL.acquire() as con:
         await con.execute("""
             INSERT INTO app_store (name, data, updated_at)
-            VALUES ($1, $2, now())
+            VALUES ($1, $2::jsonb, now())
             ON CONFLICT (name) DO UPDATE
               SET data = EXCLUDED.data,
                   updated_at = now();
-        """, name, obj)
-
+        """, name, json.dumps(obj))
 
 # -------------------------
 # Command sync (global + optional guild)
