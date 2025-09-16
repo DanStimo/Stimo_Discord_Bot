@@ -1063,27 +1063,30 @@ class LineupAssignView(discord.ui.View):
     
         if new_to_ping:
             title = self.lp.get("title") or f"{self.lp.get('formation')} Lineup"
-            content = f"📣 **{title}** updated. Please confirm with ✅\n" + " ".join(f"<@{u}>" for u in new_to_ping)
-    
+            content = (
+                f"📣 **{title}** updated. Please confirm with ✅\n"
+                + " ".join(f"<@{u}>" for u in new_to_ping)
+            )
+        
             allowed = discord.AllowedMentions(
                 users=[discord.Object(id=u) for u in new_to_ping],
                 roles=False, everyone=False, replied_user=False
             )
-    
+        
             try:
-                ch = (interaction.message.channel if interaction.message
-                      else self.message.channel if self.message
-                      else interaction.channel)
+                ch = (
+                    interaction.message.channel if getattr(interaction, "message", None)
+                    else self.message.channel if self.message
+                    else interaction.channel
+                )
                 await ch.send(content=content, allowed_mentions=allowed)
+        
+                # Only persist if the ping send succeeded
+                self.lp["pinged_user_ids"] = list(already_pinged.union(new_to_ping))
+                lineups_store["lineups"][str(self.lp["id"])] = self.lp
+                save_lineups_store()
             except Exception:
-                pass
-    
-            # 4) Persist that we’ve pinged these users
-            self.lp["pinged_user_ids"] = list(already_pinged.union(new_to_ping))
-            lineups_store["lineups"][str(self.lp["id"])] = self.lp
-            save_lineups_store()
-            except Exception:
-                # If something odd happens (e.g., missing perms), we just skip the ping gracefully
+                # If something odd happens (e.g., missing perms), skip the ping gracefully
                 pass
 
 # - /versus & aliases
