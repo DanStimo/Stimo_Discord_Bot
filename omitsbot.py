@@ -1033,14 +1033,15 @@ class LineupAssignView(discord.ui.View):
 
     @discord.ui.button(label="Finish", style=discord.ButtonStyle.success)
     async def finish(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # 0) Backfill for old lineups
+        # Backfill for older lineups
         self.lp.setdefault("pinged_user_ids", [])
-    
+        first_time = not self.lp.get("finished_once", False)
+
         # 1) Update embed & remove controls
         embed = make_lineup_embed(self.lp)
         await safe_interaction_edit(interaction, embed=embed, view=None)
-    
-        # 2) Ensure ✅ is present
+
+        # 2) Ensure ✅ reaction is present
         try:
             msg = interaction.message or self.message
             if msg:
@@ -1050,29 +1051,31 @@ class LineupAssignView(discord.ui.View):
                     pass
         except Exception:
             pass
-    
-        # 3) Compute newly-added users (assigned but never pinged before)
+
+        # 3) Build assigned list (deduped in order)
         assigned_ids: list[int] = []
         for p in self.lp.get("positions", []):
             uid = p.get("user_id")
             if uid and uid not in assigned_ids:
                 assigned_ids.append(uid)
-    
+
         already_pinged = set(self.lp.get("pinged_user_ids", []))
-        new_to_ping = [u for u in assigned_ids if u not in already_pinged]
-    
-        if new_to_ping:
+        to_ping = assigned_ids if first_time else [u for u in assigned_ids if u not in already_pinged]
+
+        # 4) Send finalize/update message with pings (if there’s anyone to ping)
+        if to_ping:
             title = self.lp.get("title") or f"{self.lp.get('formation')} Lineup"
+            header = "finalized" if first_time else "updated"
             content = (
-                f"📣 **{title}** updated. Please confirm with ✅\n"
-                + " ".join(f"<@{u}>" for u in new_to_ping)
+                f"📣 **{title}** {header}. Please confirm with ✅\n"
+                + " ".join(f"<@{u}>" for u in to_ping)
             )
-        
+
             allowed = discord.AllowedMentions(
-                users=[discord.Object(id=u) for u in new_to_ping],
+                users=[discord.Object(id=u) for u in to_ping],
                 roles=False, everyone=False, replied_user=False
             )
-        
+
             try:
                 ch = (
                     interaction.message.channel if getattr(interaction, "message", None)
@@ -1080,11 +1083,16 @@ class LineupAssignView(discord.ui.View):
                     else interaction.channel
                 )
                 await ch.send(content=content, allowed_mentions=allowed)
-        
-                # Only persist if the ping send succeeded
-                self.lp["pinged_user_ids"] = list(already_pinged.union(new_to_ping))
-                lineups_store["lineups"][str(self.lp["id"])] = self.lp
-                save_lineups_store()
+            except Exception:
+                # If sending fails (missing perms, etc.), just skip gracefully
+                pass
+
+        # 5) Persist state regardless (so second press becomes "updated")
+        self.lp["finished_once"] = True
+        if to_ping:
+            self.lp["pinged_user_ids"] = list(already_pinged.union(to_ping))
+        lineups_store["lineups"][str(self.lp["id"])] = self.lp
+        save_lineups_store()
             except Exception:
                 # If something odd happens (e.g., missing perms), skip the ping gracefully
                 pass
@@ -1493,7 +1501,7 @@ async def lineup_command(
         "creator_id": interaction.user.id,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "updated_at": None,
-        # NEW: track who we've pinged already for this lineup
+        "finished_once": False,
         "pinged_user_ids": []
     }
 
