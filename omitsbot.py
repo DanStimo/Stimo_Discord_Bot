@@ -7,7 +7,7 @@ import os
 import random
 import asyncio
 from dotenv import load_dotenv
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 import re
 import asyncpg
@@ -20,6 +20,18 @@ CLUB_ID = os.getenv("CLUB_ID", "167054")  # fallback/default
 PLATFORM = os.getenv("PLATFORM", "common-gen5")
 OFFSIDE_KEY = "offside.json"
 DEFAULT_LINEUP_FORMATION = os.getenv("DEFAULT_LINEUP_FORMATION", "3-5-2")
+
+# --- Twitch live announce config ---
+TWITCH_CLIENT_ID = os.getenv("TWITCH_CLIENT_ID")
+TWITCH_CLIENT_SECRET = os.getenv("TWITCH_CLIENT_SECRET")
+TWITCH_CHANNEL_LOGIN = (os.getenv("TWITCH_CHANNEL_LOGIN") or "").lower().strip()
+TWITCH_ANNOUNCE_CHANNEL_ID = int(os.getenv("TWITCH_ANNOUNCE_CHANNEL_ID", "0"))
+TWITCH_LIVE_ROLE_ID = int(os.getenv("TWITCH_LIVE_ROLE_ID", "0"))
+TWITCH_POLL_INTERVAL = int(os.getenv("TWITCH_POLL_INTERVAL", "60"))
+
+# In-memory state (we'll also persist if your DB helpers exist)
+_twitch_token = None  # {"access_token": "...", "expires_at": datetime}
+TWITCH_STATE_KEY = "twitch_live_state.json"  # for optional persistence
 
 # Event & template config
 EVENT_CREATOR_ROLE_ID = int(os.getenv("EVENT_CREATOR_ROLE_ID", "0")) if os.getenv("EVENT_CREATOR_ROLE_ID") else 0
@@ -1146,6 +1158,71 @@ class LineupAssignView(discord.ui.View):
         lineups_store["lineups"][str(self.lp["id"])] = self.lp
         save_lineups_store()
 
+# -------------------------
+# Twitch API helpers
+# -------------------------
+async def _twitch_fetch_app_token() -> dict:
+    """
+    Client Credentials flow -> {"access_token", "expires_at"}.
+    """
+    global _twitch_token
+    if not TWITCH_CLIENT_ID or not TWITCH_CLIENT_SECRET:
+        raise RuntimeError("TWITCH_CLIENT_ID/SECRET not set")
+
+    token_url = "https://id.twitch.tv/oauth2/token"
+    form = {
+        "client_id": TWITCH_CLIENT_ID,
+        "client_secret": TWITCH_CLIENT_SECRET,
+        "grant_type": "client_credentials",
+    }
+    async with httpx.AsyncClient(timeout=15) as c:
+        r = await c.post(token_url, data=form)
+        r.raise_for_status()
+        data = r.json()
+        _twitch_token = {
+            "access_token": data["access_token"],
+            "expires_at": datetime.now(timezone.utc) + timedelta(seconds=int(data.get("expires_in", 3600))),
+        }
+        return _twitch_token
+
+async def _twitch_get_app_token_str() -> str:
+    global _twitch_token
+    if _twitch_token is None or datetime.now(timezone.utc) >= _twitch_token["expires_at"]:
+        await _twitch_fetch_app_token()
+    return _twitch_token["access_token"]
+
+async def _twitch_api_get(path: str, params: dict) -> dict:
+    token = await _twitch_get_app_token_str()
+    headers = {
+        "Client-ID": TWITCH_CLIENT_ID,
+        "Authorization": f"Bearer {token}",
+        "User-Agent": "omitS-DiscordBot/1.0",
+    }
+    url = f"https://api.twitch.tv/helix{path}"
+    async with httpx.AsyncClient(timeout=15) as c:
+        r = await c.get(url, headers=headers, params=params)
+        if r.status_code == 401:
+            await _twitch_fetch_app_token()
+            headers["Authorization"] = f"Bearer {_twitch_token['access_token']}"
+            r = await c.get(url, headers=headers, params=params)
+        r.raise_for_status()
+        return r.json()
+
+async def twitch_get_stream_by_login(login: str) -> dict | None:
+    data = await _twitch_api_get("/streams", {"user_login": login})
+    arr = data.get("data", [])
+    return arr[0] if arr else None
+
+async def twitch_get_game_box_art_url(game_id: str | None) -> str | None:
+    if not game_id:
+        return None
+    data = await _twitch_api_get("/games", {"id": game_id})
+    arr = data.get("data", [])
+    if not arr:
+        return None
+    raw = arr[0].get("box_art_url")
+    return raw.replace("{width}", "285").replace("{height}", "380") if raw else None
+
 # - /versus & aliases
 @tree.command(name="versus", description="Check another club's stats by name or ID.")
 @app_commands.describe(club="Club name or club ID")
@@ -1812,6 +1889,39 @@ def make_lineup_embed(lp: dict) -> discord.Embed:
     footer_icon = guild.icon.url if (guild and guild.icon) else None
     embed.set_footer(text=f"omitS Bot • Lineup ID: {lp.get('id')}", icon_url=footer_icon)
     return embed
+
+# -------------------------
+# Twitch live embed + button
+# -------------------------
+def make_twitch_live_embed(stream: dict, game_box_url: str | None) -> discord.Embed:
+    color = discord.Color(int(EVENT_EMBED_COLOR_HEX.strip().lstrip("#"), 16))
+    streamer = stream.get("user_name") or "Streamer"
+    title = stream.get("title") or "Live now!"
+    game = stream.get("game_name") or "Just Chatting"
+    twitch_url = f"https://twitch.tv/{(stream.get('user_login') or TWITCH_CHANNEL_LOGIN or streamer).lower()}"
+
+    embed = discord.Embed(
+        title=f"🔴 LIVE: {streamer}",
+        description=f"**{title}**",
+        color=color,
+        url=twitch_url,  # make the title clickable
+        timestamp=datetime.now(timezone.utc),
+    )
+    embed.add_field(name="Streamer", value=streamer, inline=True)
+    embed.add_field(name="Game", value=game, inline=True)
+    embed.add_field(name="Title", value=title, inline=False)
+    if game_box_url:
+        try:
+            embed.set_thumbnail(url=game_box_url)
+        except Exception:
+            pass
+    embed.set_footer(text="omitS Bot • Twitch Live")
+    return embed
+
+class WatchButtonView(discord.ui.View):
+    def __init__(self, url: str):
+        super().__init__(timeout=None)  # link button doesn't need a timeout
+        self.add_item(discord.ui.Button(label="Watch", style=discord.ButtonStyle.link, url=url))
 
 # -------------------------
 # Template commands
@@ -2734,6 +2844,81 @@ async def db_incr_offside() -> int:
         return int(row["count"])
 
 # -------------------------
+# Twitch live monitor
+# -------------------------
+async def monitor_twitch_live():
+    """
+    Announce when OFFLINE -> LIVE; delete message when LIVE -> OFFLINE.
+    """
+    # Load persisted state if available
+    state = {"live_stream_id": None, "message_id": None, "channel_id": None}
+    try:
+        # Optional: use your Postgres JSONB store if present
+        state = await db_load_json(TWITCH_STATE_KEY, state)  # type: ignore[name-defined]
+    except Exception:
+        pass  # fall back to in-memory
+
+    while not client.is_closed():
+        try:
+            if not (TWITCH_CLIENT_ID and TWITCH_CLIENT_SECRET and TWITCH_CHANNEL_LOGIN and TWITCH_ANNOUNCE_CHANNEL_ID):
+                await asyncio.sleep(max(TWITCH_POLL_INTERVAL, 30))
+                continue
+
+            stream = await twitch_get_stream_by_login(TWITCH_CHANNEL_LOGIN)
+            is_live_now = stream is not None
+            was_live = bool(state.get("live_stream_id"))
+
+            if is_live_now and not was_live:
+                # Went LIVE -> post
+                game_box = await twitch_get_game_box_art_url(stream.get("game_id"))
+                embed = make_twitch_live_embed(stream, game_box)
+                channel = client.get_channel(TWITCH_ANNOUNCE_CHANNEL_ID) or await client.fetch_channel(TWITCH_ANNOUNCE_CHANNEL_ID)
+                content = f"||<@&{TWITCH_LIVE_ROLE_ID}>||" if TWITCH_LIVE_ROLE_ID else None
+                url = f"https://twitch.tv/{TWITCH_CHANNEL_LOGIN}"
+                allowed = discord.AllowedMentions(roles=[discord.Object(id=TWITCH_LIVE_ROLE_ID)]) if TWITCH_LIVE_ROLE_ID else None
+                msg = await channel.send(content=content, embed=embed, view=WatchButtonView(url), allowed_mentions=allowed)
+
+                state.update({"live_stream_id": stream.get("id"), "message_id": msg.id, "channel_id": channel.id})
+                try:
+                    await db_save_json(TWITCH_STATE_KEY, state)  # type: ignore[name-defined]
+                except Exception:
+                    pass
+
+            elif not is_live_now and was_live:
+                # Went OFFLINE -> delete if exists
+                ch_id = state.get("channel_id")
+                msg_id = state.get("message_id")
+                if ch_id and msg_id:
+                    try:
+                        ch = client.get_channel(ch_id) or await client.fetch_channel(ch_id)
+                        m = await ch.fetch_message(msg_id)
+                        await m.delete()
+                    except Exception as e:
+                        print(f"[WARN] Could not delete Twitch live message: {e}")
+
+                state.update({"live_stream_id": None, "message_id": None, "channel_id": None})
+                try:
+                    await db_save_json(TWITCH_STATE_KEY, state)  # type: ignore[name-defined]
+                except Exception:
+                    pass
+
+            else:
+                # Still live or still offline — optional: update embed on title/game change
+                if is_live_now and state.get("message_id"):
+                    try:
+                        ch = client.get_channel(state["channel_id"]) or await client.fetch_channel(state["channel_id"])
+                        message = await ch.fetch_message(state["message_id"])
+                        game_box = await twitch_get_game_box_art_url(stream.get("game_id"))
+                        await message.edit(embed=make_twitch_live_embed(stream, game_box), view=WatchButtonView(f"https://twitch.tv/{TWITCH_CHANNEL_LOGIN}"))
+                    except Exception:
+                        pass
+
+        except Exception as e:
+            print(f"[ERROR] monitor_twitch_live tick failed: {e}")
+
+        await asyncio.sleep(TWITCH_POLL_INTERVAL if TWITCH_POLL_INTERVAL > 0 else 60)
+
+# -------------------------
 # Command sync (global + optional guild)
 # -------------------------
 @client.event
@@ -2780,8 +2965,21 @@ async def on_ready():
 
     print(f"Bot is ready as {client.user}")
 
-    # --- keep the rest unchanged ---
-    client.loop.create_task(rotate_presence())
+    # Run background tasks once (avoid duplicates on reconnect)
+    if not getattr(client, "background_started", False):
+        try:
+            client.loop.create_task(rotate_presence())
+            print("🌀 Presence rotation started.")
+        except Exception as e:
+            print(f"[ERROR] Could not start presence rotation: {e}")
+    
+        try:
+            client.loop.create_task(monitor_twitch_live())
+            print("📡 Twitch live monitor started.")
+        except Exception as e:
+            print(f"[ERROR] Could not start Twitch monitor: {e}")
+    
+        client.background_started = True
 
     channel_id = int(os.getenv("ANNOUNCE_CHANNEL_ID", "0"))
     channel = client.get_channel(channel_id)
