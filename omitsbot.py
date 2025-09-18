@@ -59,44 +59,6 @@ welcome_config = {
     "color_hex": WELCOME_COLOR_HEX,
 }
 
-# --- Clips watcher config/state ---
-TWITCH_CLIP_CHANNEL_LOGIN = (os.getenv("TWITCH_CLIP_CHANNEL_LOGIN") or "").lower().strip()
-TWITCH_CLIP_ANNOUNCE_CHANNEL_ID = int(os.getenv("TWITCH_CLIP_ANNOUNCE_CHANNEL_ID", "0"))
-TWITCH_CLIP_ROLE_ID = int(os.getenv("TWITCH_CLIP_ROLE_ID", "0"))
-TWITCH_CLIP_POLL_INTERVAL = int(os.getenv("TWITCH_CLIP_POLL_INTERVAL", "45"))
-TWITCH_CLIP_STATE_FILE = "twitch_clips_state.json"
-
-def _load_clip_state():
-    try:
-        with open(TWITCH_CLIP_STATE_FILE, "r") as f:
-            return json.load(f)
-    except Exception:
-        return {"last_seen_id": None, "last_seen_created_at": None}
-
-def _save_clip_state(s):
-    try:
-        with open(TWITCH_CLIP_STATE_FILE, "w") as f:
-            json.dump(s, f)
-    except Exception as e:
-        print(f"[WARN] couldn't persist clip state: {e}")
-
-async def twitch_get_user_by_login(login: str) -> dict | None:
-    if not login:
-        return None
-    data = await _twitch_api_get("/users", {"login": login})
-    arr = data.get("data", [])
-    return arr[0] if arr else None
-
-async def twitch_get_latest_clip(broadcaster_id: str) -> dict | None:
-    # fetch the single most recent clip
-    data = await _twitch_api_get("/clips", {
-        "broadcaster_id": broadcaster_id,
-        "first": 1,
-        # started_at is optional, we keep our own state to avoid missing anything
-    })
-    clips = data.get("data", [])
-    return clips[0] if clips else None
-
 # --- Lineups config/persistence ---
 LINEUPS_FILE = os.getenv("LINEUPS_FILE", "lineups.json")
 
@@ -528,99 +490,6 @@ async def rotate_presence():
             print(f"[ERROR] Failed to rotate presence: {e}")
 
         await asyncio.sleep(300)
-
-async def _post_clip_embed(clip: dict):
-    channel = client.get_channel(TWITCH_CLIP_ANNOUNCE_CHANNEL_ID)
-    if not isinstance(channel, discord.TextChannel):
-        try:
-            channel = await client.fetch_channel(TWITCH_CLIP_ANNOUNCE_CHANNEL_ID)  # type: ignore
-        except Exception as e:
-            print(f"[ERROR] clip announce channel not found: {e}")
-            return
-
-    title = clip.get("title") or "New clip!"
-    url = clip.get("url")
-    thumb = clip.get("thumbnail_url")
-    creator = clip.get("creator_name", "Someone")
-    dur = clip.get("duration", 0)
-    created_at = clip.get("created_at", "")
-
-    emb = discord.Embed(
-        title=f"🎬 {title}",
-        description=f"by **{creator}**",
-        url=url,
-        color=discord.Color.purple(),
-        timestamp=datetime.fromisoformat(created_at.replace("Z","+00:00")) if created_at else discord.utils.utcnow()
-    )
-
-    # New field: Channel (hyperlinked to Twitch channel)
-    emb.add_field(name="Channel", value="[Stimo](https://twitch.tv/stimo)", inline=True)
-
-    # Duration field
-    emb.add_field(name="Duration", value=f"{int(round(dur))}s", inline=True)
-
-    # Large clip preview image
-    if thumb:
-        emb.set_image(url=thumb)
-
-    # Footer with bot name + server icon (always show)
-    guild = channel.guild if channel else None
-    icon_url = guild.icon.url if guild and guild.icon else None
-    
-    emb.set_footer(
-        text="omitS Bot",
-        icon_url=icon_url
-    )
-
-    mention_text = f"<@&{TWITCH_CLIP_ROLE_ID}>" if TWITCH_CLIP_ROLE_ID else None
-    allowed = discord.AllowedMentions(
-        roles=[discord.Object(TWITCH_CLIP_ROLE_ID)] if TWITCH_CLIP_ROLE_ID else [],
-        users=False, everyone=False, replied_user=False
-    )
-
-    try:
-        await channel.send(content=mention_text, embed=emb, allowed_mentions=allowed)
-    except Exception as e:
-        print(f"[ERROR] failed to send clip embed: {e}")
-
-async def poll_twitch_clips_loop():
-    await client.wait_until_ready()
-    if not (TWITCH_CLIP_CHANNEL_LOGIN and TWITCH_CLIP_ANNOUNCE_CHANNEL_ID and TWITCH_CLIENT_ID and TWITCH_CLIENT_SECRET):
-        print("[clips] watcher disabled; missing config")
-        return
-
-    # resolve broadcaster id once
-    try:
-        u = await twitch_get_user_by_login(TWITCH_CLIP_CHANNEL_LOGIN)
-        if not u:
-            print(f"[clips] no twitch user for login '{TWITCH_CLIP_CHANNEL_LOGIN}'")
-            return
-        broadcaster_id = u["id"]
-    except Exception as e:
-        print(f"[clips] failed to resolve broadcaster id: {e}")
-        return
-
-    state = _load_clip_state()
-    last_seen_id = state.get("last_seen_id")
-    last_seen_created_at = state.get("last_seen_created_at")
-
-    while not client.is_closed():
-        try:
-            latest = await twitch_get_latest_clip(broadcaster_id)
-            if latest:
-                cid = latest.get("id")
-                created_at = latest.get("created_at")
-                # announce if it's newer than what we’ve seen
-                is_new = (cid and cid != last_seen_id)
-                if is_new:
-                    await _post_clip_embed(latest)
-                    last_seen_id = cid
-                    last_seen_created_at = created_at
-                    _save_clip_state({"last_seen_id": last_seen_id, "last_seen_created_at": last_seen_created_at})
-        except Exception as e:
-            print(f"[clips] poll error: {e}")
-
-        await asyncio.sleep(max(TWITCH_CLIP_POLL_INTERVAL, 15))
 
 # Safe interaction helpers
 async def safe_interaction_edit(interaction, embed, view):
@@ -3125,74 +2994,78 @@ async def monitor_twitch_live():
 # Command sync (global + optional guild)
 # -------------------------
 @client.event
-@client.event
 async def on_ready():
     # --- DB bootstrap + load persistent state ---
     try:
         await init_db()
+        # Pull latest snapshots for each store from Postgres
         global events_store, templates_store, lineups_store
-        events_store    = await db_load_json(EVENTS_FILE,    {"next_id": 1, "events": {}})
+        events_store   = await db_load_json(EVENTS_FILE,   {"next_id": 1, "events": {}})
         templates_store = await db_load_json(TEMPLATES_FILE, {})
-        lineups_store   = await db_load_json(LINEUPS_FILE,   {"next_id": 1, "lineups": {}})
+        lineups_store  = await db_load_json(LINEUPS_FILE,  {"next_id": 1, "lineups": {}})
         print("🗄️ Loaded stores from Postgres.")
     except Exception as e:
         print(f"[ERROR] Postgres init/load failed: {e}")
+        # (Optional) raise here if persistence is required
+        # raise
 
-    # --- Command sync ---
+    # --- your existing command sync logic (unchanged) ---
     try:
         gid = int(os.getenv("GUILD_ID", "0"))
         guild = client.get_guild(gid) or (await client.fetch_guild(gid) if gid else None)
+
         if guild:
+            # 1) Start clean: remove any existing guild-scoped registrations
             tree.clear_commands(guild=guild)
+
+            # 2) Copy your global command definitions into the guild scope
             tree.copy_global_to(guild=guild)
+
+            # 3) Publish guild-only commands (fast propagation)
             cmds = await tree.sync(guild=guild)
             print(f"✅ Synced {len(cmds)} commands to guild {gid}")
-            tree.clear_commands(guild=None)
-            await tree.sync()
+
+            # 4) Remove GLOBAL registrations so you don't see duplicates
+            tree.clear_commands(guild=None)   # clears global
+            await tree.sync()                  # push the deletion
             print("🧹 Cleared global commands")
         else:
             print("[WARN] GUILD_ID not set or guild not found")
+
     except Exception as e:
         print(f"[ERROR] Command sync failed: {e}")
 
     print(f"Bot is ready as {client.user}")
 
-    # --- Background tasks (run once) ---
+    # Run background tasks once (avoid duplicates on reconnect)
     if not getattr(client, "background_started", False):
         try:
             client.loop.create_task(rotate_presence())
             print("🌀 Presence rotation started.")
         except Exception as e:
             print(f"[ERROR] Could not start presence rotation: {e}")
-
+    
         try:
             client.loop.create_task(monitor_twitch_live())
             print("📡 Twitch live monitor started.")
         except Exception as e:
             print(f"[ERROR] Could not start Twitch monitor: {e}")
-
-        try:
-            client.loop.create_task(poll_twitch_clips_loop())
-            print("🎬 Twitch clips watcher started.")
-        except Exception as e:
-            print(f"[ERROR] Could not start Twitch clips watcher: {e}")
-
+    
         client.background_started = True
 
-    # --- Online announce (auto-delete) ---
     channel_id = int(os.getenv("ANNOUNCE_CHANNEL_ID", "0"))
     channel = client.get_channel(channel_id)
+    
     if channel:
         message = await channel.send("✅ - omitS Bot (<:discord:1363127822209646612>) is now online and ready for commands!")
-        async def _cleanup():
+        async def delete_after_announcement():
             await asyncio.sleep(60)
             try:
                 await message.delete()
             except Exception as e:
                 print(f"[ERROR] Failed to auto-delete announcement message: {e}")
-        asyncio.create_task(_cleanup())
+        asyncio.create_task(delete_after_announcement())
     else:
         print(f"[WARN] Could not find channel with ID {channel_id}")
 
-if __name__ == "__main__":
-    client.run(TOKEN)
+client.run(TOKEN)
