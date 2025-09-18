@@ -3125,11 +3125,11 @@ async def monitor_twitch_live():
 # Command sync (global + optional guild)
 # -------------------------
 @client.event
+@client.event
 async def on_ready():
     # --- DB bootstrap + load persistent state ---
     try:
         await init_db()
-        # Pull latest snapshots for each store from Postgres
         global events_store, templates_store, lineups_store
         events_store    = await db_load_json(EVENTS_FILE,    {"next_id": 1, "events": {}})
         templates_store = await db_load_json(TEMPLATES_FILE, {})
@@ -3137,72 +3137,59 @@ async def on_ready():
         print("🗄️ Loaded stores from Postgres.")
     except Exception as e:
         print(f"[ERROR] Postgres init/load failed: {e}")
-        # (Optional) raise here if persistence is required
-        # raise
 
-    # --- your existing command sync logic (unchanged) ---
+    # --- Command sync ---
     try:
         gid = int(os.getenv("GUILD_ID", "0"))
         guild = client.get_guild(gid) or (await client.fetch_guild(gid) if gid else None)
-
         if guild:
-            # 1) Start clean: remove any existing guild-scoped registrations
             tree.clear_commands(guild=guild)
-
-            # 2) Copy your global command definitions into the guild scope
             tree.copy_global_to(guild=guild)
-
-            # 3) Publish guild-only commands (fast propagation)
             cmds = await tree.sync(guild=guild)
             print(f"✅ Synced {len(cmds)} commands to guild {gid}")
-
-            # 4) Remove GLOBAL registrations so you don't see duplicates
-            tree.clear_commands(guild=None)   # clears global
-            await tree.sync()                  # push the deletion
+            tree.clear_commands(guild=None)
+            await tree.sync()
             print("🧹 Cleared global commands")
         else:
             print("[WARN] GUILD_ID not set or guild not found")
-
     except Exception as e:
         print(f"[ERROR] Command sync failed: {e}")
 
     print(f"Bot is ready as {client.user}")
 
-    # Run background tasks once (avoid duplicates on reconnect)
+    # --- Background tasks (run once) ---
     if not getattr(client, "background_started", False):
         try:
             client.loop.create_task(rotate_presence())
             print("🌀 Presence rotation started.")
         except Exception as e:
             print(f"[ERROR] Could not start presence rotation: {e}")
-    
+
         try:
             client.loop.create_task(monitor_twitch_live())
             print("📡 Twitch live monitor started.")
         except Exception as e:
             print(f"[ERROR] Could not start Twitch monitor: {e}")
 
-        # --- NEW: Twitch clips watcher ---
         try:
-            # Requires helper poll_twitch_clips_loop() previously added
             client.loop.create_task(poll_twitch_clips_loop())
             print("🎬 Twitch clips watcher started.")
         except Exception as e:
             print(f"[ERROR] Could not start Twitch clips watcher: {e}")
-    
+
         client.background_started = True
 
+    # --- Online announce (auto-delete) ---
     channel_id = int(os.getenv("ANNOUNCE_CHANNEL_ID", "0"))
     channel = client.get_channel(channel_id)
-    
     if channel:
         message = await channel.send("✅ - omitS Bot (<:discord:1363127822209646612>) is now online and ready for commands!")
-        async def delete_after_announcement():
+        async def _cleanup():
             await asyncio.sleep(60)
             try:
                 await message.delete()
             except Exception as e:
                 print(f"[ERROR] Failed to auto-delete announcement message: {e}")
-        asyncio.create_task(delete_after_announcement())
+        asyncio.create_task(_cleanup())
     else:
         print(f"[WARN] Could not find channel with ID {channel_id}")
