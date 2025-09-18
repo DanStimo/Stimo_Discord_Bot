@@ -532,7 +532,6 @@ async def rotate_presence():
 async def _post_clip_embed(clip: dict):
     channel = client.get_channel(TWITCH_CLIP_ANNOUNCE_CHANNEL_ID)
     if not isinstance(channel, discord.TextChannel):
-        # try fetch once if not cached
         try:
             channel = await client.fetch_channel(TWITCH_CLIP_ANNOUNCE_CHANNEL_ID)  # type: ignore
         except Exception as e:
@@ -544,7 +543,6 @@ async def _post_clip_embed(clip: dict):
     thumb = clip.get("thumbnail_url")
     creator = clip.get("creator_name", "Someone")
     dur = clip.get("duration", 0)
-    views = clip.get("view_count", 0)
     created_at = clip.get("created_at", "")
 
     emb = discord.Embed(
@@ -554,14 +552,31 @@ async def _post_clip_embed(clip: dict):
         color=discord.Color.purple(),
         timestamp=datetime.fromisoformat(created_at.replace("Z","+00:00")) if created_at else discord.utils.utcnow()
     )
+
+    # New field: Channel (hyperlinked to Twitch channel)
+    emb.add_field(name="Channel", value="[Stimo](https://twitch.tv/stimo)", inline=True)
+
+    # Duration field
     emb.add_field(name="Duration", value=f"{int(round(dur))}s", inline=True)
-    emb.add_field(name="Views", value=str(views), inline=True)
+
+    # Large clip preview image
     if thumb:
         emb.set_image(url=thumb)
-    emb.set_footer(text="Twitch Clip")
+
+    # Footer with bot name + server icon (always show)
+    guild = channel.guild if channel else None
+    icon_url = guild.icon.url if guild and guild.icon else None
+    
+    emb.set_footer(
+        text="omitS Bot",
+        icon_url=icon_url
+    )
 
     mention_text = f"<@&{TWITCH_CLIP_ROLE_ID}>" if TWITCH_CLIP_ROLE_ID else None
-    allowed = discord.AllowedMentions(roles=[discord.Object(TWITCH_CLIP_ROLE_ID)] if TWITCH_CLIP_ROLE_ID else [], users=False, everyone=False, replied_user=False)
+    allowed = discord.AllowedMentions(
+        roles=[discord.Object(TWITCH_CLIP_ROLE_ID)] if TWITCH_CLIP_ROLE_ID else [],
+        users=False, everyone=False, replied_user=False
+    )
 
     try:
         await channel.send(content=mention_text, embed=emb, allowed_mentions=allowed)
