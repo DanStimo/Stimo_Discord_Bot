@@ -3193,3 +3193,6 @@ async def on_ready():
         asyncio.create_task(_cleanup())
     else:
         print(f"[WARN] Could not find channel with ID {channel_id}")
+
+if __name__ == "__main__":
+    client.run(TOKEN)
