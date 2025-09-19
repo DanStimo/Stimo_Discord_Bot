@@ -911,14 +911,15 @@ async def auto_post_lineup_in_thread(ev: dict, thread: discord.Thread, formation
             "title": f"{ev.get('name')} Lineup",
             "formation": formation_str,
             "positions": _build_positions_for_formation(formation_str),
-            "role_id": ev.get("role_id"),              # restrict to same role as event (if any)
-            "channel_id": thread.id,                   # post in the event thread
+            "role_id": ev.get("role_id"),
+            "channel_id": thread.id,
             "message_id": None,
             "creator_id": ev.get("creator_id"),
             "created_at": datetime.now(timezone.utc).isoformat(),
             "updated_at": None,
             "finished_once": False,
             "pinged_user_ids": [],
+            "kickoff_at": ev.get("datetime"),  # <— use the event time if present
         }
 
         embed = make_lineup_embed(lp)
@@ -1598,7 +1599,8 @@ async def l5_command(interaction: discord.Interaction, club: str):
     formation="Choose a soccer formation",
     title="Optional custom title for the lineup",
     role="Optional role restriction: only members with this role can be assigned",
-    channel="Channel to post the lineup (defaults to current channel)"
+    channel="Channel to post the lineup (defaults to current channel)",
+    kickoff="Kickoff date/time (DD-MM-YYYY HH:MM) in Europe/London"
 )
 @app_commands.choices(formation=[app_commands.Choice(name=f, value=f) for f in FORMATIONS.keys()])
 async def lineup_command(
@@ -1606,7 +1608,8 @@ async def lineup_command(
     formation: app_commands.Choice[str],
     title: str | None = None,
     role: discord.Role | None = None,
-    channel: discord.TextChannel | None = None
+    channel: discord.TextChannel | None = None,
+    kickoff: str | None = None,
 ):
     await interaction.response.defer(ephemeral=True)
     target_channel = channel or interaction.channel
@@ -1614,22 +1617,39 @@ async def lineup_command(
         await safe_interaction_respond(interaction, content="❌ Please specify a valid text channel.", ephemeral=True)
         return
 
-    # Build lineup object
-    lid = lineups_store.get("next_id", 1)
-    lp = {
-        "id": lid,
-        "title": (title or "").strip() or None,
-        "formation": formation.value,
-        "positions": _build_positions_for_formation(formation.value),
-        "role_id": (role.id if role else None),
-        "channel_id": target_channel.id,
-        "message_id": None,
-        "creator_id": interaction.user.id,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "updated_at": None,
-        "finished_once": False,
-        "pinged_user_ids": []
-    }
+        # Parse optional kickoff (Europe/London -> UTC ISO)
+        kickoff_iso = None
+        if kickoff:
+            try:
+                dt_local_naive = datetime.strptime(kickoff, "%d-%m-%Y %H:%M")
+                dt_local = dt_local_naive.replace(tzinfo=DEFAULT_TZ)
+                dt_utc = dt_local.astimezone(timezone.utc)
+                kickoff_iso = dt_utc.isoformat()
+            except Exception:
+                await safe_interaction_respond(
+                    interaction,
+                    content="❌ Invalid kickoff format. Use `DD-MM-YYYY HH:MM` (24-hour), Europe/London.",
+                    ephemeral=True
+                )
+                return
+    
+        # Build lineup object
+        lid = lineups_store.get("next_id", 1)
+        lp = {
+            "id": lid,
+            "title": (title or "").strip() or None,
+            "formation": formation.value,
+            "positions": _build_positions_for_formation(formation.value),
+            "role_id": (role.id if role else None),
+            "channel_id": target_channel.id,
+            "message_id": None,
+            "creator_id": interaction.user.id,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": None,
+            "finished_once": False,
+            "pinged_user_ids": [],
+            "kickoff_at": kickoff_iso,
+        }
 
     embed = make_lineup_embed(lp)
 
@@ -1861,12 +1881,24 @@ def make_lineup_embed(lp: dict) -> discord.Embed:
     formation = lp.get("formation")
     role_id = lp.get("role_id")
 
+    # Build the details section
+    details: list[str] = [f"**Formation:** `{formation}`"]
+    if role_id:
+        details.append(f"**Eligible Role:** <@&{role_id}>")
+
+    # Kickoff (optional)
+    ko_iso = lp.get("kickoff_at")
+    if ko_iso:
+        try:
+            dt = datetime.fromisoformat(ko_iso).astimezone(timezone.utc)
+            # Absolute + relative time
+            details.append(f"**Kickoff:** {discord.utils.format_dt(dt, style='F')} ({discord.utils.format_dt(dt, style='R')})")
+        except Exception:
+            pass
+
     embed = discord.Embed(
         title=f"🧩 {title}",
-        description=(
-            f"**Formation:** `{formation}`"
-            + (f"\n**Eligible Role:** <@&{role_id}>" if role_id else "")
-        ),
+        description="\n".join(details),
         color=color,
     )
 
