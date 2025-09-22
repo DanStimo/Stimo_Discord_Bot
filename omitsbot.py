@@ -133,19 +133,62 @@ def _twitch_url_from_input(value: str | None) -> str | None:
 
 @client.event
 async def on_member_join(member: discord.Member):
+    print(f"[INFO] on_member_join fired for {member} (id={member.id})")
+
+    # --- Config lookups ---
     channel_id = welcome_config.get("channel_id", 0)
     if not channel_id:
+        print("[WARN] No welcome channel configured. Use /setwelcomechannel.")
         return
 
+    # --- If your server uses Membership Screening, wait until it's completed ---
+    # member.pending == True means they haven't accepted the rules yet.
+    try:
+        if getattr(member, "pending", False):
+            print(f"[INFO] {member} is pending membership screening; waiting for completion...")
+            def _done(before: discord.Member, after: discord.Member) -> bool:
+                return after.id == member.id and not after.pending
+            # Wait up to 30 minutes for them to finish screening
+            await client.wait_for("member_update", check=_done, timeout=1800)
+            # Refresh the member object from cache if needed
+            refreshed = member.guild.get_member(member.id)
+            if refreshed:
+                member = refreshed
+            print(f"[INFO] {member} finished membership screening.")
+    except asyncio.TimeoutError:
+        print(f"[WARN] {member} did not complete screening in time; skipping welcome/actions.")
+        return
+    except Exception as e:
+        print(f"[WARN] Error while waiting for membership screening: {e}")
+
+    # --- Resolve welcome channel ---
     try:
         channel = member.guild.get_channel(channel_id) or await member.guild.fetch_channel(channel_id)
     except Exception as e:
         print(f"[ERROR] Welcome channel fetch failed: {e}")
         return
-
-    if not isinstance(channel, (discord.TextChannel, discord.Thread, discord.ForumChannel)):
+    if not isinstance(channel, discord.TextChannel):
+        print("[WARN] Welcome channel is not a text channel.")
         return
 
+    # --- Try to auto-assign the Member role (requires Manage Roles and correct role hierarchy) ---
+    MEMBER_ROLE_ID = int(os.getenv("MEMBER_ROLE_ID", "0"))
+    if MEMBER_ROLE_ID:
+        role = member.guild.get_role(MEMBER_ROLE_ID)
+        if role:
+            try:
+                await member.add_roles(role, reason="Auto member role on join")
+                print(f"[INFO] Gave {member} the role: {role.name}")
+            except discord.Forbidden:
+                print("[ERROR] Missing 'Manage Roles' or role hierarchy issue: bot role must be above Member role.")
+            except Exception as e:
+                print(f"[ERROR] Failed to add Member role: {e}")
+        else:
+            print(f"[WARN] MEMBER_ROLE_ID {MEMBER_ROLE_ID} not found in guild.")
+    else:
+        print("[WARN] MEMBER_ROLE_ID not set; skipping auto-role assignment.")
+
+    # --- Build the embed ---
     embed = discord.Embed(
         title="Welcome aboard! 👋",
         description=(
@@ -158,26 +201,40 @@ async def on_member_join(member: discord.Member):
         timestamp=datetime.now(timezone.utc)
     )
 
+    # Author (user + avatar)
     embed.set_author(
         name=f"{member.display_name} has arrived!",
         icon_url=member.display_avatar.url
     )
 
+    # Thumbnail: guild icon (fallback to member avatar)
     if member.guild.icon:
         embed.set_thumbnail(url=member.guild.icon.url)
     else:
         embed.set_thumbnail(url=member.display_avatar.url)
 
-    embed.set_footer(
-        text="omitS Bot",
-        icon_url="https://i.imgur.com/Uy3fdb1.png"
-    )
+    # Footer
+    embed.set_footer(text="omitS Bot", icon_url="https://i.imgur.com/Uy3fdb1.png")
 
+    # --- Send and react ---
     try:
+        # Make sure bot can view/send/embed/add reactions in this channel
+        perms = channel.permissions_for(channel.guild.me)
+        if not (perms.view_channel and perms.send_messages and perms.embed_links and perms.add_reactions):
+            print("[ERROR] Missing one of: View Channel / Send Messages / Embed Links / Add Reactions in welcome channel.")
+            return
+
         message = await channel.send(content=member.mention, embed=embed)
+
+        # react with custom emoji by name (must be in this server)
         emoji = discord.utils.get(member.guild.emojis, name="Wave")
         if emoji:
             await message.add_reaction(emoji)
+        else:
+            print("[WARN] Could not find custom emoji 'Wave' in this server; skipping reaction.")
+
+        print(f"[INFO] Welcome message posted for {member} in #{channel.name}")
+
     except Exception as e:
         print(f"[ERROR] Failed to send welcome embed or add reaction: {e}")
 
