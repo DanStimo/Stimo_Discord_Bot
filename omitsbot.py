@@ -137,7 +137,7 @@ async def on_member_join(member: discord.Member):
 
     # --- Hardcoded config ---
     WELCOME_CHANNEL_ID = 1361690632392933527        # 👈 replace with your welcome channel ID
-    WELCOME_COLOR = 3498DB                       # 👈 green color, hex without '#'
+    WELCOME_COLOR = 0x3498DB                       # 👈 green color, hex without '#'
     MEMBER_ROLE_ID = 1361661691590606929            # 👈 replace with your Member role ID
 
     # --- Resolve channel ---
