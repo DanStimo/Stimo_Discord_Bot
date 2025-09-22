@@ -135,42 +135,31 @@ def _twitch_url_from_input(value: str | None) -> str | None:
 async def on_member_join(member: discord.Member):
     print(f"[JOIN] on_member_join fired for {member} (id={member.id})")
 
-    # --- Resolve welcome channel (env fallback in case config was lost after restart) ---
-    channel_id = welcome_config.get("channel_id", 0) or int(os.getenv("WELCOME_CHANNEL_ID", "0"))
-    if not channel_id:
-        print("[WARN] No welcome channel configured. Set WELCOME_CHANNEL_ID in .env or run /setwelcomechannel.")
-        return
+    # --- Hardcoded config ---
+    WELCOME_CHANNEL_ID = 1361690632392933527        # 👈 replace with your welcome channel ID
+    WELCOME_COLOR = 3498DB                       # 👈 green color, hex without '#'
+    MEMBER_ROLE_ID = 1361661691590606929            # 👈 replace with your Member role ID
 
-    try:
-        channel = member.guild.get_channel(channel_id) or await member.guild.fetch_channel(channel_id)
-    except Exception as e:
-        print(f"[ERROR] Welcome channel fetch failed: {e}")
+    # --- Resolve channel ---
+    channel = member.guild.get_channel(WELCOME_CHANNEL_ID)
+    if channel is None:
+        print(f"[ERROR] Could not resolve welcome channel {WELCOME_CHANNEL_ID}")
         return
 
     # --- Auto-assign the Member role ---
-    MEMBER_ROLE_ID = int(os.getenv("MEMBER_ROLE_ID", "0"))
-    MEMBER_ROLE_NAME = os.getenv("MEMBER_ROLE_NAME", "Member")
-
-    role = None
-    if MEMBER_ROLE_ID:
-        role = member.guild.get_role(MEMBER_ROLE_ID)
-        if role is None:
-            print(f"[WARN] MEMBER_ROLE_ID {MEMBER_ROLE_ID} not found in guild.")
-    if role is None and MEMBER_ROLE_NAME:
-        role = discord.utils.get(member.guild.roles, name=MEMBER_ROLE_NAME)
-
+    role = member.guild.get_role(MEMBER_ROLE_ID)
     if role:
         try:
             await member.add_roles(role, reason="Auto member role on join")
             print(f"[INFO] Gave {member} the role: {role.name}")
         except discord.Forbidden:
-            print("[ERROR] Cannot add role: missing Manage Roles or role hierarchy issue (bot role must be above Member).")
+            print("[ERROR] Cannot add role: missing Manage Roles or role hierarchy issue.")
         except Exception as e:
             print(f"[ERROR] Failed to add Member role: {e}")
     else:
-        print("[WARN] No Member role resolved. Set MEMBER_ROLE_ID in .env (recommended) or MEMBER_ROLE_NAME.")
+        print(f"[WARN] Member role with ID {MEMBER_ROLE_ID} not found in guild.")
 
-    # --- Build the embed (single copy) ---
+    # --- Build embed ---
     embed = discord.Embed(
         title="Welcome aboard! 👋",
         description=(
@@ -179,11 +168,11 @@ async def on_member_join(member: discord.Member):
             "• **Grab roles:** <#1361921570104283186>\n"
             "• **Say hi!:** <#1361690632392933527> 👋"
         ),
-        color=_color_from_hex(welcome_config.get("color_hex")),
+        color=WELCOME_COLOR,
         timestamp=datetime.now(timezone.utc)
     )
 
-    # Author line: "<display_name> has arrived!" with their avatar
+    # Author: "<display_name> has arrived!" with avatar
     embed.set_author(
         name=f"{member.display_name} has arrived!",
         icon_url=member.display_avatar.url
@@ -207,7 +196,8 @@ async def on_member_join(member: discord.Member):
 
         message = await channel.send(content=member.mention, embed=embed)
 
-        emoji = discord.utils.get(member.guild.emojis, name="Wave")  # must be exact name of the emoji
+        # react with custom emoji named "Wave"
+        emoji = discord.utils.get(member.guild.emojis, name="Wave")
         if emoji:
             await message.add_reaction(emoji)
         else:
