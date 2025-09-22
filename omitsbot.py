@@ -133,60 +133,93 @@ def _twitch_url_from_input(value: str | None) -> str | None:
 
 @client.event
 async def on_member_join(member: discord.Member):
-    print(f"[INFO] on_member_join fired for {member} (id={member.id})")
+    print(f"[JOIN] on_member_join fired for {member} (id={member.id})")
 
-    # --- Config lookups ---
-    channel_id = welcome_config.get("channel_id", 0)
+    # --- Resolve welcome channel (env fallback in case config was lost after restart) ---
+    channel_id = welcome_config.get("channel_id", 0) or int(os.getenv("WELCOME_CHANNEL_ID", "0"))
     if not channel_id:
-        print("[WARN] No welcome channel configured. Use /setwelcomechannel.")
+        print("[WARN] No welcome channel configured. Set WELCOME_CHANNEL_ID in .env or run /setwelcomechannel.")
         return
 
-    # --- If your server uses Membership Screening, wait until it's completed ---
-    # member.pending == True means they haven't accepted the rules yet.
-    try:
-        if getattr(member, "pending", False):
-            print(f"[INFO] {member} is pending membership screening; waiting for completion...")
-            def _done(before: discord.Member, after: discord.Member) -> bool:
-                return after.id == member.id and not after.pending
-            # Wait up to 30 minutes for them to finish screening
-            await client.wait_for("member_update", check=_done, timeout=1800)
-            # Refresh the member object from cache if needed
-            refreshed = member.guild.get_member(member.id)
-            if refreshed:
-                member = refreshed
-            print(f"[INFO] {member} finished membership screening.")
-    except asyncio.TimeoutError:
-        print(f"[WARN] {member} did not complete screening in time; skipping welcome/actions.")
-        return
-    except Exception as e:
-        print(f"[WARN] Error while waiting for membership screening: {e}")
-
-    # --- Resolve welcome channel ---
     try:
         channel = member.guild.get_channel(channel_id) or await member.guild.fetch_channel(channel_id)
     except Exception as e:
         print(f"[ERROR] Welcome channel fetch failed: {e}")
         return
-    if not isinstance(channel, discord.TextChannel):
-        print("[WARN] Welcome channel is not a text channel.")
+
+    # Quick permission check (prevents silent failures)
+    perms = channel.permissions_for(channel.guild.me)
+    if not (perms.view_channel and perms.send_messages and perms.embed_links):
+        print("[ERROR] Missing permissions in welcome channel: need View Channel, Send Messages, Embed Links.")
         return
 
-    # --- Try to auto-assign the Member role (requires Manage Roles and correct role hierarchy) ---
+    # --- Build the embed (your existing layout) ---
+    embed = discord.Embed(
+        title="Welcome aboard! 👋",
+        description=(
+            f"{member.mention}, you've reached **Stimo's** Discord server!\n\n"
+            "• **Read the rules:** <#1362311374293958856>\n"
+            "• **Grab roles:** <#1361921570104283186>\n"
+            "• **Say hi!:** <#1361690632392933527> 👋"
+        ),
+        color=_color_from_hex(welcome_config.get("color_hex")),
+        timestamp=datetime.now(timezone.utc)
+    )
+
+    # Author line: "<display_name> has arrived!" with their avatar
+    embed.set_author(
+        name=f"{member.display_name} has arrived!",
+        icon_url=member.display_avatar.url
+    )
+
+    # Thumbnail: guild icon (fallback to member avatar)
+    if member.guild.icon:
+        embed.set_thumbnail(url=member.guild.icon.url)
+    else:
+        embed.set_thumbnail(url=member.display_avatar.url)
+
+    # Footer
+    embed.set_footer(text="omitS Bot", icon_url="https://i.imgur.com/Uy3fdb1.png")
+
+    # --- Send the message & add reaction ---
+    try:
+        message = await channel.send(content=member.mention, embed=embed)
+
+        # react with custom emoji named "Wave" from this server
+        if perms.add_reactions:
+            emoji = discord.utils.get(member.guild.emojis, name="Wave")  # name only (no colons)
+            if emoji:
+                await message.add_reaction(emoji)
+            else:
+                print("[WARN] Could not find custom emoji 'Wave' in this server; skipping reaction.")
+        else:
+            print("[WARN] Missing Add Reactions permission in welcome channel.")
+    except Exception as e:
+        print(f"[ERROR] Failed to send welcome embed or add reaction: {e}")
+
+    # --- Auto-assign the Member role ---
+    # Prefer ID via env, else fall back to name
     MEMBER_ROLE_ID = int(os.getenv("MEMBER_ROLE_ID", "0"))
+    MEMBER_ROLE_NAME = os.getenv("MEMBER_ROLE_NAME", "Member")
+
+    role = None
     if MEMBER_ROLE_ID:
         role = member.guild.get_role(MEMBER_ROLE_ID)
-        if role:
-            try:
-                await member.add_roles(role, reason="Auto member role on join")
-                print(f"[INFO] Gave {member} the role: {role.name}")
-            except discord.Forbidden:
-                print("[ERROR] Missing 'Manage Roles' or role hierarchy issue: bot role must be above Member role.")
-            except Exception as e:
-                print(f"[ERROR] Failed to add Member role: {e}")
-        else:
+        if role is None:
             print(f"[WARN] MEMBER_ROLE_ID {MEMBER_ROLE_ID} not found in guild.")
+    if role is None and MEMBER_ROLE_NAME:
+        role = discord.utils.get(member.guild.roles, name=MEMBER_ROLE_NAME)
+
+    if role:
+        try:
+            await member.add_roles(role, reason="Auto member role on join")
+            print(f"[INFO] Gave {member} the role: {role.name}")
+        except discord.Forbidden:
+            print("[ERROR] Cannot add role: missing Manage Roles or role hierarchy issue (bot role must be above Member).")
+        except Exception as e:
+            print(f"[ERROR] Failed to add Member role: {e}")
     else:
-        print("[WARN] MEMBER_ROLE_ID not set; skipping auto-role assignment.")
+        print("[WARN] No Member role resolved. Set MEMBER_ROLE_ID in .env (recommended) or MEMBER_ROLE_NAME.")
 
     # --- Build the embed ---
     embed = discord.Embed(
