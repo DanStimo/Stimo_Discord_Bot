@@ -736,7 +736,11 @@ async def fetch_and_display_last5(interaction, club_id, club_name="Club", origin
             url = f"{base_url}?matchType={match_type}&platform={PLATFORM}&clubIds={club_id}"
             response = await client_http.get(url, headers=headers)
             if response.status_code == 200:
-                matches.extend(response.json())
+                data = response.json() or []
+                # Tag each match with the type we fetched so we can label it later
+                for m in data:
+                    m["_matchType"] = match_type
+                matches.extend(data)
 
     matches.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
     last_5 = matches[:5]
@@ -751,7 +755,7 @@ async def fetch_and_display_last5(interaction, club_id, club_name="Club", origin
     )
 
     for idx, match in enumerate(last_5, 1):
-        clubs = match.get("clubs", {})
+        clubs = match.get("clubs", {}) or {}
         club_data = clubs.get(str(club_id)) or {}
         opponent_id = next((cid for cid in clubs if cid != str(club_id)), None)
         opponent_data = clubs.get(opponent_id) if opponent_id else {}
@@ -767,8 +771,12 @@ async def fetch_and_display_last5(interaction, club_id, club_name="Club", origin
 
         result = "✅" if our_score > opponent_score else "❌" if our_score < opponent_score else "➖"
 
+        # Resolve label safely
+        raw_type = match.get("_matchType") or match.get("matchType")
+        label = MATCH_TYPE_LABELS.get(raw_type, raw_type or "Unknown")
+
         embed.add_field(
-            name=f"{idx}⃣ {result} vs {opponent_name}",
+            name=f"{idx}⃣ {result} [{label}] vs {opponent_name}",
             value=f"Score: {our_score}-{opponent_score}",
             inline=False
         )
@@ -777,7 +785,6 @@ async def fetch_and_display_last5(interaction, club_id, club_name="Club", origin
         await original_message.edit(content=None, embed=embed, view=None)
         asyncio.create_task(delete_after_delay(original_message))
         await log_command_output(interaction, "last5", original_message)
-
     else:
         message = await interaction.followup.send(embed=embed)
         await log_command_output(interaction, "last5", message)
