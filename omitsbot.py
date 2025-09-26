@@ -286,7 +286,7 @@ async def get_club_stats(club_id):
 async def get_recent_form(club_id):
     base_url = "https://proclubs.ea.com/api/fc/clubs/matches"
     headers = {"User-Agent": "Mozilla/5.0"}
-    match_types = ["leagueMatch", "playoffMatch"]
+    match_types = ["leagueMatch", "playoffMatch", "friendlyMatch"]
     all_matches = []
 
     try:
@@ -329,7 +329,7 @@ async def get_recent_form(club_id):
 async def get_last_match(club_id):
     base_url = "https://proclubs.ea.com/api/fc/clubs/matches"
     headers = {"User-Agent": "Mozilla/5.0"}
-    match_types = ["leagueMatch", "playoffMatch"]
+    match_types = ["leagueMatch", "playoffMatch", "friendlyMatch"]
     all_matches = []
 
     try:
@@ -393,7 +393,7 @@ async def get_club_rank(club_id):
 async def get_days_since_last_match(club_id):
     base_url = "https://proclubs.ea.com/api/fc/clubs/matches"
     headers = {"User-Agent": "Mozilla/5.0"}
-    match_types = ["leagueMatch", "playoffMatch"]
+    match_types = ["leagueMatch", "playoffMatch", "friendlyMatch"]
     all_matches = []
 
     try:
@@ -712,7 +712,7 @@ class Last5DropdownView(discord.ui.View):
 async def fetch_and_display_last5(interaction, club_id, club_name="Club", original_message=None):
     base_url = "https://proclubs.ea.com/api/fc/clubs/matches"
     headers = {"User-Agent": "Mozilla/5.0"}
-    match_types = ["leagueMatch", "playoffMatch"]
+    match_types = ["leagueMatch", "playoffMatch", "friendlyMatch"]
     matches = []
 
     async with httpx.AsyncClient(timeout=10) as client_http:
@@ -1367,7 +1367,7 @@ async def handle_lastmatch(interaction: discord.Interaction, club: str, from_dro
                 club_id = str(valid_clubs[0]["clubInfo"]["clubId"]) if valid_clubs else club
 
             base_url = "https://proclubs.ea.com/api/fc/clubs/matches"
-            match_types = ["leagueMatch", "playoffMatch"]
+            match_types = ["leagueMatch", "playoffMatch", "friendlyMatch"]
             matches = []
 
             for match_type in match_types:
