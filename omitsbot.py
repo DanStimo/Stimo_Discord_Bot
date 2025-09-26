@@ -1397,7 +1397,11 @@ async def handle_lastmatch(interaction: discord.Interaction, club: str, from_dro
                 url = f"{base_url}?matchType={match_type}&platform={PLATFORM}&clubIds={club_id}"
                 response = await client_http.get(url, headers=headers)
                 if response.status_code == 200:
-                    matches.extend(response.json())
+                    data = response.json() or []
+                    # tag each match so we know its type when we format output
+                    for m in data:
+                        m["_matchType"] = match_type
+                    matches.extend(data)
 
             if not matches:
                 await interaction.followup.send("No matches found for this club.")
@@ -1406,7 +1410,11 @@ async def handle_lastmatch(interaction: discord.Interaction, club: str, from_dro
             matches.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
             last_match = matches[0]
 
-            clubs = last_match.get("clubs", {})
+            # Resolve a friendly match-type label
+            raw_type = last_match.get("_matchType") or last_match.get("matchType")
+            label = MATCH_TYPE_LABELS.get(raw_type, raw_type or "Unknown")
+
+            clubs = last_match.get("clubs", {}) or {}
             club_data = clubs.get(club_id)
             opponent_id = next((cid for cid in clubs if cid != club_id), None)
             opponent_data = clubs.get(opponent_id) if opponent_id else {}
@@ -1419,12 +1427,12 @@ async def handle_lastmatch(interaction: discord.Interaction, club: str, from_dro
             result_text = "Win" if our_score > opponent_score else "Loss" if our_score < opponent_score else "Draw"
 
             embed = discord.Embed(
-                title=f"📅 Last Match: {our_name} vs {opponent_name}",
+                title=f"📅 Last Match: [{label}] {our_name} vs {opponent_name}",
                 description=f"{result_emoji} {result_text} ({our_score}-{opponent_score})",
                 color=discord.Color.green() if our_score > opponent_score else discord.Color.red() if our_score < opponent_score else discord.Color.gold()
             )
 
-            players_data = list(last_match.get("players", {}).get(club_id, {}).values())
+            players_data = list((last_match.get("players", {}) or {}).get(club_id, {}).values())
             sorted_players = sorted(players_data, key=lambda p: float(p.get("rating", 0)), reverse=True)
 
             for player in sorted_players:
