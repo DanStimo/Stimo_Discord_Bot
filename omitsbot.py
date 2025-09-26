@@ -21,6 +21,12 @@ PLATFORM = os.getenv("PLATFORM", "common-gen5")
 OFFSIDE_KEY = "offside.json"
 DEFAULT_LINEUP_FORMATION = os.getenv("DEFAULT_LINEUP_FORMATION", "3-5-2")
 
+MATCH_TYPE_LABELS = {
+    "leagueMatch": "League",
+    "playoffMatch": "Playoff",
+    "friendlyMatch": "Friendly"
+}
+
 # --- Twitch live announce config ---
 TWITCH_CLIENT_ID = os.getenv("TWITCH_CLIENT_ID")
 TWITCH_CLIENT_SECRET = os.getenv("TWITCH_CLIENT_SECRET")
@@ -365,7 +371,7 @@ async def get_last_match(club_id):
         opponent_score = int(opponent_data.get("goals", 0))
 
         result = "✅" if our_score > opponent_score else "❌" if our_score < opponent_score else "➖"
-        return f"{result} - {opponent_name} ({our_score}-{opponent_score})"
+        return f"{result} - {opponent_name} ({labe}) ({our_score}-{opponent_score})"
 
     except Exception as e:
         print(f"[ERROR] Failed to fetch last match: {e}")
