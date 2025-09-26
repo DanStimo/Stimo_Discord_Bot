@@ -342,18 +342,27 @@ async def get_last_match(club_id):
         async with httpx.AsyncClient(timeout=10) as client_http:
             for match_type in match_types:
                 url = f"{base_url}?matchType={match_type}&platform={PLATFORM}&clubIds={club_id}"
-                response = await client_http.get(url, headers=headers)
-                if response.status_code == 200:
-                    matches = response.json()
+                resp = await client_http.get(url, headers=headers)
+                if resp.status_code == 200:
+                    matches = resp.json() or []
+                    # ✅ keep track of which list this match came from
+                    for m in matches:
+                        m["_matchType"] = match_type
                     all_matches.extend(matches)
 
+        # newest first
         all_matches.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
 
         if not all_matches:
             return "Last match data not available."
 
         match = all_matches[0]
-        clubs_data = match.get("clubs", {})
+
+        # Resolve friendly label
+        raw_type = match.get("_matchType") or match.get("matchType")
+        label = MATCH_TYPE_LABELS.get(raw_type, raw_type or "Unknown")
+
+        clubs_data = match.get("clubs", {}) or {}
         club_data = clubs_data.get(str(club_id))
         opponent_id = next((cid for cid in clubs_data if cid != str(club_id)), None)
         opponent_data = clubs_data.get(opponent_id) if opponent_id else None
@@ -364,14 +373,15 @@ async def get_last_match(club_id):
         opponent_name = (
             opponent_data.get("name")
             or opponent_data.get("details", {}).get("name")
-            or match.get("opponentClub", {}).get("name", "Unknown")
+            or match.get("opponentClub", {}).get("name")
+            or "Unknown"
         )
 
         our_score = int(club_data.get("goals", 0))
         opponent_score = int(opponent_data.get("goals", 0))
 
-        result = "✅" if our_score > opponent_score else "❌" if our_score < opponent_score else "➖"
-        return f"{result} - {opponent_name} ({label}) ({our_score}-{opponent_score})"
+        result = "✅" if our_score > opponent_score else ("❌" if our_score < opponent_score else "➖")
+        return f"{result} - {label} - {opponent_name} ({our_score}-{opponent_score})"
 
     except Exception as e:
         print(f"[ERROR] Failed to fetch last match: {e}")
