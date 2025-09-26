@@ -737,9 +737,8 @@ async def fetch_and_display_last5(interaction, club_id, club_name="Club", origin
             response = await client_http.get(url, headers=headers)
             if response.status_code == 200:
                 data = response.json() or []
-                # Tag each match with the type we fetched so we can label it later
                 for m in data:
-                    m["_matchType"] = match_type
+                    m["_matchType"] = match_type  # keep track of type
                 matches.extend(data)
 
     matches.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
@@ -771,7 +770,6 @@ async def fetch_and_display_last5(interaction, club_id, club_name="Club", origin
 
         result = "✅" if our_score > opponent_score else "❌" if our_score < opponent_score else "➖"
 
-        # Resolve label safely
         raw_type = match.get("_matchType") or match.get("matchType")
         label = MATCH_TYPE_LABELS.get(raw_type, raw_type or "Unknown")
 
