@@ -566,28 +566,22 @@ async def fetch_all_stats_for_club(club_id: str):
         "days_display": days_display,
     }
 
-ZWSP = "\u200b"  # zero-width space for tidy spacing
+# Helpers + embed builder for /stats
+ZWSP = "\u200b"  # zero-width space for layout
 
 def _field(name: str, value: str, inline: bool = True) -> dict:
-    # tiny helper so the layout below stays readable
     return {"name": name, "value": value if value else "—", "inline": inline}
 
 def _spacer(inline: bool = True) -> dict:
-    # an empty field that keeps grid alignment
     return {"name": ZWSP, "value": ZWSP, "inline": inline}
 
 def build_stats_embed(club_id: str, club_name: str | None, data: dict) -> discord.Embed:
     """
-    Clean, grid-aligned embed:
-      Row 1: Rank | Skill
-      Row 2: Record (full)
-      Row 3: Win Streak | Unbeaten Streak
-      Row 4: Recent Form (full)
-      Row 5: Last Match (full)
-      Row 6: Last Played | Club ID
+    Clean, grid-aligned embed with rows:
+      Rank & Skill | Record | Streaks | Form | Last Match | Activity
     """
     title_name = (club_name or f"Club {club_id}").upper()
-    s = data["stats"] or {}
+    s = data.get("stats", {})
 
     mp = s.get("matchesPlayed", "N/A")
     wins = s.get("wins", "N/A")
@@ -598,15 +592,14 @@ def build_stats_embed(club_id: str, club_name: str | None, data: dict) -> discor
     ubstreak = s.get("unbeatenStreak", "0")
 
     rank_display = data.get("rank_display", "Unranked")
-    days_display = data.get("days_display", "Unknown")
+    days_display = data.get("days_display", "—")
     recent_form = data.get("recent_form", "No recent matches")
     last_match = data.get("last_match", "Last match data not available.")
 
-    # Match your other embeds' color (the red you used previously)
     embed = discord.Embed(
         title=f"🧭 {title_name}",
         description="All key stats at a glance.",
-        color=0xB30000
+        color=0xB30000  # same red as your other embeds
     )
 
     fields: list[dict] = []
@@ -615,21 +608,20 @@ def build_stats_embed(club_id: str, club_name: str | None, data: dict) -> discor
     fields += [
         _field("🏆 Leaderboard Rank", f"**{rank_display}**", inline=True),
         _field("⭐ Skill Rating", f"**{sr}**", inline=True),
+        _spacer(True),
     ]
 
-    # Ensure row complete in Discord's 3-per-row layout (2 columns -> add a spacer)
-    fields.append(_spacer(inline=True))
-
     # Row 2 — full width
-    record_value = f"**{wins}W – {draws}D – {losses}L**\n_Total matches:_ **{mp}**"
-    fields.append(_field("📈 Record", record_value, inline=False))
+    fields.append(
+        _field("📈 Record", f"**{wins}W – {draws}D – {losses}L**\n_Total matches:_ **{mp}**", inline=False)
+    )
 
     # Row 3 — two columns
     fields += [
         _field("🔥 Win Streak", f"**{wstreak}**", inline=True),
         _field("🛡️ Unbeaten Streak", f"**{ubstreak}**", inline=True),
+        _spacer(True),
     ]
-    fields.append(_spacer(inline=True))
 
     # Row 4 — full width
     fields.append(_field("🧩 Recent Form (last 5)", recent_form, inline=False))
@@ -639,12 +631,11 @@ def build_stats_embed(club_id: str, club_name: str | None, data: dict) -> discor
 
     # Row 6 — two columns
     fields += [
-        _field("🗓️ Last Played", days_display if days_display != "Unknown" else "—", inline=True),
+        _field("🗓️ Last Played", days_display, inline=True),
         _field("🆔 Club ID", f"`{club_id}`", inline=True),
+        _spacer(True),
     ]
-    fields.append(_spacer(inline=True))
 
-    # apply all fields
     for f in fields:
         embed.add_field(**f)
 
@@ -853,24 +844,28 @@ class ClubDropdownView(discord.ui.View):
         self.add_item(ClubDropdown(interaction, options, club_data))
 
 class StatsDropdown(discord.ui.View):
-    def __init__(self, interaction: discord.Interaction, options: list[discord.SelectOption], results: list[dict]):
-        super().__init__(timeout=60)
-        self.interaction = interaction
+    def __init__(self, results: list[dict]):
+        super().__init__(timeout=90)
         self.results = results
+        options = [
+            discord.SelectOption(
+                label=r["clubInfo"]["name"],
+                value=str(r["clubInfo"]["clubId"])
+            )
+            for r in results[:25]
+        ]
+        options.append(discord.SelectOption(label="None of these", value="none"))
 
-        self.select = discord.ui.Select(placeholder="Choose a club…", options=options, min_values=1, max_values=1)
-        self.select.callback = self._on_select
-        self.add_item(self.select)
+        select = discord.ui.Select(placeholder="Choose a club…", options=options, min_values=1, max_values=1)
+        select.callback = self._on_select
+        self.add_item(select)
 
     async def _on_select(self, interaction: discord.Interaction):
-        # ignore other users if you like:
-        # if interaction.user.id != self.interaction.user.id: return
-        value = self.select.values[0]
+        value = self.children[0].values[0]
         if value == "none":
             await interaction.response.edit_message(content="Selection cancelled.", view=None)
             return
 
-        # find selected club in results
         chosen = next((c for c in self.results if str(c["clubInfo"]["clubId"]) == str(value)), None)
         if not chosen:
             await interaction.response.edit_message(content="Could not find that club.", view=None)
@@ -880,13 +875,13 @@ class StatsDropdown(discord.ui.View):
         club_name = chosen["clubInfo"]["name"]
 
         await interaction.response.defer()
-        await interaction.edit_original_response(content="⏳ Fetching stats…", view=None)
+        await interaction.edit_original_response(content="⏳ Fetching club stats…", view=None)
 
         data = await fetch_all_stats_for_club(club_id)
         embed = build_stats_embed(club_id, club_name, data)
 
         await interaction.edit_original_response(content=None, embed=embed, view=None)
-
+        
 class LastMatchDropdown(discord.ui.Select):
     def __init__(self, interaction, options, club_data):
         self.interaction = interaction
@@ -1905,38 +1900,39 @@ async def stats_command(interaction: discord.Interaction, club: str):
     await interaction.response.defer()
 
     try:
-        # If they pass a numeric ID, skip search
+        # numeric ID → skip search
         if club.isdigit():
             club_id = club
             club_name = None
-        else:
-            # robust EA search (partial names)
-            hits = await search_clubs_ea(club)
+            placeholder = await interaction.followup.send("⏳ Fetching club stats…")
+            data = await fetch_all_stats_for_club(club_id)
+            embed = build_stats_embed(club_id, club_name, data)
+            await placeholder.edit(content=None, embed=embed, view=None)
+            return
 
-            if not hits:
-                await interaction.followup.send("No matching clubs found.", ephemeral=True)
-                return
+        # name search
+        hits = await search_clubs_ea(club)
+        if not hits:
+            await interaction.followup.send("No matching clubs found.", ephemeral=True)
+            return
 
-            if len(hits) > 1:
-                options = [
-                    discord.SelectOption(
-                        label=h["clubInfo"]["name"],
-                        value=str(h["clubInfo"]["clubId"])
-                    )
-                    for h in hits[:25]
-                ]
-                options.append(discord.SelectOption(label="None of these", value="none"))
-                view = StatsDropdown(interaction, options, hits)
-                await interaction.followup.send("Multiple clubs found. Please choose the correct one:", view=view)
-                return
+        # multiple results → dropdown
+        if len(hits) > 1:
+            view = StatsDropdown(hits)
+            await interaction.followup.send("Multiple clubs found. Please choose the correct one:", view=view)
+            return
 
-            club_id = str(hits[0]["clubInfo"]["clubId"])
-            club_name = hits[0]["clubInfo"]["name"]
-
-        # Fetch everything concurrently and render
-        await interaction.followup.send("⏳ Fetching club stats…", ephemeral=True)
+        # single result
+        club_id = str(hits[0]["clubInfo"]["clubId"])
+        club_name = hits[0]["clubInfo"]["name"]
+        placeholder = await interaction.followup.send("⏳ Fetching club stats…")
         data = await fetch_all_stats_for_club(club_id)
         embed = build_stats_embed(club_id, club_name, data)
+        await placeholder.edit(content=None, embed=embed, view=None)
+
+    except Exception as e:
+        print(f"[ERROR] /stats failed: {e}")
+        await interaction.followup.send("❌ An error occurred while fetching club stats.", ephemeral=True)
 
         message = await interaction.followup.send(embed=embed)
         await log_command_output(interaction, "stats", message)
