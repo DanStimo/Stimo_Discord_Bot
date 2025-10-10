@@ -566,14 +566,29 @@ async def fetch_all_stats_for_club(club_id: str):
         "days_display": days_display,
     }
 
+ZWSP = "\u200b"  # zero-width space for tidy spacing
+
+def _field(name: str, value: str, inline: bool = True) -> dict:
+    # tiny helper so the layout below stays readable
+    return {"name": name, "value": value if value else "—", "inline": inline}
+
+def _spacer(inline: bool = True) -> dict:
+    # an empty field that keeps grid alignment
+    return {"name": ZWSP, "value": ZWSP, "inline": inline}
+
 def build_stats_embed(club_id: str, club_name: str | None, data: dict) -> discord.Embed:
     """
-    Pretty, organized embed with emojis.
+    Clean, grid-aligned embed:
+      Row 1: Rank | Skill
+      Row 2: Record (full)
+      Row 3: Win Streak | Unbeaten Streak
+      Row 4: Recent Form (full)
+      Row 5: Last Match (full)
+      Row 6: Last Played | Club ID
     """
     title_name = (club_name or f"Club {club_id}").upper()
-    s = data["stats"]
+    s = data["stats"] or {}
 
-    # Defensive defaults
     mp = s.get("matchesPlayed", "N/A")
     wins = s.get("wins", "N/A")
     draws = s.get("draws", "N/A")
@@ -582,66 +597,56 @@ def build_stats_embed(club_id: str, club_name: str | None, data: dict) -> discor
     wstreak = s.get("winStreak", "0")
     ubstreak = s.get("unbeatenStreak", "0")
 
+    rank_display = data.get("rank_display", "Unranked")
+    days_display = data.get("days_display", "Unknown")
+    recent_form = data.get("recent_form", "No recent matches")
+    last_match = data.get("last_match", "Last match data not available.")
+
+    # Match your other embeds' color (the red you used previously)
     embed = discord.Embed(
-        title=f"📊 {title_name}",
+        title=f"🧭 {title_name}",
         description="All key stats at a glance.",
-        color=discord.Color.dark_theme()
+        color=0xB30000
     )
 
-    # Top line: Rank & Skill
-    embed.add_field(
-        name="🏆 Leaderboard Rank",
-        value=f"**{data['rank_display']}**",
-        inline=True
-    )
-    embed.add_field(
-        name="⭐ Skill Rating",
-        value=f"**{sr}**",
-        inline=True
-    )
+    fields: list[dict] = []
 
-    # Record + Streaks
-    embed.add_field(
-        name="📈 Record",
-        value=f"**{wins}W – {draws}D – {losses}L**\n_Total matches:_ **{mp}**",
-        inline=False
-    )
-    embed.add_field(
-        name="🔥 Win Streak",
-        value=f"**{wstreak}**",
-        inline=True
-    )
-    embed.add_field(
-        name="🛡️ Unbeaten Streak",
-        value=f"**{ubstreak}**",
-        inline=True
-    )
+    # Row 1 — two columns
+    fields += [
+        _field("🏆 Leaderboard Rank", f"**{rank_display}**", inline=True),
+        _field("⭐ Skill Rating", f"**{sr}**", inline=True),
+    ]
 
-    # Recent form row
-    embed.add_field(
-        name="🧩 Recent Form (last 5)",
-        value=data["recent_form"],
-        inline=False
-    )
+    # Ensure row complete in Discord's 3-per-row layout (2 columns -> add a spacer)
+    fields.append(_spacer(inline=True))
 
-    # Last match summary
-    embed.add_field(
-        name="🕹️ Last Match",
-        value=data["last_match"],
-        inline=False
-    )
+    # Row 2 — full width
+    record_value = f"**{wins}W – {draws}D – {losses}L**\n_Total matches:_ **{mp}**"
+    fields.append(_field("📈 Record", record_value, inline=False))
 
-    # Activity
-    embed.add_field(
-        name="🗓️ Last Played",
-        value=data["days_display"],
-        inline=True
-    )
-    embed.add_field(
-        name="🆔 Club ID",
-        value=f"`{club_id}`",
-        inline=True
-    )
+    # Row 3 — two columns
+    fields += [
+        _field("🔥 Win Streak", f"**{wstreak}**", inline=True),
+        _field("🛡️ Unbeaten Streak", f"**{ubstreak}**", inline=True),
+    ]
+    fields.append(_spacer(inline=True))
+
+    # Row 4 — full width
+    fields.append(_field("🧩 Recent Form (last 5)", recent_form, inline=False))
+
+    # Row 5 — full width
+    fields.append(_field("🎮 Last Match", last_match, inline=False))
+
+    # Row 6 — two columns
+    fields += [
+        _field("🗓️ Last Played", days_display if days_display != "Unknown" else "—", inline=True),
+        _field("🆔 Club ID", f"`{club_id}`", inline=True),
+    ]
+    fields.append(_spacer(inline=True))
+
+    # apply all fields
+    for f in fields:
+        embed.add_field(**f)
 
     embed.set_footer(text="EA Pro Clubs — Combined Club Stats")
     return embed
