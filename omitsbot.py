@@ -1828,74 +1828,74 @@ class Top100View(discord.ui.View):
 
     # ---------- buttons (INSIDE the class) ----------
     @discord.ui.button(label="⏮️ First", style=discord.ButtonStyle.secondary)
-async def first_page(self, interaction: discord.Interaction, button: discord.ui.Button):
-    if self._busy:
+    async def first_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self._busy:
+            await interaction.response.defer()
+            return
+        self._busy = True
         await interaction.response.defer()
-        return
-    self._busy = True
-    await interaction.response.defer()
-    try:
-        self.page = 0
-        self._set_buttons_enabled(False)
-        await interaction.edit_original_response(embed=self._loading_embed(), view=self)
-        embed = await self.get_embed()
-        self._set_buttons_enabled(True)
-        await interaction.edit_original_response(embed=embed, view=self)
-    finally:
-        self._busy = False
-
-@discord.ui.button(label="⬅️ Prev", style=discord.ButtonStyle.primary)
-async def prev_page(self, interaction: discord.Interaction, button: discord.ui.Button):
-    if self._busy:
+        try:
+            self.page = 0
+            self._set_buttons_enabled(False)
+            await interaction.edit_original_response(embed=self._loading_embed(), view=self)
+            embed = await self.get_embed()
+            self._set_buttons_enabled(True)
+            await interaction.edit_original_response(embed=embed, view=self)
+        finally:
+            self._busy = False
+    
+    @discord.ui.button(label="⬅️ Prev", style=discord.ButtonStyle.primary)
+    async def prev_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self._busy:
+            await interaction.response.defer()
+            return
+        self._busy = True
         await interaction.response.defer()
-        return
-    self._busy = True
-    await interaction.response.defer()
-    try:
-        if self.page > 0:
-            self.page -= 1
-        self._set_buttons_enabled(False)
-        await interaction.edit_original_response(embed=self._loading_embed(), view=self)
-        embed = await self.get_embed()
-        self._set_buttons_enabled(True)
-        await interaction.edit_original_response(embed=embed, view=self)
-    finally:
-        self._busy = False
-
-@discord.ui.button(label="➡️ Next", style=discord.ButtonStyle.primary)
-async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
-    if self._busy:
+        try:
+            if self.page > 0:
+                self.page -= 1
+            self._set_buttons_enabled(False)
+            await interaction.edit_original_response(embed=self._loading_embed(), view=self)
+            embed = await self.get_embed()
+            self._set_buttons_enabled(True)
+            await interaction.edit_original_response(embed=embed, view=self)
+        finally:
+            self._busy = False
+    
+    @discord.ui.button(label="➡️ Next", style=discord.ButtonStyle.primary)
+    async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self._busy:
+            await interaction.response.defer()
+            return
+        self._busy = True
         await interaction.response.defer()
-        return
-    self._busy = True
-    await interaction.response.defer()
-    try:
-        if (self.page + 1) * self.per_page < len(self.data):
-            self.page += 1
-        self._set_buttons_enabled(False)
-        await interaction.edit_original_response(embed=self._loading_embed(), view=self)
-        embed = await self.get_embed()
-        self._set_buttons_enabled(True)
-        await interaction.edit_original_response(embed=embed, view=self)
-    finally:
-        self._busy = False
-
-@discord.ui.button(label="⏭️ Last", style=discord.ButtonStyle.secondary)
-async def last_page(self, interaction: discord.Interaction, button: discord.ui.Button):
-    if self._busy:
+        try:
+            if (self.page + 1) * self.per_page < len(self.data):
+                self.page += 1
+            self._set_buttons_enabled(False)
+            await interaction.edit_original_response(embed=self._loading_embed(), view=self)
+            embed = await self.get_embed()
+            self._set_buttons_enabled(True)
+            await interaction.edit_original_response(embed=embed, view=self)
+        finally:
+            self._busy = False
+    
+    @discord.ui.button(label="⏭️ Last", style=discord.ButtonStyle.secondary)
+    async def last_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self._busy:
+            await interaction.response.defer()
+            return
+        self._busy = True
         await interaction.response.defer()
-        return
-    self._busy = True
-    await interaction.response.defer()
-    try:
-        self.page = (len(self.data) - 1) // self.per_page
-        self._set_buttons_enabled(False)
-        await interaction.edit_original_response(embed=self._loading_embed(), view=self)
-        embed = await self.get_embed()
-        self._set_buttons_enabled(True)
-        await interaction.edit_original_response(embed=embed, view=self)
-    finally:
-        self._busy = False
+        try:
+            self.page = (len(self.data) - 1) // self.per_page
+            self._set_buttons_enabled(False)
+            await interaction.edit_original_response(embed=self._loading_embed(), view=self)
+            embed = await self.get_embed()
+            self._set_buttons_enabled(True)
+            await interaction.edit_original_response(embed=embed, view=self)
+        finally:
+            self._busy = False
 
     async def on_timeout(self):
         if self.message:
