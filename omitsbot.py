@@ -1058,6 +1058,8 @@ class Last5DropdownView(discord.ui.View):
 
 
 async def fetch_and_display_last5(interaction, club_id, club_name="Club", original_message=None):
+    club_id = str(club_id)
+
     match_types = ["leagueMatch", "playoffMatch", "friendlyMatch"]
     matches = []
 
@@ -1077,21 +1079,17 @@ async def fetch_and_display_last5(interaction, club_id, club_name="Club", origin
         await interaction.followup.send("No recent matches found.")
         return
 
+    # Build embed once
     embed = discord.Embed(
         title=f"📅 {club_name.upper()}'s Last 5",
         color=discord.Color.blue()
     )
 
-        # get teamId once for this club
-        team_id = await get_team_id_for_club(club_id)
-        crest_url = build_crest_url(team_id) if team_id else None
-    
-        embed = discord.Embed(
-            title=f"📅 {club_name.upper()}'s Last 5",
-            color=discord.Color.blue()  # your color
-        )
-        if crest_url:
-            embed.set_thumbnail(url=crest_url)
+    # ✅ Crest thumbnail (proper indentation, no duplicate embed)
+    team_id = await get_team_id_for_club(club_id)
+    crest_url = build_crest_url(team_id) if team_id else None
+    if crest_url:
+        embed.set_thumbnail(url=crest_url)
 
     for idx, match in enumerate(last_5, 1):
         clubs = match.get("clubs", {}) or {}
@@ -1113,6 +1111,8 @@ async def fetch_and_display_last5(interaction, club_id, club_name="Club", origin
         raw_type = match.get("_matchType") or match.get("matchType")
         label = MATCH_TYPE_LABELS.get(raw_type, raw_type or "Unknown")
 
+        # (Optional) put emoji first for alignment:
+        # name=f"{idx}⃣ {result} {label} — vs {opponent_name}",
         embed.add_field(
             name=f"{idx}⃣ {result} [{label}] vs {opponent_name}",
             value=f"Score: {our_score}-{opponent_score}",
@@ -1127,6 +1127,7 @@ async def fetch_and_display_last5(interaction, club_id, club_name="Club", origin
         message = await interaction.followup.send(embed=embed)
         await log_command_output(interaction, "last5", message)
         asyncio.create_task(delete_after_delay(message))
+
 
 async def delete_after_delay(message, delay=180):
     await asyncio.sleep(delay)
