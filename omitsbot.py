@@ -317,6 +317,49 @@ async def search_clubs_ea(query: str) -> list:
         if c.get("clubInfo", {}).get("name", "").strip().lower() != "none of these"
     ]
 
+from datetime import datetime, timezone
+
+async def get_last_played_timestamp(club_id: str | int) -> datetime | None:
+    """
+    Returns a timezone-aware datetime of the club's most recent match
+    across league, playoff, and friendly — or None if no matches.
+    """
+    club_id = str(club_id)
+    match_types = ["leagueMatch", "playoffMatch", "friendlyMatch"]
+    latest_ts = 0
+
+    try:
+        for mt in match_types:
+            data = await _ea_get_json(
+                "https://proclubs.ea.com/api/fc/clubs/matches",
+                {"matchType": mt, "platform": PLATFORM, "clubIds": club_id},
+            ) or []
+            # Find max timestamp among returned matches (if any)
+            for m in data:
+                ts = int(m.get("timestamp", 0) or 0)
+                if ts > latest_ts:
+                    latest_ts = ts
+    except Exception as e:
+        print(f"[ERROR] get_last_played_timestamp({club_id}): {e}")
+
+    if latest_ts <= 0:
+        return None
+    return datetime.fromtimestamp(latest_ts, tz=timezone.utc)
+
+    def format_last_played(dt: datetime | None) -> str:
+        if not dt:
+            return "—"
+        now = datetime.now(timezone.utc)
+        delta = now - dt
+        days = delta.days
+        hours = int(delta.total_seconds() // 3600)
+        if days >= 1:
+            return f"{days}d ago"
+        if hours >= 1:
+            return f"{hours}h ago"
+        mins = int(delta.total_seconds() // 60)
+        return f"{mins}m ago"
+
 # --- Web helpers for EA endpoints ---
 async def get_club_stats(club_id):
     data = await _ea_get_json(
@@ -1469,58 +1512,100 @@ async def lm_command(interaction: discord.Interaction, club: str):
 
 # - Top 100
 class Top100View(discord.ui.View):
-    def __init__(self, leaderboard, per_page=10):
+    def __init__(self, data, per_page=10):
         super().__init__(timeout=180)
-        self.leaderboard = leaderboard
+        self.data = data
         self.per_page = per_page
         self.page = 0
         self.message = None
+        self.last_played_cache: dict[str, datetime | None] = {}
 
-    def get_embed(self):
-        start = self.page * self.per_page
-        end = start + self.per_page
-        current_page_clubs = self.leaderboard[start:end]
+    def get_page_slice(self):
+    start = self.page * self.per_page
+    end = start + self.per_page
+    return self.data[start:end]
 
-        embed = discord.Embed(
-            title=f"🏆 Top 100 Clubs (Page {self.page + 1}/{(len(self.leaderboard) - 1) // self.per_page + 1})",
-            description="Navigate using the buttons below.",
-            color=0xFFD700
-        )
+async def _ensure_last_played_for_page(self):
+    """
+    Fetch last-played for the visible 10 clubs, with small concurrency
+    and cache results to avoid repeat lookups.
+    """
+    page_rows = self.get_page_slice()
 
-        for club in current_page_clubs:
-            name = club.get("clubName", "Unknown Club")
-            rank = club.get("rank", "N/A")
-            skill = club.get("skillRating", "N/A")
-            embed.add_field(
-                name=f"#{rank} - {name}",
-                value=f"⭐ Skill Rating: {skill}",
-                inline=False
-            )
+    # Extract clubIds on this page (as strings)
+    ids_needed = []
+    for club in page_rows:
+        cid = str(club.get("clubId"))
+        if cid and cid not in self.last_played_cache:
+            ids_needed.append(cid)
 
-        embed.set_footer(text="EA Pro Clubs All-Time Leaderboard")
-        return embed
+    if not ids_needed:
+        return
+
+    # Limit concurrency so we don't spam EA
+    sem = asyncio.Semaphore(5)
+
+    async def _job(cid: str):
+        async with sem:
+            dt = await get_last_played_timestamp(cid)
+            self.last_played_cache[cid] = dt
+
+    await asyncio.gather(*[_job(cid) for cid in ids_needed])
+
+def _format_row(self, club: dict) -> str:
+    name = club.get("name") or (club.get("clubInfo", {}) or {}).get("name") or "Unknown"
+    rank = club.get("rank", "—")
+    sr = club.get("skillRating", club.get("skill", "—"))
+    cid = str(club.get("clubId", ""))
+    lp = format_last_played(self.last_played_cache.get(cid))
+    # Example line: "#1  Team Name — SR: 1800  •  Last: 2d ago"
+    return f"#{rank}  {name} — SR: {sr}  •  Last: {lp}"
+
+async def get_embed(self):
+    """
+    NOTE: this version is async now because we fetch data.
+    Update any call sites to `await view.get_embed()`.
+    """
+    await self._ensure_last_played_for_page()
+
+    page_rows = self.get_page_slice()
+    description_lines = [self._format_row(c) for c in page_rows]
+    page_count = (len(self.data) + self.per_page - 1) // self.per_page
+    page_label = f"Page {self.page + 1}/{page_count}"
+
+    embed = discord.Embed(
+        title="🏆 Top 100 Clubs",
+        description="\n".join(description_lines) if description_lines else "No data.",
+        color=discord.Color.blurple()
+    )
+    embed.set_footer(text=page_label)
+    return embed
 
     @discord.ui.button(label="⏮️ First", style=discord.ButtonStyle.secondary)
     async def first_page(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.page = 0
-        await interaction.response.edit_message(embed=self.get_embed(), view=self)
-
+        embed = await self.get_embed()  # now async
+        await interaction.response.edit_message(embed=embed, view=self)
+    
     @discord.ui.button(label="⬅️ Prev", style=discord.ButtonStyle.primary)
     async def prev_page(self, interaction: discord.Interaction, button: discord.ui.Button):
         if self.page > 0:
             self.page -= 1
-        await interaction.response.edit_message(embed=self.get_embed(), view=self)
-
+        embed = await self.get_embed()  # now async
+        await interaction.response.edit_message(embed=embed, view=self)
+    
     @discord.ui.button(label="➡️ Next", style=discord.ButtonStyle.primary)
     async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if (self.page + 1) * self.per_page < len(self.leaderboard):
+        if (self.page + 1) * self.per_page < len(self.data):  # or self.leaderboard
             self.page += 1
-        await interaction.response.edit_message(embed=self.get_embed(), view=self)
-
+        embed = await self.get_embed()  # now async
+        await interaction.response.edit_message(embed=embed, view=self)
+    
     @discord.ui.button(label="⏭️ Last", style=discord.ButtonStyle.secondary)
     async def last_page(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.page = (len(self.leaderboard) - 1) // self.per_page
-        await interaction.response.edit_message(embed=self.get_embed(), view=self)
+        self.page = (len(self.data) - 1) // self.per_page  # or self.leaderboard
+        embed = await self.get_embed()  # now async
+        await interaction.response.edit_message(embed=embed, view=self)
 
     async def on_timeout(self):
         if self.message:
@@ -1532,36 +1617,25 @@ class Top100View(discord.ui.View):
 @tree.command(name="t100", description="Show the Top 100 Clubs from EA Pro Clubs Leaderboard.")
 async def top100_command(interaction: discord.Interaction):
     await interaction.response.defer()
-
     try:
-        # Use the robust helper + shared client + params
         data = await _ea_get_json(
             "https://proclubs.ea.com/api/fc/allTimeLeaderboard",
             {"platform": PLATFORM},
         )
-
-        if not data or not isinstance(data, list):
+        if not isinstance(data, list):
             await interaction.followup.send("⚠️ No leaderboard data found.")
             return
 
-        # Sort by rank and cap to 100 (mirror your current logic)
         top_100 = sorted(data, key=lambda c: c.get("rank", 9999))[:100]
 
-        # Reuse your existing paginated view + embed builder
         view = Top100View(top_100, per_page=10)
-        embed = view.get_embed()
-
+        embed = await view.get_embed()   # CHANGED: await
         message = await interaction.followup.send(embed=embed, view=view)
         view.message = message
-
-        await log_command_output(interaction, "t100", view.message)
-
+        await log_command_output(interaction, "t100", message)
     except Exception as e:
         print(f"[ERROR] Failed to fetch Top 100: {e}")
-        await send_temporary_message(
-            interaction.followup,
-            content="❌ An error occurred while fetching the Top 100 clubs."
-        )
+        await send_temporary_message(interaction.followup, content="❌ An error occurred while fetching the Top 100 clubs.")
 
 @tree.command(name="last5", description="Show the last 5 matches for a club.")
 @app_commands.describe(club="Club name or club ID")
