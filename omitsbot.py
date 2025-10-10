@@ -1758,7 +1758,7 @@ class Top100View(discord.ui.View):
         embed = discord.Embed(
             title=title,
             description=f"{subtitle}{body}",
-            color=discord.Color.dark_grey()
+            color=discord.Color.gold()
         )
         embed.set_footer(text="EA Pro Clubs All-Time Leaderboard")
         return embed
