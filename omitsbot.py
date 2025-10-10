@@ -441,6 +441,15 @@ def md_escape(s: str) -> str:
         s = str(s or "")
     return s.replace("\\", "\\\\").replace("*", r"\*").replace("_", r"\_").replace("`", r"\`").replace("|", r"\|")
 
+def build_crest_url(team_id: str | int | None) -> str | None:
+    """
+    Build the crest image URL from a teamId.
+    EA hosts them as .../crests/256x256/l{teamId}.png
+    """
+    if not team_id:
+        return None
+    return f"https://eafc24.content.easports.com/fifa/fltOnlineAssets/24B23FDE-7835-41C2-87A2-F453DFDB2E82/2024/fcweb/crests/256x256/l{team_id}.png"
+
 # --- Web helpers for EA endpoints ---
 async def get_club_stats(club_id):
     data = await _ea_get_json(
