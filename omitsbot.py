@@ -979,7 +979,13 @@ class StatsDropdown(discord.ui.View):
         data = await fetch_all_stats_for_club(club_id)
         embed = build_stats_embed(club_id, club_name, data)
 
-        final_msg = await interaction.edit_original_response(content=None, embed=embed, view=None)
+        view = PrintRecordButton({"matchesPlayed": data["stats"].get("matchesPlayed"),
+                          "wins": data["stats"].get("wins"),
+                          "draws": data["stats"].get("draws"),
+                          "losses": data["stats"].get("losses"),
+                          "skillRating": data["stats"].get("skillRating")},
+                         (club_name or f"Club {club_id}").upper())
+        final_msg = await interaction.edit_original_response(content=None, embed=embed, view=view)
 
         # 🔔 auto-delete the final embed after N seconds
         asyncio.create_task(delete_after_delay(final_msg, 180))
