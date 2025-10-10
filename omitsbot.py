@@ -1634,7 +1634,7 @@ async def handle_lastmatch(interaction: discord.Interaction, club: str, from_dro
                 return
             club_id = str(valid_clubs[0]["clubInfo"]["clubId"]) if valid_clubs else club
 
-        # Pull matches across types via params (HTTP/2 client)
+        # Pull matches
         match_types = ["leagueMatch", "playoffMatch", "friendlyMatch"]
         matches = []
         for match_type in match_types:
@@ -1675,6 +1675,13 @@ async def handle_lastmatch(interaction: discord.Interaction, club: str, from_dro
             color=discord.Color.green() if our_score > opponent_score else discord.Color.red() if our_score < opponent_score else discord.Color.gold()
         )
 
+        # ✅ ADD THIS BLOCK (right here, same indent level)
+        team_id = await get_team_id_for_club(str(club_id))
+        crest_url = build_crest_url(team_id) if team_id else None
+        if crest_url:
+            embed.set_thumbnail(url=crest_url)
+
+        # Players
         players_data = list((last_match.get("players", {}) or {}).get(club_id, {}).values())
         sorted_players = sorted(players_data, key=lambda p: float(p.get("rating", 0)), reverse=True)
         for player in sorted_players:
