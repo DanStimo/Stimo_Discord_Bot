@@ -853,10 +853,7 @@ class StatsDropdown(discord.ui.View):
         super().__init__(timeout=90)
         self.results = results
         options = [
-            discord.SelectOption(
-                label=r["clubInfo"]["name"],
-                value=str(r["clubInfo"]["clubId"])
-            )
+            discord.SelectOption(label=r["clubInfo"]["name"], value=str(r["clubInfo"]["clubId"]))
             for r in results[:25]
         ]
         options.append(discord.SelectOption(label="None of these", value="none"))
@@ -868,24 +865,32 @@ class StatsDropdown(discord.ui.View):
     async def _on_select(self, interaction: discord.Interaction):
         value = self.children[0].values[0]
         if value == "none":
-            await interaction.response.edit_message(content="Selection cancelled.", view=None)
+            msg = await interaction.response.edit_message(content="Selection cancelled.", view=None)
+            asyncio.create_task(delete_after_delay(msg, 60))
             return
 
         chosen = next((c for c in self.results if str(c["clubInfo"]["clubId"]) == str(value)), None)
         if not chosen:
-            await interaction.response.edit_message(content="Could not find that club.", view=None)
+            msg = await interaction.response.edit_message(content="Could not find that club.", view=None)
+            asyncio.create_task(delete_after_delay(msg, 60))
             return
 
         club_id = str(chosen["clubInfo"]["clubId"])
         club_name = chosen["clubInfo"]["name"]
 
         await interaction.response.defer()
-        await interaction.edit_original_response(content="⏳ Fetching club stats…", view=None)
 
+        # turn the dropdown message → loading text
+        loading_msg = await interaction.edit_original_response(content="⏳ Fetching club stats…", view=None)
+
+        # fetch + render
         data = await fetch_all_stats_for_club(club_id)
         embed = build_stats_embed(club_id, club_name, data)
 
-        await interaction.edit_original_response(content=None, embed=embed, view=None)
+        final_msg = await interaction.edit_original_response(content=None, embed=embed, view=None)
+
+        # 🔔 auto-delete the final embed after N seconds
+        asyncio.create_task(delete_after_delay(final_msg, 180))
         
 class LastMatchDropdown(discord.ui.Select):
     def __init__(self, interaction, options, club_data):
@@ -1905,6 +1910,7 @@ async def stats_command(interaction: discord.Interaction, club: str):
     await interaction.response.defer()
 
     try:
+        # Resolve club
         if club.isdigit():
             club_id = club
             club_name = None
@@ -1914,43 +1920,32 @@ async def stats_command(interaction: discord.Interaction, club: str):
                 await interaction.followup.send("No matching clubs found.", ephemeral=True)
                 return
             if len(hits) > 1:
-                view = StatsDropdown(hits)
-                await interaction.followup.send("Multiple clubs found. Please choose the correct one:", view=view)
+                view = StatsDropdown(hits)  # this view will handle its own auto-delete (see step 3)
+                msg = await interaction.followup.send("Multiple clubs found. Please choose the correct one:", view=view)
+                # optional timeout cleanup for an unselected dropdown:
+                asyncio.create_task(delete_after_delay(msg, 180))
                 return
             club_id = str(hits[0]["clubInfo"]["clubId"])
             club_name = hits[0]["clubInfo"]["name"]
 
-        placeholder = await interaction.followup.send("⏳ Fetching club stats…")
+        # One placeholder → edit in-place
+        msg = await interaction.followup.send("⏳ Fetching club stats…")
 
         try:
             data = await fetch_all_stats_for_club(club_id)
             embed = build_stats_embed(club_id, club_name, data)
         except Exception as e:
             print(f"[ERROR] fetch_all_stats_for_club failed: {e}")
-            embed = discord.Embed(
-                title="❌ Error",
-                description="Could not fetch all stats for this club.",
-                color=discord.Color.red()
-            )
+            embed = discord.Embed(title="❌ Error", description="Could not fetch all stats for this club.", color=discord.Color.red())
 
-        await placeholder.edit(content=None, embed=embed, view=None)
+        await msg.edit(content=None, embed=embed, view=None)
+
+        # 🔔 auto-delete after N seconds
+        asyncio.create_task(delete_after_delay(msg, 180))
 
     except Exception as e:
         print(f"[ERROR] /stats failed: {e}")
         await interaction.followup.send("❌ An unexpected error occurred while fetching club stats.", ephemeral=True)
-
-        # optional auto-delete after 3 minutes (match your other commands)
-        async def _del():
-            await asyncio.sleep(180)
-            try:
-                await message.delete()
-            except Exception as e:
-                print(f"[ERROR] Failed to delete /stats message: {e}")
-        asyncio.create_task(_del())
-
-    except Exception as e:
-        print(f"[ERROR] /stats failed: {e}")
-        await interaction.followup.send("An error occurred while fetching club stats.", ephemeral=True)
 
 @tree.command(name="lineup", description="Create an interactive lineup from a formation.")
 @app_commands.describe(
