@@ -441,6 +441,69 @@ async def get_recent_form(club_id):
         print(f"[ERROR] Failed to fetch recent form: {e}")
         return []
 
+async def get_last5_matches_summary(club_id: str) -> str:
+    """
+    Returns a tidy multi-line string of the last 5 matches across
+    league, playoff, friendly. Example line:
+    • League — vs Onion Bag (2–1) ✅
+    """
+    club_id = str(club_id)
+    match_types = ["leagueMatch", "playoffMatch", "friendlyMatch"]
+    all_matches = []
+    try:
+        for mt in match_types:
+            data = await _client_ea.get(
+                "https://proclubs.ea.com/api/fc/clubs/matches",
+                params={"matchType": mt, "platform": PLATFORM, "clubIds": club_id},
+            )
+            if data.status_code == 404:
+                continue
+            data.raise_for_status()
+            arr = data.json() or []
+            for m in arr:
+                m["_matchType"] = mt
+            all_matches.extend(arr)
+
+        if not all_matches:
+            return "No recent matches"
+
+        # newest first
+        all_matches.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
+        take = all_matches[:5]
+
+        lines = []
+        for m in take:
+            raw_mt = m.get("_matchType") or m.get("matchType")
+            label = MATCH_TYPE_LABELS.get(raw_mt, raw_mt or "Match")
+
+            clubs = m.get("clubs", {}) or {}
+            our = clubs.get(club_id) or {}
+            opp_id = next((cid for cid in clubs if cid != club_id), None)
+            opp = clubs.get(opp_id) or {}
+
+            opp_name = (
+                (opp.get("details") or {}).get("name")
+                or opp.get("name")
+                or "Unknown"
+            )
+
+            our_goals = int(our.get("goals", 0))
+            opp_goals = int(opp.get("goals", 0))
+            if our_goals > opp_goals:
+                res = "✅"
+            elif our_goals < opp_goals:
+                res = "❌"
+            else:
+                res = "➖"
+
+            lines.append(f"• {label} — vs {opp_name} ({our_goals}–{opp_goals}) {res}")
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        print(f"[ERROR] get_last5_matches_summary: {e}")
+        return "No recent matches"
+
 async def get_last_match(club_id):
     match_types = ["leagueMatch", "playoffMatch", "friendlyMatch"]
     all_matches = []
@@ -540,39 +603,35 @@ async def get_squad_names(club_id):
 
 async def fetch_all_stats_for_club(club_id: str):
     """
-    Concurrently fetches all stats we need for the /stats embed.
-    Returns a dict with safe defaults if something fails.
+    Concurrently fetch everything needed for the /stats embed.
     """
     club_id = str(club_id)
-
-    # run API calls in parallel
     stats_task = asyncio.create_task(get_club_stats(club_id))
     form_task = asyncio.create_task(get_recent_form(club_id))
-    last_task = asyncio.create_task(get_last_match(club_id))
     days_task = asyncio.create_task(get_days_since_last_match(club_id))
     rank_task = asyncio.create_task(get_club_rank(club_id))
+    last5_task = asyncio.create_task(get_last5_matches_summary(club_id))
 
     stats = await stats_task
     recent_form = await form_task
-    last_match = await last_task
     days_since = await days_task
     rank = await rank_task
+    last5 = await last5_task
 
-    # normalize
-    rank_display = f"#{rank}" if isinstance(rank, int) or (isinstance(rank, str) and rank.isdigit()) else "Unranked"
-    days_display = f"{days_since} day(s) ago" if days_since is not None else "Unknown"
+    rank_display = f"#{rank}" if (isinstance(rank, int) or (isinstance(rank, str) and rank.isdigit())) else "Unranked"
+    days_display = f"{days_since} day(s) ago" if days_since is not None else "—"
     form_string = " ".join(recent_form) if recent_form else "No recent matches"
 
     return {
-        "stats": stats,
+        "stats": stats or {},
         "rank_display": rank_display,
         "recent_form": form_string,
-        "last_match": last_match,
+        "last5": last5 or "No recent matches",
         "days_display": days_display,
     }
 
 # Helpers + embed builder for /stats
-ZWSP = "\u200b"  # zero-width space for layout
+ZWSP = "\u200b"
 
 def _field(name: str, value: str, inline: bool = True) -> dict:
     return {"name": name, "value": value if value else "—", "inline": inline}
@@ -582,8 +641,14 @@ def _spacer(inline: bool = True) -> dict:
 
 def build_stats_embed(club_id: str, club_name: str | None, data: dict) -> discord.Embed:
     """
-    Clean, grid-aligned embed with rows:
-      Rank & Skill | Record | Streaks | Form | Last Match | Activity
+    Layout:
+      Rank | Skill
+      Matches Played (full width)
+      W-D-L (full width, single line)
+      Win Streak | Unbeaten Streak
+      Last 5 Matches (full width)
+      Recent Form (full width)
+      Days Since Last | Club ID
     """
     title_name = (club_name or f"Club {club_id}").upper()
     s = data.get("stats", {})
@@ -599,45 +664,47 @@ def build_stats_embed(club_id: str, club_name: str | None, data: dict) -> discor
     rank_display = data.get("rank_display", "Unranked")
     days_display = data.get("days_display", "—")
     recent_form = data.get("recent_form", "No recent matches")
-    last_match = data.get("last_match", "Last match data not available.")
+    last5 = data.get("last5", "No recent matches")
 
+    # Use same color as your other embeds (red)
     embed = discord.Embed(
-        title=f"🧭 {title_name}",
-        description="All key stats at a glance.",
-        color=0xB30000  # same red as your other embeds
+        title=f"{title_name}",          # ← no "Club Stats" in title
+        description=None,
+        color=0xB30000
     )
 
     fields: list[dict] = []
 
-    # Row 1 — two columns
+    # Row 1 — two columns (+spacer for grid)
     fields += [
-        _field("🏆 Leaderboard Rank", f"**{rank_display}**", inline=True),
-        _field("⭐ Skill Rating", f"**{sr}**", inline=True),
+        _field("Leaderboard Rank", f"📈 {rank_display}", inline=True),
+        _field("Skill Rating", f"🏅 {sr}", inline=True),
         _spacer(True),
     ]
 
     # Row 2 — full width
-    fields.append(
-        _field("📈 Record", f"**{wins}W – {draws}D – {losses}L**\n_Total matches:_ **{mp}**", inline=False)
-    )
+    fields.append(_field("Matches Played", f"📊 {mp}", inline=False))
 
-    # Row 3 — two columns
+    # Row 3 — full width (single line W-D-L)
+    fields.append(_field("W-D-L", f"✅ **{wins}**  •  ➖ **{draws}**  •  ❌ **{losses}**", inline=False))
+
+    # Row 4 — two columns
     fields += [
-        _field("🔥 Win Streak", f"**{wstreak}**", inline=True),
-        _field("🛡️ Unbeaten Streak", f"**{ubstreak}**", inline=True),
+        _field("Win Streak", f"🔥 {wstreak}", inline=True),
+        _field("Unbeaten Streak", f"🛡️ {ubstreak}", inline=True),
         _spacer(True),
     ]
 
-    # Row 4 — full width
-    fields.append(_field("🧩 Recent Form (last 5)", recent_form, inline=False))
+    # Row 5 — full width (Last 5)
+    fields.append(_field("Last 5 Matches", last5, inline=False))
 
-    # Row 5 — full width
-    fields.append(_field("🎮 Last Match", last_match, inline=False))
+    # Row 6 — full width (Recent Form)
+    fields.append(_field("Recent Form", recent_form, inline=False))
 
-    # Row 6 — two columns
+    # Row 7 — two columns
     fields += [
-        _field("🗓️ Last Played", days_display, inline=True),
-        _field("🆔 Club ID", f"`{club_id}`", inline=True),
+        _field("Days Since Last Match", f"🗓️ {days_display}", inline=True),
+        _field("Club ID", f"`{club_id}`", inline=True),
         _spacer(True),
     ]
 
@@ -1904,7 +1971,7 @@ async def last5_command(interaction: discord.Interaction, club: str):
 async def l5_command(interaction: discord.Interaction, club: str):
     await last5_command.callback(interaction, club)
 
-@tree.command(name="stats", description="All-in-one club stats: rank, rating, record, form, last match, activity.")
+@tree.command(name="stats", description="All-in-one club stats: rank, rating, record, form, last 5 matches, activity.")
 @app_commands.describe(club="Club name or club ID")
 async def stats_command(interaction: discord.Interaction, club: str):
     await interaction.response.defer()
@@ -1938,7 +2005,8 @@ async def stats_command(interaction: discord.Interaction, club: str):
             print(f"[ERROR] fetch_all_stats_for_club failed: {e}")
             embed = discord.Embed(title="❌ Error", description="Could not fetch all stats for this club.", color=discord.Color.red())
 
-        await msg.edit(content=None, embed=embed, view=None)
+        view = PrintRecordButton(data["stats"], (club_name or f"Club {club_id}").upper())
+        await msg.edit(content=None, embed=embed, view=view)
 
         # 🔔 auto-delete after N seconds
         asyncio.create_task(delete_after_delay(msg, 180))
