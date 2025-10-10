@@ -1261,81 +1261,93 @@ async def twitch_get_game_box_art_url(game_id: str | None) -> str | None:
 @app_commands.describe(club="Club name or club ID")
 async def versus_command(interaction: discord.Interaction, club: str):
     await interaction.response.defer(ephemeral=False)
-    headers = {"User-Agent": "Mozilla/5.0"}
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/json",
+        "Origin": "https://www.ea.com",
+        "Referer": "https://www.ea.com/ea-sports-fc/pro-clubs",
+        "Cache-Control": "no-cache",
+    }
 
     async with httpx.AsyncClient(timeout=10) as client_http:
         try:
-            encoded_name = club.replace(" ", "%20")
-            search_url = f"https://proclubs.ea.com/api/fc/allTimeLeaderboard/search?platform={PLATFORM}&clubName={encoded_name}"
-            search_response = await client_http.get(search_url, headers=headers)
+            # ✅ If it's an ID, skip search and go straight to stats/matches
+            if club.isdigit():
+                opponent_id = club
+                selected_name = None
+            else:
+                encoded_name = club.replace(" ", "%20")
+                search_url = f"https://proclubs.ea.com/api/fc/allTimeLeaderboard/search?platform={PLATFORM}&clubName={encoded_name}"
+                search_response = await client_http.get(search_url, headers=headers)
+                if search_response.status_code != 200:
+                    # Log for visibility
+                    print(f"[VERSUS] search failed: {search_response.status_code} {search_response.text[:200]}")
+                    await interaction.followup.send("Club not found or EA API failed.")
+                    return
 
-            if search_response.status_code != 200:
-                await send_temporary_message(interaction.followup, content="Club not found or EA API failed.")
-                return
+                search_data = search_response.json() or []
+                valid_clubs = [
+                    c for c in search_data
+                    if c.get("clubInfo", {}).get("name", "").strip().lower() != "none of these"
+                ]
 
-            search_data = search_response.json()
-            if not search_data or not isinstance(search_data, list):
-                await send_temporary_message(interaction.followup, content="No matching clubs found.")
-                return
+                if len(valid_clubs) == 0:
+                    await interaction.followup.send("No matching clubs found.")
+                    return
 
-            valid_clubs = [
-                c for c in search_data
-                if c.get("clubInfo", {}).get("name", "").strip().lower() != "none of these"
-            ]
+                if len(valid_clubs) > 1:
+                    options = [
+                        discord.SelectOption(label=c['clubInfo']['name'], value=str(c['clubInfo']['clubId']))
+                        for c in valid_clubs[:25]
+                    ]
+                    options.append(discord.SelectOption(label="None of these", value="none"))
+                    view = ClubDropdownView(interaction, options, valid_clubs)
+                    await interaction.followup.send("Multiple clubs found. Please choose the correct one:", view=view)
+                    return
 
-            if len(valid_clubs) == 1:
-                selected = valid_clubs[0]
-                opponent_id = str(selected["clubInfo"]["clubId"])
-                stats = await get_club_stats(opponent_id)
-                recent_form = await get_recent_form(opponent_id)
-                last_match = await get_last_match(opponent_id)
-                days_since_last = await get_days_since_last_match(opponent_id)
-                days_display = f"🗓️ {days_since_last} day(s) ago" if days_since_last is not None else "🗓️ Unavailable"
-                rank = await get_club_rank(opponent_id)
-                rank_display = f"#{rank}" if isinstance(rank, int) else "Unranked"
-                form_string = ' '.join(recent_form) if recent_form else "No recent matches found."
-            
-                embed = discord.Embed(
-                    title=f"📋 {selected['clubInfo']['name'].upper()} Club Stats",
-                    color=0xB30000
-                )
-                embed.add_field(name="Leaderboard Rank", value=f"📈 {rank_display}", inline=False)
-                embed.add_field(name="Skill Rating", value=f"🏅 {stats['skillRating']}", inline=False)
-                embed.add_field(name="Matches Played", value=f"📊 {stats['matchesPlayed']}", inline=False)
-                embed.add_field(name="Wins", value=f"✅ {stats['wins']}", inline=False)
-                embed.add_field(name="Draws", value=f"➖ {stats['draws']}", inline=False)
-                embed.add_field(name="Losses", value=f"❌ {stats['losses']}", inline=False)
-                embed.add_field(name="Win Streak", value=f"{stats['winStreak']} {streak_emoji(stats['winStreak'])}", inline=False)
-                embed.add_field(name="Unbeaten Streak", value=f"{stats['unbeatenStreak']} {streak_emoji(stats['unbeatenStreak'])}", inline=False)
-                embed.add_field(name="Last Match", value=last_match, inline=False)
-                embed.add_field(name="Recent Form", value=form_string, inline=False)
-                embed.add_field(name="Days Since Last Match", value=days_display, inline=False)
-            
-                view = PrintRecordButton(stats, selected['clubInfo']['name'].upper())
-                message = await interaction.followup.send(embed=embed, view=view)
-                await log_command_output(interaction, "versus", message)
+                opponent_id = str(valid_clubs[0]["clubInfo"]["clubId"])
+                selected_name = valid_clubs[0]["clubInfo"]["name"]
 
-                async def delete_after_timeout():
-                    await asyncio.sleep(180)
-                    try:
-                        await message.delete()
-                    except Exception as e:
-                        print(f"[ERROR] Failed to delete message after timeout: {e}")
-                asyncio.create_task(delete_after_timeout())
-                return
+            # ✅ same as your existing flow
+            stats = await get_club_stats(opponent_id)
+            recent_form = await get_recent_form(opponent_id)
+            last_match = await get_last_match(opponent_id)
+            days_since_last = await get_days_since_last_match(opponent_id)
+            days_display = f"🗓️ {days_since_last} day(s) ago" if days_since_last is not None else "🗓️ Unavailable"
+            rank = await get_club_rank(opponent_id)
+            rank_display = f"#{rank}" if isinstance(rank, int) else "Unranked"
+            form_string = ' '.join(recent_form) if recent_form else "No recent matches found."
 
-            options = [
-                discord.SelectOption(label=c['clubInfo']['name'], value=str(c['clubInfo']['clubId']))
-                for c in valid_clubs[:25]
-            ]
-            options.append(discord.SelectOption(label="None of these", value="none"))
+            club_title = (selected_name or f"Club {opponent_id}").upper()
+            embed = discord.Embed(title=f"📋 {club_title} Club Stats", color=0xB30000)
+            embed.add_field(name="Leaderboard Rank", value=f"📈 {rank_display}", inline=False)
+            embed.add_field(name="Skill Rating", value=f"🏅 {stats['skillRating']}", inline=False)
+            embed.add_field(name="Matches Played", value=f"📊 {stats['matchesPlayed']}", inline=False)
+            embed.add_field(name="Wins", value=f"✅ {stats['wins']}", inline=False)
+            embed.add_field(name="Draws", value=f"➖ {stats['draws']}", inline=False)
+            embed.add_field(name="Losses", value=f"❌ {stats['losses']}", inline=False)
+            embed.add_field(name="Win Streak", value=f"{stats['winStreak']} {streak_emoji(stats['winStreak'])}", inline=False)
+            embed.add_field(name="Unbeaten Streak", value=f"{stats['unbeatenStreak']} {streak_emoji(stats['unbeatenStreak'])}", inline=False)
+            embed.add_field(name="Last Match", value=last_match, inline=False)
+            embed.add_field(name="Recent Form", value=form_string, inline=False)
+            embed.add_field(name="Days Since Last Match", value=days_display, inline=False)
 
-            view = ClubDropdownView(interaction, options, valid_clubs)
-            await interaction.followup.send("Multiple clubs found. Please choose the correct one:", view=view)
+            view = PrintRecordButton(stats, club_title)
+            message = await interaction.followup.send(embed=embed, view=view)
+            await log_command_output(interaction, "versus", message)
+
+            # auto-cleanup (as you already do elsewhere)
+            async def _del():
+                await asyncio.sleep(180)
+                try:
+                    await message.delete()
+                except Exception as e:
+                    print(f"[ERROR] Failed to delete message after timeout: {e}")
+            asyncio.create_task(_del())
 
         except Exception as e:
-            print(f"Error in /versus: {e}")
-            await send_temporary_message(interaction.followup, content="An error occurred while fetching opponent stats.")
+            print(f"[ERROR] /versus failed: {e}")
+            await interaction.followup.send("An error occurred while fetching opponent stats.")
 
 @tree.command(name="vs", description="Alias for /versus")
 @app_commands.describe(club="Club name or club ID")
