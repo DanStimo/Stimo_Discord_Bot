@@ -360,6 +360,21 @@ async def get_last_played_timestamp(club_id: str | int) -> datetime | None:
         mins = int(delta.total_seconds() // 60)
         return f"{mins}m ago"
 
+def format_last_played(dt: datetime | None) -> str:
+    """Format a datetime into a human-friendly 'last played' string."""
+    if not dt:
+        return "—"
+    now = datetime.now(timezone.utc)
+    delta = now - dt
+    days = delta.days
+    hours = int(delta.total_seconds() // 3600)
+    if days >= 1:
+        return f"{days}d ago"
+    if hours >= 1:
+        return f"{hours}h ago"
+    mins = int(delta.total_seconds() // 60)
+    return f"{mins}m ago"
+
 # --- Web helpers for EA endpoints ---
 async def get_club_stats(club_id):
     data = await _ea_get_json(
