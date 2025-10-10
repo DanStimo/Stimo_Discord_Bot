@@ -1518,93 +1518,81 @@ class Top100View(discord.ui.View):
         self.per_page = per_page
         self.page = 0
         self.message = None
+        # cache last-played datetimes so we don’t re-fetch every time
         self.last_played_cache: dict[str, datetime | None] = {}
 
     def get_page_slice(self):
-    start = self.page * self.per_page
-    end = start + self.per_page
-    return self.data[start:end]
+        start = self.page * self.per_page
+        end = start + self.per_page
+        return self.data[start:end]
 
-async def _ensure_last_played_for_page(self):
-    """
-    Fetch last-played for the visible 10 clubs, with small concurrency
-    and cache results to avoid repeat lookups.
-    """
-    page_rows = self.get_page_slice()
+    async def _ensure_last_played_for_page(self):
+        """Fetch last-played for visible clubs if not already cached."""
+        page_rows = self.get_page_slice()
+        ids_needed = [
+            str(club.get("clubId"))
+            for club in page_rows
+            if str(club.get("clubId")) not in self.last_played_cache
+        ]
+        if not ids_needed:
+            return
 
-    # Extract clubIds on this page (as strings)
-    ids_needed = []
-    for club in page_rows:
-        cid = str(club.get("clubId"))
-        if cid and cid not in self.last_played_cache:
-            ids_needed.append(cid)
+        sem = asyncio.Semaphore(5)
 
-    if not ids_needed:
-        return
+        async def _job(cid: str):
+            async with sem:
+                dt = await get_last_played_timestamp(cid)
+                self.last_played_cache[cid] = dt
 
-    # Limit concurrency so we don't spam EA
-    sem = asyncio.Semaphore(5)
+        await asyncio.gather(*[_job(cid) for cid in ids_needed])
 
-    async def _job(cid: str):
-        async with sem:
-            dt = await get_last_played_timestamp(cid)
-            self.last_played_cache[cid] = dt
+    def _format_row(self, club: dict) -> str:
+        name = club.get("name") or (club.get("clubInfo", {}) or {}).get("name") or "Unknown"
+        rank = club.get("rank", "—")
+        sr = club.get("skillRating", club.get("skill", "—"))
+        cid = str(club.get("clubId", ""))
+        lp = format_last_played(self.last_played_cache.get(cid))
+        return f"#{rank}  {name} — SR: {sr}  •  Last: {lp}"
 
-    await asyncio.gather(*[_job(cid) for cid in ids_needed])
+    async def get_embed(self):
+        await self._ensure_last_played_for_page()
+        page_rows = self.get_page_slice()
+        description_lines = [self._format_row(c) for c in page_rows]
+        page_count = (len(self.data) + self.per_page - 1) // self.per_page
+        page_label = f"Page {self.page + 1}/{page_count}"
 
-def _format_row(self, club: dict) -> str:
-    name = club.get("name") or (club.get("clubInfo", {}) or {}).get("name") or "Unknown"
-    rank = club.get("rank", "—")
-    sr = club.get("skillRating", club.get("skill", "—"))
-    cid = str(club.get("clubId", ""))
-    lp = format_last_played(self.last_played_cache.get(cid))
-    # Example line: "#1  Team Name — SR: 1800  •  Last: 2d ago"
-    return f"#{rank}  {name} — SR: {sr}  •  Last: {lp}"
-
-async def get_embed(self):
-    """
-    NOTE: this version is async now because we fetch data.
-    Update any call sites to `await view.get_embed()`.
-    """
-    await self._ensure_last_played_for_page()
-
-    page_rows = self.get_page_slice()
-    description_lines = [self._format_row(c) for c in page_rows]
-    page_count = (len(self.data) + self.per_page - 1) // self.per_page
-    page_label = f"Page {self.page + 1}/{page_count}"
-
-    embed = discord.Embed(
-        title="🏆 Top 100 Clubs",
-        description="\n".join(description_lines) if description_lines else "No data.",
-        color=discord.Color.blurple()
-    )
-    embed.set_footer(text=page_label)
-    return embed
+        embed = discord.Embed(
+            title="🏆 Top 100 Clubs",
+            description="\n".join(description_lines) if description_lines else "No data.",
+            color=discord.Color.blurple()
+        )
+        embed.set_footer(text=page_label)
+        return embed
 
     @discord.ui.button(label="⏮️ First", style=discord.ButtonStyle.secondary)
     async def first_page(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.page = 0
-        embed = await self.get_embed()  # now async
+        embed = await self.get_embed()
         await interaction.response.edit_message(embed=embed, view=self)
-    
+
     @discord.ui.button(label="⬅️ Prev", style=discord.ButtonStyle.primary)
     async def prev_page(self, interaction: discord.Interaction, button: discord.ui.Button):
         if self.page > 0:
             self.page -= 1
-        embed = await self.get_embed()  # now async
+        embed = await self.get_embed()
         await interaction.response.edit_message(embed=embed, view=self)
-    
+
     @discord.ui.button(label="➡️ Next", style=discord.ButtonStyle.primary)
     async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if (self.page + 1) * self.per_page < len(self.data):  # or self.leaderboard
+        if (self.page + 1) * self.per_page < len(self.data):
             self.page += 1
-        embed = await self.get_embed()  # now async
+        embed = await self.get_embed()
         await interaction.response.edit_message(embed=embed, view=self)
-    
+
     @discord.ui.button(label="⏭️ Last", style=discord.ButtonStyle.secondary)
     async def last_page(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.page = (len(self.data) - 1) // self.per_page  # or self.leaderboard
-        embed = await self.get_embed()  # now async
+        self.page = (len(self.data) - 1) // self.per_page
+        embed = await self.get_embed()
         await interaction.response.edit_message(embed=embed, view=self)
 
     async def on_timeout(self):
