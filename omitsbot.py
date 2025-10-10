@@ -1609,34 +1609,58 @@ class Top100View(discord.ui.View):
         return embed
 
     @discord.ui.button(label="⏮️ First", style=discord.ButtonStyle.secondary)
-    async def first_page(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer()  # respond within 3s
-        self.page = 0
+async def first_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+    await interaction.response.defer()
+    await interaction.followup.send("Fetching page… this can take a moment.", ephemeral=True)
+    self.page = 0
+    try:
+        self._set_buttons_enabled(False)
+        await interaction.edit_original_response(embed=self._loading_embed(), view=self)
         embed = await self.get_embed()
-        await interaction.edit_original_response(embed=embed, view=self)
-    
-    @discord.ui.button(label="⬅️ Prev", style=discord.ButtonStyle.primary)
-    async def prev_page(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer()  # respond within 3s
-        if self.page > 0:
-            self.page -= 1
+    finally:
+        self._set_buttons_enabled(True)
+    await interaction.edit_original_response(embed=embed, view=self)
+
+@discord.ui.button(label="⬅️ Prev", style=discord.ButtonStyle.primary)
+async def prev_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+    await interaction.response.defer()
+    await interaction.followup.send("Fetching page… this can take a moment.", ephemeral=True)
+    if self.page > 0:
+        self.page -= 1
+    try:
+        self._set_buttons_enabled(False)
+        await interaction.edit_original_response(embed=self._loading_embed(), view=self)
         embed = await self.get_embed()
-        await interaction.edit_original_response(embed=embed, view=self)
-    
-    @discord.ui.button(label="➡️ Next", style=discord.ButtonStyle.primary)
-    async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer()  # respond within 3s
-        if (self.page + 1) * self.per_page < len(self.data):  # or self.leaderboard
-            self.page += 1
+    finally:
+        self._set_buttons_enabled(True)
+    await interaction.edit_original_response(embed=embed, view=self)
+
+@discord.ui.button(label="➡️ Next", style=discord.ButtonStyle.primary)
+async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+    await interaction.response.defer()
+    await interaction.followup.send("Fetching page… this can take a moment.", ephemeral=True)
+    if (self.page + 1) * self.per_page < len(self.data):
+        self.page += 1
+    try:
+        self._set_buttons_enabled(False)
+        await interaction.edit_original_response(embed=self._loading_embed(), view=self)
         embed = await self.get_embed()
-        await interaction.edit_original_response(embed=embed, view=self)
-    
-    @discord.ui.button(label="⏭️ Last", style=discord.ButtonStyle.secondary)
-    async def last_page(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer()  # respond within 3s
-        self.page = (len(self.data) - 1) // self.per_page  # or self.leaderboard
+    finally:
+        self._set_buttons_enabled(True)
+    await interaction.edit_original_response(embed=embed, view=self)
+
+@discord.ui.button(label="⏭️ Last", style=discord.ButtonStyle.secondary)
+async def last_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+    await interaction.response.defer()
+    await interaction.followup.send("Fetching page… this can take a moment.", ephemeral=True)
+    self.page = (len(self.data) - 1) // self.per_page
+    try:
+        self._set_buttons_enabled(False)
+        await interaction.edit_original_response(embed=self._loading_embed(), view=self)
         embed = await self.get_embed()
-        await interaction.edit_original_response(embed=embed, view=self)
+    finally:
+        self._set_buttons_enabled(True)
+    await interaction.edit_original_response(embed=embed, view=self)
 
     async def on_timeout(self):
         if self.message:
@@ -1644,6 +1668,25 @@ class Top100View(discord.ui.View):
                 await self.message.delete()
             except Exception as e:
                 print(f"[ERROR] Failed to auto-delete /t100 message: {e}")
+
+def _set_buttons_enabled(self, enabled: bool):
+    for child in self.children:
+        if isinstance(child, discord.ui.Button):
+            child.disabled = not enabled
+
+def _loading_embed(self) -> discord.Embed:
+    page_count = (len(self.data) + self.per_page - 1) // self.per_page
+    title = f"🏆 Top 100 Clubs (Page {self.page + 1}/{page_count})"
+    # show a short status while we fetch "last played"
+    body = "⏳ Fetching latest data…"
+    subtitle = "_Navigate using the buttons below._\n\n"
+    embed = discord.Embed(
+        title=title,
+        description=f"{subtitle}{body}",
+        color=discord.Color.dark_grey()
+    )
+    embed.set_footer(text="EA Pro Clubs All-Time Leaderboard")
+    return embed
 
 @tree.command(name="t100", description="Show the Top 100 Clubs from EA Pro Clubs Leaderboard.")
 async def top100_command(interaction: discord.Interaction):
