@@ -375,6 +375,12 @@ def format_last_played(dt: datetime | None) -> str:
     mins = int(delta.total_seconds() // 60)
     return f"{mins}m ago"
 
+def md_escape(s: str) -> str:
+    """Escape Discord markdown meta so club names render cleanly."""
+    if not isinstance(s, str):
+        s = str(s or "")
+    return s.replace("\\", "\\\\").replace("*", r"\*").replace("_", r"\_").replace("`", r"\`").replace("|", r"\|")
+
 # --- Web helpers for EA endpoints ---
 async def get_club_stats(club_id):
     data = await _ea_get_json(
@@ -1562,26 +1568,44 @@ class Top100View(discord.ui.View):
         await asyncio.gather(*[_job(cid) for cid in ids_needed])
 
     def _format_row(self, club: dict) -> str:
+        # data extraction
         name = club.get("name") or (club.get("clubInfo", {}) or {}).get("name") or "Unknown"
+        name = md_escape(name)
         rank = club.get("rank", "—")
         sr = club.get("skillRating", club.get("skill", "—"))
         cid = str(club.get("clubId", ""))
+    
+        # optional last played (comment out the next two lines to hide it)
         lp = format_last_played(self.last_played_cache.get(cid))
-        return f"#{rank}  {name} — SR: {sr}  •  Last: {lp}"
+        last_str = f" • Last Played: {lp}" if lp and lp != "—" else ""
+    
+        # two-line entry, like your screenshot
+        line1 = f"**#{rank} – {name}**"
+        line2 = f"⭐ Skill Rating: {sr}{last_str}"
+    
+        return f"{line1}\n{line2}"
 
     async def get_embed(self):
         await self._ensure_last_played_for_page()
+    
         page_rows = self.get_page_slice()
+        # blank line between items to mimic the spacing in your screenshot
         description_lines = [self._format_row(c) for c in page_rows]
+        body = "\n\n".join(description_lines) if description_lines else "No data."
+    
+        # page title like "🏆 Top 100 Clubs (Page 1/10)"
         page_count = (len(self.data) + self.per_page - 1) // self.per_page
-        page_label = f"Page {self.page + 1}/{page_count}"
-
+        title = f"🏆 Top 100 Clubs (Page {self.page + 1}/{page_count})"
+    
+        # small subtitle line above the list
+        subtitle = "_Navigate using the buttons below._\n\n"
+    
         embed = discord.Embed(
-            title="🏆 Top 100 Clubs",
-            description="\n".join(description_lines) if description_lines else "No data.",
-            color=discord.Color.blurple()
+            title=title,
+            description=f"{subtitle}{body}",
+            color=discord.Color.dark_grey()
         )
-        embed.set_footer(text=page_label)
+        embed.set_footer(text="EA Pro Clubs All-Time Leaderboard")
         return embed
 
     @discord.ui.button(label="⏮️ First", style=discord.ButtonStyle.secondary)
