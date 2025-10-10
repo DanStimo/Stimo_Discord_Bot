@@ -309,14 +309,16 @@ async def search_clubs_ea(query: str) -> list:
         return []
     url = "https://proclubs.ea.com/api/fc/allTimeLeaderboard/search"
     params = {"platform": PLATFORM, "clubName": query.strip()}
-    data = await _ea_get_json(url, params)
+    resp = await _client_ea.get(url, params=params)
+    resp.raise_for_status()
+    data = resp.json()
     if not isinstance(data, list):
         return []
     return [
         c for c in data
         if c.get("clubInfo", {}).get("name", "").strip().lower() != "none of these"
     ]
-
+    
 from datetime import datetime, timezone
 
 async def get_last_played_timestamp(club_id: str | int) -> datetime | None:
@@ -482,15 +484,16 @@ async def get_last_match(club_id):
         return "Last match data not available."
 
 async def get_club_rank(club_id):
-    data = await _ea_get_json(
-        "https://proclubs.ea.com/api/fc/allTimeLeaderboard",
-        {"platform": PLATFORM},
-    )
+    url = "https://proclubs.ea.com/api/fc/allTimeLeaderboard/club"
+    params = {"platform": PLATFORM, "clubIds": str(club_id)}
+    resp = await _client_ea.get(url, params=params)
+    resp.raise_for_status()
+    data = resp.json()
     try:
-        if isinstance(data, list):
-            for club in data:
-                if str(club.get("clubId")) == str(club_id):
-                    return club.get("rank", "Unranked")
+        if data and isinstance(data, dict):
+            raw = data.get("raw", [])
+            if raw and isinstance(raw, list):
+                return raw[0].get("rank", "Unranked")
     except Exception as e:
         print(f"[ERROR] Exception in get_club_rank: {e}")
     return "Unranked"
