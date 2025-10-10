@@ -685,8 +685,8 @@ def build_stats_embed(club_id: str, club_name: str | None, data: dict) -> discor
     # Row 2 — full width
     fields.append(_field("Matches Played", f"📊 {mp}", inline=False))
 
-    # Row 3 — full width (single line W-D-L)
-    fields.append(_field("W-D-L", f"✅ **{wins}**  •  ➖ **{draws}**  •  ❌ **{losses}**", inline=False))
+    # Row 3 — full width (single line W-D-L, no emojis)
+    fields.append(_field("W-D-L", f"{wins} - {draws} - {losses}", inline=False))
 
     # Row 4 — two columns
     fields += [
