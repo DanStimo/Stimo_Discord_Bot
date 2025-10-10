@@ -1,6 +1,7 @@
 ﻿discord.py
-httpx
+httpx[http2]
 fuzzywuzzy
 python-Levenshtein
 python-dotenv
 asyncpg>=0.29.0
+
