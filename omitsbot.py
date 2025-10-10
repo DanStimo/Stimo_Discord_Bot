@@ -751,16 +751,16 @@ def build_stats_embed(club_id: str, club_name: str | None, data: dict) -> discor
 
     # Use same color as your other embeds (red)
     embed = discord.Embed(
-        title=f"{title_name}",          # ← no "Club Stats" in title
+        title=f"{title_name}",
         description=None,
         color=0xB30000
     )
 
-     # Thumbnail from teamId (if available)
-     team_id = data.get("teamId")
-     crest_url = build_crest_url(team_id) if team_id else None
-     if crest_url:
-         embed.set_thumbnail(url=crest_url)
+    # ✅ Crest thumbnail
+    team_id = data.get("teamId")
+    crest_url = build_crest_url(team_id) if team_id else None
+    if crest_url:
+        embed.set_thumbnail(url=crest_url)
 
     fields: list[dict] = []
 
