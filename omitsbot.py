@@ -496,7 +496,7 @@ async def get_last5_matches_summary(club_id: str) -> str:
             else:
                 res = "➖"
 
-            lines.append(f"• {label} — vs {opp_name} ({our_goals}–{opp_goals}) {res}")
+            lines.append(f"{res} {label} — vs {opp_name} ({our_goals}–{opp_goals})")
 
         return "\n".join(lines)
 
