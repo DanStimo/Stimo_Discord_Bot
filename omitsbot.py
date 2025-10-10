@@ -1586,29 +1586,33 @@ class Top100View(discord.ui.View):
 
     @discord.ui.button(label="⏮️ First", style=discord.ButtonStyle.secondary)
     async def first_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer()  # respond within 3s
         self.page = 0
         embed = await self.get_embed()
-        await interaction.response.edit_message(embed=embed, view=self)
-
+        await interaction.edit_original_response(embed=embed, view=self)
+    
     @discord.ui.button(label="⬅️ Prev", style=discord.ButtonStyle.primary)
     async def prev_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer()  # respond within 3s
         if self.page > 0:
             self.page -= 1
         embed = await self.get_embed()
-        await interaction.response.edit_message(embed=embed, view=self)
-
+        await interaction.edit_original_response(embed=embed, view=self)
+    
     @discord.ui.button(label="➡️ Next", style=discord.ButtonStyle.primary)
     async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if (self.page + 1) * self.per_page < len(self.data):
+        await interaction.response.defer()  # respond within 3s
+        if (self.page + 1) * self.per_page < len(self.data):  # or self.leaderboard
             self.page += 1
         embed = await self.get_embed()
-        await interaction.response.edit_message(embed=embed, view=self)
-
+        await interaction.edit_original_response(embed=embed, view=self)
+    
     @discord.ui.button(label="⏭️ Last", style=discord.ButtonStyle.secondary)
     async def last_page(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.page = (len(self.data) - 1) // self.per_page
+        await interaction.response.defer()  # respond within 3s
+        self.page = (len(self.data) - 1) // self.per_page  # or self.leaderboard
         embed = await self.get_embed()
-        await interaction.response.edit_message(embed=embed, view=self)
+        await interaction.edit_original_response(embed=embed, view=self)
 
     async def on_timeout(self):
         if self.message:
