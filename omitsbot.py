@@ -483,19 +483,21 @@ async def get_last_match(club_id):
         print(f"[ERROR] Failed to fetch last match: {e}")
         return "Last match data not available."
 
-async def get_club_rank(club_id):
+async def get_club_rank(club_id: str):
     url = "https://proclubs.ea.com/api/fc/allTimeLeaderboard/club"
     params = {"platform": PLATFORM, "clubIds": str(club_id)}
-    resp = await _client_ea.get(url, params=params)
-    resp.raise_for_status()
-    data = resp.json()
     try:
+        resp = await _client_ea.get(url, params=params)
+        if resp.status_code == 404:
+            return "Unranked"
+        resp.raise_for_status()
+        data = resp.json()
         if data and isinstance(data, dict):
             raw = data.get("raw", [])
             if raw and isinstance(raw, list):
                 return raw[0].get("rank", "Unranked")
     except Exception as e:
-        print(f"[ERROR] Exception in get_club_rank: {e}")
+        print(f"[ERROR] Exception in get_club_rank({club_id}): {e}")
     return "Unranked"
 
 async def get_days_since_last_match(club_id):
@@ -1903,42 +1905,39 @@ async def stats_command(interaction: discord.Interaction, club: str):
     await interaction.response.defer()
 
     try:
-        # numeric ID → skip search
         if club.isdigit():
             club_id = club
             club_name = None
-            placeholder = await interaction.followup.send("⏳ Fetching club stats…")
+        else:
+            hits = await search_clubs_ea(club)
+            if not hits:
+                await interaction.followup.send("No matching clubs found.", ephemeral=True)
+                return
+            if len(hits) > 1:
+                view = StatsDropdown(hits)
+                await interaction.followup.send("Multiple clubs found. Please choose the correct one:", view=view)
+                return
+            club_id = str(hits[0]["clubInfo"]["clubId"])
+            club_name = hits[0]["clubInfo"]["name"]
+
+        placeholder = await interaction.followup.send("⏳ Fetching club stats…")
+
+        try:
             data = await fetch_all_stats_for_club(club_id)
             embed = build_stats_embed(club_id, club_name, data)
-            await placeholder.edit(content=None, embed=embed, view=None)
-            return
+        except Exception as e:
+            print(f"[ERROR] fetch_all_stats_for_club failed: {e}")
+            embed = discord.Embed(
+                title="❌ Error",
+                description="Could not fetch all stats for this club.",
+                color=discord.Color.red()
+            )
 
-        # name search
-        hits = await search_clubs_ea(club)
-        if not hits:
-            await interaction.followup.send("No matching clubs found.", ephemeral=True)
-            return
-
-        # multiple results → dropdown
-        if len(hits) > 1:
-            view = StatsDropdown(hits)
-            await interaction.followup.send("Multiple clubs found. Please choose the correct one:", view=view)
-            return
-
-        # single result
-        club_id = str(hits[0]["clubInfo"]["clubId"])
-        club_name = hits[0]["clubInfo"]["name"]
-        placeholder = await interaction.followup.send("⏳ Fetching club stats…")
-        data = await fetch_all_stats_for_club(club_id)
-        embed = build_stats_embed(club_id, club_name, data)
         await placeholder.edit(content=None, embed=embed, view=None)
 
     except Exception as e:
         print(f"[ERROR] /stats failed: {e}")
-        await interaction.followup.send("❌ An error occurred while fetching club stats.", ephemeral=True)
-
-        message = await interaction.followup.send(embed=embed)
-        await log_command_output(interaction, "stats", message)
+        await interaction.followup.send("❌ An unexpected error occurred while fetching club stats.", ephemeral=True)
 
         # optional auto-delete after 3 minutes (match your other commands)
         async def _del():
