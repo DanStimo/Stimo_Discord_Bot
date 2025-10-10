@@ -546,21 +546,46 @@ async def get_last_match(club_id):
         print(f"[ERROR] Failed to fetch last match: {e}")
         return "Last match data not available."
 
-async def get_club_rank(club_id: str):
-    url = "https://proclubs.ea.com/api/fc/allTimeLeaderboard/club"
-    params = {"platform": PLATFORM, "clubIds": str(club_id)}
+async def get_club_rank(club_id: str | int):
+    club_id = str(club_id)
+
     try:
-        resp = await _client_ea.get(url, params=params)
-        if resp.status_code == 404:
-            return "Unranked"
-        resp.raise_for_status()
-        data = resp.json()
-        if data and isinstance(data, dict):
-            raw = data.get("raw", [])
-            if raw and isinstance(raw, list):
-                return raw[0].get("rank", "Unranked")
+        resp = await _client_ea.get(
+            "https://proclubs.ea.com/api/fc/allTimeLeaderboard/club",
+            params={"platform": PLATFORM, "clubIds": club_id},
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            if isinstance(data, dict):
+                raw = data.get("raw") or []
+                if raw and isinstance(raw, list):
+                    rank = raw[0].get("rank")
+                    if rank is not None:
+                        return rank  # int or str like "42"
+        elif resp.status_code != 404:
+            # non-404 error; log and continue to fallback
+            print(f"[RANK] club endpoint {resp.status_code}: {resp.text[:160]}")
     except Exception as e:
-        print(f"[ERROR] Exception in get_club_rank({club_id}): {e}")
+        print(f"[RANK] exception (club endpoint): {e}")
+
+    try:
+        resp2 = await _client_ea.get(
+            "https://proclubs.ea.com/api/fc/allTimeLeaderboard",
+            params={"platform": PLATFORM},
+        )
+        if resp2.status_code == 200:
+            data2 = resp2.json()
+            if isinstance(data2, list):
+                for entry in data2:
+                    if str(entry.get("clubId")) == club_id:
+                        return entry.get("rank", "Unranked")
+            else:
+                print(f"[RANK] unexpected list payload: {type(data2)}")
+        else:
+            print(f"[RANK] list endpoint {resp2.status_code}: {resp2.text[:160]}")
+    except Exception as e:
+        print(f"[RANK] exception (list fallback): {e}")
+
     return "Unranked"
 
 async def get_days_since_last_match(club_id):
