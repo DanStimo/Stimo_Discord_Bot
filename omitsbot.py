@@ -1608,7 +1608,7 @@ class Top100View(discord.ui.View):
         embed.set_footer(text="EA Pro Clubs All-Time Leaderboard")
         return embed
 
-    @discord.ui.button(label="⏮️ First", style=discord.ButtonStyle.secondary)
+@discord.ui.button(label="⏮️ First", style=discord.ButtonStyle.secondary)
 async def first_page(self, interaction: discord.Interaction, button: discord.ui.Button):
     await interaction.response.defer()
     await interaction.followup.send("Fetching page… this can take a moment.", ephemeral=True)
