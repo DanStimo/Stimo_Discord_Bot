@@ -77,6 +77,64 @@ intents.members = True  # ✅ REQUIRED for on_member_join and member lookups
 client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
 
+CREST_URL_TEMPLATE = os.getenv("CREST_URL_TEMPLATE", "").strip()
+
+def build_crest_url(team_id: str | int) -> str | None:
+    """Return a crest URL from teamId using your template, or None if not set."""
+    if not team_id or not CREST_URL_TEMPLATE:
+        return None
+    return CREST_URL_TEMPLATE.format(teamId=str(team_id))
+
+async def get_team_id_for_club(club_id: str | int) -> str | None:
+    """
+    Try to find teamId for a club:
+      1) overallStats (fast, single call)
+      2) fall back to the newest matches and read clubs[club_id].details.teamId
+    """
+    club_id = str(club_id)
+
+    # 1) overallStats
+    try:
+        r = await _client_ea.get(
+            "https://proclubs.ea.com/api/fc/clubs/overallStats",
+            params={"platform": PLATFORM, "clubIds": club_id},
+        )
+        if r.status_code == 200:
+            data = r.json() or []
+            if isinstance(data, list) and data:
+                tid = data[0].get("teamId")
+                if tid:
+                    return str(tid)
+    except Exception as e:
+        print(f"[crest] overallStats lookup failed: {e}")
+
+    # 2) matches fallback (check newest first among common types)
+    try:
+        match_types = ["leagueMatch", "playoffMatch", "friendlyMatch"]
+        newest = []
+        for mt in match_types:
+            mres = await _client_ea.get(
+                "https://proclubs.ea.com/api/fc/clubs/matches",
+                params={"matchType": mt, "platform": PLATFORM, "clubIds": club_id},
+            )
+            if mres.status_code == 404:
+                continue
+            mres.raise_for_status()
+            arr = mres.json() or []
+            newest.extend(arr)
+        newest.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
+        for m in newest:
+            clubs = m.get("clubs", {}) or {}
+            mine = clubs.get(club_id) or {}
+            details = mine.get("details") or {}
+            tid = details.get("teamId")
+            if tid:
+                return str(tid)
+    except Exception as e:
+        print(f"[crest] matches lookup failed: {e}")
+
+    return None
+
 # === Welcome Feature ===
 WELCOME_CHANNEL_ID = int(os.getenv("WELCOME_CHANNEL_ID", "0"))
 WELCOME_COLOR_HEX = os.getenv("WELCOME_COLOR_HEX", "#2ecc71")
@@ -627,23 +685,22 @@ async def get_squad_names(club_id):
     return []
 
 async def fetch_all_stats_for_club(club_id: str):
-    """
-    Concurrently fetch everything needed for the /stats embed.
-    """
     club_id = str(club_id)
     stats_task = asyncio.create_task(get_club_stats(club_id))
     form_task = asyncio.create_task(get_recent_form(club_id))
     days_task = asyncio.create_task(get_days_since_last_match(club_id))
     rank_task = asyncio.create_task(get_club_rank(club_id))
     last5_task = asyncio.create_task(get_last5_matches_summary(club_id))
+    teamid_task = asyncio.create_task(get_team_id_for_club(club_id))
 
     stats = await stats_task
     recent_form = await form_task
     days_since = await days_task
     rank = await rank_task
     last5 = await last5_task
+    team_id = await teamid_task
 
-    rank_display = f"#{rank}" if (isinstance(rank, int) or (isinstance(rank, str) and rank.isdigit())) else "Unranked"
+    rank_display = f"#{rank}" if (isinstance(rank, int) or (isinstance(rank, str) and str(rank).isdigit())) else "Unranked"
     days_display = f"{days_since} day(s) ago" if days_since is not None else "—"
     form_string = " ".join(recent_form) if recent_form else "No recent matches"
 
@@ -653,6 +710,7 @@ async def fetch_all_stats_for_club(club_id: str):
         "recent_form": form_string,
         "last5": last5 or "No recent matches",
         "days_display": days_display,
+        "teamId": team_id,  # NEW
     }
 
 # Helpers + embed builder for /stats
@@ -697,6 +755,12 @@ def build_stats_embed(club_id: str, club_name: str | None, data: dict) -> discor
         description=None,
         color=0xB30000
     )
+
+     # Thumbnail from teamId (if available)
+     team_id = data.get("teamId")
+     crest_url = build_crest_url(team_id) if team_id else None
+     if crest_url:
+         embed.set_thumbnail(url=crest_url)
 
     fields: list[dict] = []
 
@@ -1017,6 +1081,17 @@ async def fetch_and_display_last5(interaction, club_id, club_name="Club", origin
         title=f"📅 {club_name.upper()}'s Last 5",
         color=discord.Color.blue()
     )
+
+        # get teamId once for this club
+        team_id = await get_team_id_for_club(club_id)
+        crest_url = build_crest_url(team_id) if team_id else None
+    
+        embed = discord.Embed(
+            title=f"📅 {club_name.upper()}'s Last 5",
+            color=discord.Color.blue()  # your color
+        )
+        if crest_url:
+            embed.set_thumbnail(url=crest_url)
 
     for idx, match in enumerate(last_5, 1):
         clubs = match.get("clubs", {}) or {}
