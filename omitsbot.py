@@ -17,7 +17,7 @@ load_dotenv()
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 CLUB_ID = os.getenv("CLUB_ID", "167054")  # fallback/default
-PLATFORM = os.getenv("PLATFORM", "common-gen5")
+PLATFORM = os.getenv("PLATFORM", "gen5")
 OFFSIDE_KEY = "offside.json"
 DEFAULT_LINEUP_FORMATION = os.getenv("DEFAULT_LINEUP_FORMATION", "3-5-2")
 
