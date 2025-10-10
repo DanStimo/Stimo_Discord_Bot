@@ -533,6 +533,119 @@ async def get_squad_names(club_id):
         print(f"[ERROR] Failed to fetch squad names: {e}")
     return []
 
+async def fetch_all_stats_for_club(club_id: str):
+    """
+    Concurrently fetches all stats we need for the /stats embed.
+    Returns a dict with safe defaults if something fails.
+    """
+    club_id = str(club_id)
+
+    # run API calls in parallel
+    stats_task = asyncio.create_task(get_club_stats(club_id))
+    form_task = asyncio.create_task(get_recent_form(club_id))
+    last_task = asyncio.create_task(get_last_match(club_id))
+    days_task = asyncio.create_task(get_days_since_last_match(club_id))
+    rank_task = asyncio.create_task(get_club_rank(club_id))
+
+    stats = await stats_task
+    recent_form = await form_task
+    last_match = await last_task
+    days_since = await days_task
+    rank = await rank_task
+
+    # normalize
+    rank_display = f"#{rank}" if isinstance(rank, int) or (isinstance(rank, str) and rank.isdigit()) else "Unranked"
+    days_display = f"{days_since} day(s) ago" if days_since is not None else "Unknown"
+    form_string = " ".join(recent_form) if recent_form else "No recent matches"
+
+    return {
+        "stats": stats,
+        "rank_display": rank_display,
+        "recent_form": form_string,
+        "last_match": last_match,
+        "days_display": days_display,
+    }
+
+def build_stats_embed(club_id: str, club_name: str | None, data: dict) -> discord.Embed:
+    """
+    Pretty, organized embed with emojis.
+    """
+    title_name = (club_name or f"Club {club_id}").upper()
+    s = data["stats"]
+
+    # Defensive defaults
+    mp = s.get("matchesPlayed", "N/A")
+    wins = s.get("wins", "N/A")
+    draws = s.get("draws", "N/A")
+    losses = s.get("losses", "N/A")
+    sr = s.get("skillRating", "N/A")
+    wstreak = s.get("winStreak", "0")
+    ubstreak = s.get("unbeatenStreak", "0")
+
+    embed = discord.Embed(
+        title=f"📊 {title_name}",
+        description="All key stats at a glance.",
+        color=discord.Color.dark_theme()
+    )
+
+    # Top line: Rank & Skill
+    embed.add_field(
+        name="🏆 Leaderboard Rank",
+        value=f"**{data['rank_display']}**",
+        inline=True
+    )
+    embed.add_field(
+        name="⭐ Skill Rating",
+        value=f"**{sr}**",
+        inline=True
+    )
+
+    # Record + Streaks
+    embed.add_field(
+        name="📈 Record",
+        value=f"**{wins}W – {draws}D – {losses}L**\n_Total matches:_ **{mp}**",
+        inline=False
+    )
+    embed.add_field(
+        name="🔥 Win Streak",
+        value=f"**{wstreak}**",
+        inline=True
+    )
+    embed.add_field(
+        name="🛡️ Unbeaten Streak",
+        value=f"**{ubstreak}**",
+        inline=True
+    )
+
+    # Recent form row
+    embed.add_field(
+        name="🧩 Recent Form (last 5)",
+        value=data["recent_form"],
+        inline=False
+    )
+
+    # Last match summary
+    embed.add_field(
+        name="🕹️ Last Match",
+        value=data["last_match"],
+        inline=False
+    )
+
+    # Activity
+    embed.add_field(
+        name="🗓️ Last Played",
+        value=data["days_display"],
+        inline=True
+    )
+    embed.add_field(
+        name="🆔 Club ID",
+        value=f"`{club_id}`",
+        inline=True
+    )
+
+    embed.set_footer(text="EA Pro Clubs — Combined Club Stats")
+    return embed
+
 async def rotate_presence():
     await client.wait_until_ready()
 
@@ -734,6 +847,41 @@ class ClubDropdownView(discord.ui.View):
         super().__init__()
         self.add_item(ClubDropdown(interaction, options, club_data))
 
+class StatsDropdown(discord.ui.View):
+    def __init__(self, interaction: discord.Interaction, options: list[discord.SelectOption], results: list[dict]):
+        super().__init__(timeout=60)
+        self.interaction = interaction
+        self.results = results
+
+        self.select = discord.ui.Select(placeholder="Choose a club…", options=options, min_values=1, max_values=1)
+        self.select.callback = self._on_select
+        self.add_item(self.select)
+
+    async def _on_select(self, interaction: discord.Interaction):
+        # ignore other users if you like:
+        # if interaction.user.id != self.interaction.user.id: return
+        value = self.select.values[0]
+        if value == "none":
+            await interaction.response.edit_message(content="Selection cancelled.", view=None)
+            return
+
+        # find selected club in results
+        chosen = next((c for c in self.results if str(c["clubInfo"]["clubId"]) == str(value)), None)
+        if not chosen:
+            await interaction.response.edit_message(content="Could not find that club.", view=None)
+            return
+
+        club_id = str(chosen["clubInfo"]["clubId"])
+        club_name = chosen["clubInfo"]["name"]
+
+        await interaction.response.defer()
+        await interaction.edit_original_response(content="⏳ Fetching stats…", view=None)
+
+        data = await fetch_all_stats_for_club(club_id)
+        embed = build_stats_embed(club_id, club_name, data)
+
+        await interaction.edit_original_response(content=None, embed=embed, view=None)
+
 class LastMatchDropdown(discord.ui.Select):
     def __init__(self, interaction, options, club_data):
         self.interaction = interaction
@@ -805,6 +953,7 @@ class Last5DropdownView(discord.ui.View):
     def __init__(self, options, club_data):
         super().__init__(timeout=180)
         self.add_item(Last5Dropdown(options, club_data))
+
 
 async def fetch_and_display_last5(interaction, club_id, club_name="Club", original_message=None):
     match_types = ["leagueMatch", "playoffMatch", "friendlyMatch"]
@@ -1744,6 +1893,61 @@ async def last5_command(interaction: discord.Interaction, club: str):
 @app_commands.describe(club="Club name or club ID")
 async def l5_command(interaction: discord.Interaction, club: str):
     await last5_command.callback(interaction, club)
+
+@tree.command(name="stats", description="All-in-one club stats: rank, rating, record, form, last match, activity.")
+@app_commands.describe(club="Club name or club ID")
+async def stats_command(interaction: discord.Interaction, club: str):
+    await interaction.response.defer()
+
+    try:
+        # If they pass a numeric ID, skip search
+        if club.isdigit():
+            club_id = club
+            club_name = None
+        else:
+            # robust EA search (partial names)
+            hits = await search_clubs_ea(club)
+
+            if not hits:
+                await interaction.followup.send("No matching clubs found.", ephemeral=True)
+                return
+
+            if len(hits) > 1:
+                options = [
+                    discord.SelectOption(
+                        label=h["clubInfo"]["name"],
+                        value=str(h["clubInfo"]["clubId"])
+                    )
+                    for h in hits[:25]
+                ]
+                options.append(discord.SelectOption(label="None of these", value="none"))
+                view = StatsDropdown(interaction, options, hits)
+                await interaction.followup.send("Multiple clubs found. Please choose the correct one:", view=view)
+                return
+
+            club_id = str(hits[0]["clubInfo"]["clubId"])
+            club_name = hits[0]["clubInfo"]["name"]
+
+        # Fetch everything concurrently and render
+        await interaction.followup.send("⏳ Fetching club stats…", ephemeral=True)
+        data = await fetch_all_stats_for_club(club_id)
+        embed = build_stats_embed(club_id, club_name, data)
+
+        message = await interaction.followup.send(embed=embed)
+        await log_command_output(interaction, "stats", message)
+
+        # optional auto-delete after 3 minutes (match your other commands)
+        async def _del():
+            await asyncio.sleep(180)
+            try:
+                await message.delete()
+            except Exception as e:
+                print(f"[ERROR] Failed to delete /stats message: {e}")
+        asyncio.create_task(_del())
+
+    except Exception as e:
+        print(f"[ERROR] /stats failed: {e}")
+        await interaction.followup.send("An error occurred while fetching club stats.", ephemeral=True)
 
 @tree.command(name="lineup", description="Create an interactive lineup from a formation.")
 @app_commands.describe(
