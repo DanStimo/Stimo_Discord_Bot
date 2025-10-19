@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 import re
 import asyncpg
 import logging
+from discord.utils import escape_markdown
 
 load_dotenv()
 
@@ -846,7 +847,7 @@ def build_stats_embed(club_id: str, club_name: str | None, data: dict) -> discor
     # Row 6 — Current Squad (full width)
     squad_list = data.get("current_squad", []) or []
     if squad_list:
-        squad_text = ", ".join(squad_list)
+        squad_text = ", ".join(escape_markdown(n) for n in squad_list)
         # truncate if too long for embed field (Discord limit ≈1024 chars)
         if len(squad_text) > 1000:
             allowed = 980
