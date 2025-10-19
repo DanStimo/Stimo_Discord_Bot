@@ -13,6 +13,7 @@ import re
 import asyncpg
 import logging
 from discord.utils import escape_markdown
+import math
 
 load_dotenv()
 
@@ -847,16 +848,15 @@ def build_stats_embed(club_id: str, club_name: str | None, data: dict) -> discor
     # Row 6 — Current Squad (full width)
     squad_list = data.get("current_squad", []) or []
     if squad_list:
-        squad_text = ", ".join(escape_markdown(n) for n in squad_list)
-        # truncate if too long for embed field (Discord limit ≈1024 chars)
-        if len(squad_text) > 1000:
-            allowed = 980
-            truncated = squad_text[:allowed].rsplit(",", 1)[0]
-            omitted = len(squad_list) - len(truncated.split(","))
-            squad_text = f"{truncated} … (+{omitted} more)"
+        cols = 2  # change to 3 if you prefer three columns
+        squad_text = format_columns(squad_list, cols=cols)
+        # truncate overall length if still too long
+        if len(squad_text) > 1020:
+            # crude truncation: keep head of text
+            squad_text = squad_text[:1000].rsplit("\n", 1)[0] + "\n```"  # try to close code block
     else:
         squad_text = "—"
-
+    
     fields.append(_field("Current Squad", squad_text, inline=False))
 
     # Row 6 — two columns
@@ -871,6 +871,40 @@ def build_stats_embed(club_id: str, club_name: str | None, data: dict) -> discor
 
     embed.set_footer(text="EAFC — Pro Clubs Stats")
     return embed
+
+def format_columns(names: list[str], cols: int = 2) -> str:
+    """
+    Return a string with names displayed in `cols` columns, balanced top-to-bottom.
+    Uses simple spacing; NOT a code block so markdown is escaped beforehand.
+    """
+    if not names:
+        return "—"
+    escaped = [escape_markdown(n) for n in names]
+    rows = math.ceil(len(escaped) / cols)
+    # build columns as lists
+    columns = []
+    for c in range(cols):
+        start = c * rows
+        columns.append(escaped[start:start + rows])
+    # pad columns to equal length for zipping
+    for col in columns:
+        while len(col) < rows:
+            col.append("")  # empty filler
+    # compute column widths (for nicer alignment inside a code block)
+    col_widths = [max((len(x) for x in col), default=0) for col in columns]
+    # build lines
+    lines = []
+    for r in range(rows):
+        parts = []
+        for c in range(cols):
+            name = columns[c][r]
+            if not name:
+                parts.append(" " * col_widths[c])
+            else:
+                parts.append(name.ljust(col_widths[c]))
+        lines.append("  ".join(parts).rstrip())
+    # Return as a code block (monospace) so spacing lines up
+    return "```\n" + "\n".join(lines) + "\n```"
 
 async def rotate_presence():
     await client.wait_until_ready()
