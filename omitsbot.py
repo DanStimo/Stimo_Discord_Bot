@@ -739,6 +739,7 @@ def build_stats_embed(club_id: str, club_name: str | None, data: dict) -> discor
       W-D-L (full width, single line)
       Win Streak | Unbeaten Streak
       Last 5 Matches (full width)
+      Recent Form (full width)
       Days Since Last | Club ID
     """
     title_name = (club_name or f"Club {club_id}").upper()
@@ -754,6 +755,7 @@ def build_stats_embed(club_id: str, club_name: str | None, data: dict) -> discor
 
     rank_display = data.get("rank_display", "Unranked")
     days_display = data.get("days_display", "—")
+    recent_form = data.get("recent_form", "No recent matches")
     last5 = data.get("last5", "No recent matches")
 
     # Use same color as your other embeds (red)
