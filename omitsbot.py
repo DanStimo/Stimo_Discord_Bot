@@ -902,10 +902,13 @@ async def safe_interaction_respond(interaction: discord.Interaction, **kwargs):
 
 async def send_temporary_message(destination, content=None, embed=None, view=None, delay=60):
     try:
+        # Ask Discord to return the actual message object
         if view:
-            message = await destination.send(content=content, embed=embed, view=view)
+            message = await destination.send(content=content, embed=embed, view=view, wait=True)
         else:
-            message = await destination.send(content=content, embed=embed)
+            message = await destination.send(content=content, embed=embed, wait=True)
+
+        # Auto-delete after X seconds
         await asyncio.sleep(delay)
         await message.delete()
     except Exception as e:
