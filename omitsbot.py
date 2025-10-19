@@ -861,7 +861,7 @@ def build_stats_embed(club_id: str, club_name: str | None, data: dict) -> discor
 
     # Row 6 — two columns
     fields += [
-        _field("Days Since Last Match", f"🗓️ {days_display}", inline=True),
+        _field("Last Active", f"🗓️ {days_display}", inline=True),
         _field("Club ID", f"`{club_id}`", inline=True),
         _spacer(True),
     ]
