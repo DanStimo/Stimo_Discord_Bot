@@ -1739,7 +1739,7 @@ async def lm_command(interaction: discord.Interaction, club: str):
 # - Top 100
 class Top100View(discord.ui.View):
     def __init__(self, data, per_page=10):
-        super().__init__(timeout=180)
+        super().__init__(timeout=60)
         self.data = data
         self.per_page = per_page
         self.page = 0
