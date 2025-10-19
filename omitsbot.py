@@ -1621,7 +1621,7 @@ async def handle_lastmatch(interaction: discord.Interaction, club: str, from_dro
         else:
             valid_clubs = await search_clubs_ea(club)
             if not valid_clubs:
-                await send_temporary_message(interaction.followup, content="No matching clubs found.")
+                await send_temporary_message(interaction.followup, content="No matching clubs found.", delay=15)
                 return
             if len(valid_clubs) > 1 and not from_dropdown:
                 options = [
@@ -1939,7 +1939,7 @@ async def last5_command(interaction: discord.Interaction, club: str):
 
         valid_clubs = await search_clubs_ea(club)
         if not valid_clubs:
-            await send_temporary_message(interaction.followup, content="No matching clubs found.", delay=60)
+            await send_temporary_message(interaction.followup, content="No matching clubs found.", delay=15)
             return
 
         if len(valid_clubs) == 1:
