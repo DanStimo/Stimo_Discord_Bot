@@ -848,12 +848,13 @@ def build_stats_embed(club_id: str, club_name: str | None, data: dict) -> discor
     # Row 6 — Current Squad (full width)
     squad_list = data.get("current_squad", []) or []
     if squad_list:
-        cols = 2  # change to 3 if you prefer three columns
-        squad_text = format_columns(squad_list, cols=cols)
-        # truncate overall length if still too long
-        if len(squad_text) > 1020:
-            # crude truncation: keep head of text
-            squad_text = squad_text[:1000].rsplit("\n", 1)[0] + "\n```"  # try to close code block
+        # Escape markdown so underscores or asterisks don’t format names
+        squad_text = ", ".join(escape_markdown(n) for n in squad_list)
+        if len(squad_text) > 1000:
+            allowed = 980
+            truncated = squad_text[:allowed].rsplit(",", 1)[0]
+            omitted = len(squad_list) - len(truncated.split(","))
+            squad_text = f"{truncated} … (+{omitted} more)"
     else:
         squad_text = "—"
     
