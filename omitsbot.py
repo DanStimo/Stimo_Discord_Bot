@@ -900,7 +900,7 @@ async def safe_interaction_respond(interaction: discord.Interaction, **kwargs):
         print(f"[ERROR] Failed to respond to interaction: {e}")
         return None
 
-async def send_temporary_message(destination, content=None, embed=None, view=None, delay=60):
+async def send_temporary_message(destination, content=None, embed=None, view=None, delay=30):
     try:
         # Ask Discord to return the actual message object
         if view:
