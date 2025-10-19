@@ -993,6 +993,8 @@ class StatsDropdown(discord.ui.View):
                          (club_name or f"Club {club_id}").upper())
         final_msg = await interaction.edit_original_response(content=None, embed=embed, view=view)
 
+        await log_command_output(interaction, "stats", final_msg)
+
         # 🔔 auto-delete the final embed after N seconds
         asyncio.create_task(delete_after_delay(final_msg, 60))
         
@@ -2003,6 +2005,8 @@ async def stats_command(interaction: discord.Interaction, club: str):
 
         view = PrintRecordButton(data["stats"], (club_name or f"Club {club_id}").upper())
         await msg.edit(content=None, embed=embed, view=view)
+
+        await log_command_output(interaction, "stats", msg)
 
         # 🔔 auto-delete after N seconds
         asyncio.create_task(delete_after_delay(msg, 60))
