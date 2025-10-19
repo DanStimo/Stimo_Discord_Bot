@@ -75,9 +75,13 @@ DEFAULT_TZ = ZoneInfo("Europe/London")
 
 # --- Intents ---
 intents = discord.Intents.default()
-intents.members = True  # ✅ REQUIRED for on_member_join and member lookups
+intents.members = True
+intents.message_content = True
 client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
+
+# Channel where typing a club name without a command should trigger stats
+FREE_STATS_CHANNEL_ID = 1362795404185305129
 
 CREST_URL_TEMPLATE = os.getenv("CREST_URL_TEMPLATE", "").strip()
 
@@ -294,6 +298,58 @@ async def on_member_join(member: discord.Member):
 
     except Exception as e:
         print(f"[ERROR] Failed to send welcome embed or add reaction: {e}")
+
+@client.event
+async def on_message(message: discord.Message):
+    # Ignore bots and DMs
+    if message.author.bot or not message.guild:
+        return
+
+    # Only react in the target channel
+    if message.channel.id != FREE_STATS_CHANNEL_ID:
+        return
+
+    content = (message.content or "").strip()
+    # Ignore obvious commands or empty/emoji-only posts
+    if not content or content.startswith(("/", "!", ".", "?")):
+        return
+
+    # Optional: keep it sane
+    if len(content) < 2 or len(content) > 64:
+        return
+
+    try:
+        # Quick typing indicator
+        async with message.channel.typing():
+            # If they typed a clubId directly
+            if content.isdigit():
+                club_id = content
+                # Try to enrich name via EA search (best effort)
+                found = await search_clubs_ea(content)
+                club_name = str(found[0]["clubInfo"]["name"]) if found else f"Club {club_id}"
+                await send_stats_message_to_channel(message.channel, club_id, club_name)
+                return
+
+            # Otherwise search by name (same endpoint you use elsewhere)
+            matches = await search_clubs_ea(content)  # reuses your robust search
+            if not matches:
+                m = await message.channel.send("No matching clubs found.")
+                asyncio.create_task(delete_after_delay(m, 15))
+                return
+
+            # One exact hit → show stats
+            if len(matches) == 1:
+                c = matches[0]["clubInfo"]
+                await send_stats_message_to_channel(message.channel, str(c["clubId"]), c["name"])
+                return
+
+            # Multiple hits → show a selector that edits in place
+            view = FreeStatsDropdown(matches)
+            m = await message.channel.send("Multiple clubs found. Please select:", view=view)
+            asyncio.create_task(delete_after_delay(m, 90))
+
+    except Exception as e:
+        print(f"[ERROR] free-typed stats failed: {e}")
         
 # Load or initialize club mapping
 try:
@@ -1092,6 +1148,53 @@ class StatsDropdown(discord.ui.View):
 
         # 🔔 auto-delete the final embed after N seconds
         asyncio.create_task(delete_after_delay(final_msg, 60))
+
+class FreeStatsDropdown(discord.ui.View):
+    def __init__(self, results: list[dict]):
+        super().__init__(timeout=90)
+        self.results = results
+        options = [
+            discord.SelectOption(label=r["clubInfo"]["name"], value=str(r["clubInfo"]["clubId"]))
+            for r in results[:25]
+        ]
+        options.append(discord.SelectOption(label="None of these", value="none"))
+
+        select = discord.ui.Select(placeholder="Choose a club…", options=options, min_values=1, max_values=1)
+        select.callback = self._on_select
+        self.add_item(select)
+
+    async def _on_select(self, interaction: discord.Interaction):
+        value = self.children[0].values[0]
+        if value == "none":
+            await interaction.response.edit_message(content="Selection cancelled.", view=None)
+            asyncio.create_task(delete_after_delay(interaction.message, 60))
+            return
+
+        chosen = next((c for c in self.results if str(c["clubInfo"]["clubId"]) == str(value)), None)
+        if not chosen:
+            await interaction.response.edit_message(content="Could not find that club.", view=None)
+            asyncio.create_task(delete_after_delay(interaction.message, 60))
+            return
+
+        club_id = str(chosen["clubInfo"]["clubId"])
+        club_name = chosen["clubInfo"]["name"]
+
+        await interaction.response.edit_message(content="⏳ Fetching club stats…", view=None)
+        # Replace the “picker” with the final stats embed
+        data = await fetch_all_stats_for_club(club_id)
+        embed = build_stats_embed(club_id, club_name, data)
+        view = PrintRecordButton(
+            {
+                "matchesPlayed": data["stats"].get("matchesPlayed"),
+                "wins": data["stats"].get("wins"),
+                "draws": data["stats"].get("draws"),
+                "losses": data["stats"].get("losses"),
+                "skillRating": data["stats"].get("skillRating"),
+            },
+            (club_name or f"Club {club_id}").upper()
+        )
+        await interaction.message.edit(content=None, embed=embed, view=view)
+        asyncio.create_task(delete_after_delay(interaction.message, 60))
         
 class LastMatchDropdown(discord.ui.Select):
     def __init__(self, interaction, options, club_data):
@@ -1373,6 +1476,22 @@ class RoleMemberSelect(discord.ui.Select):
         
         embed = make_lineup_embed(self.lp)
         await safe_interaction_edit(interaction, embed=embed, view=view)
+
+async def send_stats_message_to_channel(channel: discord.TextChannel, club_id: str, club_name: str):
+    data = await fetch_all_stats_for_club(club_id)
+    embed = build_stats_embed(club_id, club_name, data)
+    view = PrintRecordButton(
+        {
+            "matchesPlayed": data["stats"].get("matchesPlayed"),
+            "wins": data["stats"].get("wins"),
+            "draws": data["stats"].get("draws"),
+            "losses": data["stats"].get("losses"),
+            "skillRating": data["stats"].get("skillRating"),
+        },
+        (club_name or f"Club {club_id}").upper(),
+    )
+    msg = await channel.send(embed=embed, view=view)
+    asyncio.create_task(delete_after_delay(msg, 60))
 
 async def auto_post_lineup_in_thread(ev: dict, thread: discord.Thread, formation: str | None = None):
     """
