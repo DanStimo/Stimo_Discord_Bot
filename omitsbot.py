@@ -379,6 +379,50 @@ async def search_clubs_ea(query: str) -> list:
     
 from datetime import datetime, timezone
 
+async def get_current_squad(club_id: str) -> list[str]:
+    """
+    Fetch current squad/member list from the members/stats endpoint (or sensible fallbacks).
+    Returns a list of player names (may be empty).
+    """
+    club_id = str(club_id)
+    try:
+        # try the members/stats endpoint you referenced
+        data = await _ea_get_json(
+            "https://proclubs.ea.com/api/fc/members/stats",
+            {"platform": PLATFORM, "clubId": club_id}
+        ) or {}
+
+        # common shapes:
+        # 1) dict with "members": [ { "name": "...", ...}, ... ]
+        if isinstance(data, dict):
+            members = data.get("members") or data.get("players") or []
+        # 2) list of members
+        elif isinstance(data, list):
+            members = data
+        else:
+            members = []
+
+        names = []
+        for m in members:
+            if not isinstance(m, dict):
+                continue
+            # try common name keys (robust)
+            name = m.get("name") or m.get("playername") or m.get("displayName") or m.get("playerName")
+            if name:
+                names.append(str(name))
+        # unique & preserve order
+        seen = set()
+        out = []
+        for n in names:
+            if n not in seen:
+                seen.add(n)
+                out.append(n)
+        return out
+
+    except Exception as e:
+        print(f"[ERROR] Failed to fetch current squad for {club_id}: {e}")
+        return []
+
 async def get_last_played_timestamp(club_id: str | int) -> datetime | None:
     """
     Returns a timezone-aware datetime of the club's most recent match
@@ -701,6 +745,7 @@ async def fetch_all_stats_for_club(club_id: str):
     rank_task = asyncio.create_task(get_club_rank(club_id))
     last5_task = asyncio.create_task(get_last5_matches_summary(club_id))
     teamid_task = asyncio.create_task(get_team_id_for_club(club_id))
+    squad_task = asyncio.create_task(get_current_squad(club_id))
 
     stats = await stats_task
     recent_form = await form_task
@@ -708,6 +753,7 @@ async def fetch_all_stats_for_club(club_id: str):
     rank = await rank_task
     last5 = await last5_task
     team_id = await teamid_task
+    current_squad = await squad_task
 
     rank_display = f"#{rank}" if (isinstance(rank, int) or (isinstance(rank, str) and str(rank).isdigit())) else "Unranked"
     days_display = f"{days_since} day(s) ago" if days_since is not None else "—"
@@ -719,7 +765,8 @@ async def fetch_all_stats_for_club(club_id: str):
         "recent_form": form_string,
         "last5": last5 or "No recent matches",
         "days_display": days_display,
-        "teamId": team_id,  # NEW
+        "teamId": team_id,
+        "current_squad": current_squad,
     }
 
 # Helpers + embed builder for /stats
@@ -796,6 +843,21 @@ def build_stats_embed(club_id: str, club_name: str | None, data: dict) -> discor
     # Row 5 — full width (Last 5)
     fields.append(_field("Last 5 Matches", last5, inline=False))
 
+    # Row 6 — Current Squad (full width)
+    squad_list = data.get("current_squad", []) or []
+    if squad_list:
+        squad_text = ", ".join(squad_list)
+        # truncate if too long for embed field (Discord limit ≈1024 chars)
+        if len(squad_text) > 1000:
+            allowed = 980
+            truncated = squad_text[:allowed].rsplit(",", 1)[0]
+            omitted = len(squad_list) - len(truncated.split(","))
+            squad_text = f"{truncated} … (+{omitted} more)"
+    else:
+        squad_text = "—"
+
+    fields.append(_field("Current Squad", squad_text, inline=False))
+
     # Row 6 — two columns
     fields += [
         _field("Days Since Last Match", f"🗓️ {days_display}", inline=True),
@@ -806,7 +868,7 @@ def build_stats_embed(club_id: str, club_name: str | None, data: dict) -> discor
     for f in fields:
         embed.add_field(**f)
 
-    embed.set_footer(text="EA Pro Clubs — Combined Club Stats")
+    embed.set_footer(text="EAFC — Pro Clubs Stats")
     return embed
 
 async def rotate_presence():
