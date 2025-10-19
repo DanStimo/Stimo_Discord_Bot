@@ -333,6 +333,20 @@ async def log_free_stats(message: discord.Message, *, query: str, resolved: str 
     except Exception as e:
         print(f"[WARN] Failed to log free-stats: {e}")
 
+async def log_stats_embed_for_request(
+    *, guild: discord.Guild, author: discord.abc.User, origin_channel: discord.TextChannel, embed: discord.Embed
+):
+    """
+    Send a log entry that visually matches the /stats output:
+    a header like '/stats by @User in #channel:' + the stats embed.
+    """
+    log_ch = guild.get_channel(LOG_CHANNEL_ID) or (client.get_channel(LOG_CHANNEL_ID) if guild else None)
+    if not log_ch:
+        print(f"[WARN] Log channel {LOG_CHANNEL_ID} not found")
+        return
+    header = f"/stats by {author.mention} in {origin_channel.mention}:"
+    await log_ch.send(content=header, embed=embed)
+
 @client.event
 async def on_message(message: discord.Message):
     if message.author.bot or not message.guild:
@@ -359,7 +373,7 @@ async def on_message(message: discord.Message):
 
                 # delete the user's post so our response "replaces" it
                 asyncio.create_task(safe_delete(message))
-                await send_stats_message_to_channel(message.channel, club_id, club_name)
+                await send_stats_message_to_channel(message.channel, club_id, club_name, origin_message=message)
                 return
 
             # Search by name
@@ -381,7 +395,7 @@ async def on_message(message: discord.Message):
                 await log_free_stats(message, query=content, resolved=f"{c['name']} (ID {c['clubId']})")
 
                 asyncio.create_task(safe_delete(message))
-                await send_stats_message_to_channel(message.channel, str(c["clubId"]), c["name"])
+                await send_stats_message_to_channel(message.channel, str(c["clubId"]), c["name"], origin_message=message)
                 return
 
             # 🔵 LOG: multiple matches, unresolved selection
@@ -389,7 +403,7 @@ async def on_message(message: discord.Message):
 
             # Multiple matches → present selector; delete the original user message
             asyncio.create_task(safe_delete(message))
-            view = FreeStatsDropdown(matches, original_query=content)
+            view = FreeStatsDropdown(matches, original_query=content, request_message=message)
             m = await message.channel.send("Multiple clubs found. Please select:", view=view)
             asyncio.create_task(delete_after_delay(m, 90))
 
@@ -1195,10 +1209,11 @@ class StatsDropdown(discord.ui.View):
         asyncio.create_task(delete_after_delay(final_msg, 60))
 
 class FreeStatsDropdown(discord.ui.View):
-    def __init__(self, results: list[dict], original_query: str):
+    def __init__(self, results: list[dict], original_query: str, request_message: discord.Message):
         super().__init__(timeout=90)
         self.results = results
-        self.original_query = original_query  # 👈 keep what the user typed
+        self.original_query = original_query
+        self.request_message = request_message
 
         options = [
             discord.SelectOption(label=r["clubInfo"]["name"], value=str(r["clubInfo"]["clubId"]))
@@ -1244,9 +1259,18 @@ class FreeStatsDropdown(discord.ui.View):
         # turn the dropdown message → loading text
         loading_msg = await interaction.edit_original_response(content="⏳ Fetching club stats…", view=None)
 
-        # fetch + render
+       # fetch + render
         data = await fetch_all_stats_for_club(club_id)
         embed = build_stats_embed(club_id, club_name, data)
+        
+        # 🔵 NEW: mirror the card to your log channel with a header like "/stats by ... in #..."
+        await log_stats_embed_for_request(
+            guild=self.request_message.guild,
+            author=self.request_message.author,
+            origin_channel=self.request_message.channel,
+            embed=embed
+        )
+        
         view = PrintRecordButton(
             {
                 "matchesPlayed": data["stats"].get("matchesPlayed"),
@@ -1541,7 +1565,9 @@ class RoleMemberSelect(discord.ui.Select):
         embed = make_lineup_embed(self.lp)
         await safe_interaction_edit(interaction, embed=embed, view=view)
 
-async def send_stats_message_to_channel(channel: discord.TextChannel, club_id: str, club_name: str):
+async def send_stats_message_to_channel(
+    channel: discord.TextChannel, club_id: str, club_name: str, *, origin_message: discord.Message | None = None
+):
     data = await fetch_all_stats_for_club(club_id)
     embed = build_stats_embed(club_id, club_name, data)
     view = PrintRecordButton(
@@ -1556,6 +1582,15 @@ async def send_stats_message_to_channel(channel: discord.TextChannel, club_id: s
     )
     msg = await channel.send(embed=embed, view=view)
     asyncio.create_task(delete_after_delay(msg, 60))
+
+    # Mirror to the log channel with a header that looks like the slash command
+    if origin_message:
+        await log_stats_embed_for_request(
+            guild=origin_message.guild,
+            author=origin_message.author,
+            origin_channel=origin_message.channel,
+            embed=embed,
+        )
 
 async def auto_post_lineup_in_thread(ev: dict, thread: discord.Thread, formation: str | None = None):
     """
