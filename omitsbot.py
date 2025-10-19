@@ -299,52 +299,57 @@ async def on_member_join(member: discord.Member):
     except Exception as e:
         print(f"[ERROR] Failed to send welcome embed or add reaction: {e}")
 
+async def safe_delete(msg: discord.Message, delay: float | None = None):
+    try:
+        if delay:
+            await asyncio.sleep(delay)
+        await msg.delete()
+    except (discord.Forbidden, discord.NotFound, discord.HTTPException):
+        pass
+
 @client.event
 async def on_message(message: discord.Message):
-    # Ignore bots and DMs
     if message.author.bot or not message.guild:
         return
-
-    # Only react in the target channel
     if message.channel.id != FREE_STATS_CHANNEL_ID:
         return
 
     content = (message.content or "").strip()
-    # Ignore obvious commands or empty/emoji-only posts
     if not content or content.startswith(("/", "!", ".", "?")):
         return
-
-    # Optional: keep it sane
     if len(content) < 2 or len(content) > 64:
         return
 
     try:
-        # Quick typing indicator
         async with message.channel.typing():
             # If they typed a clubId directly
             if content.isdigit():
                 club_id = content
-                # Try to enrich name via EA search (best effort)
                 found = await search_clubs_ea(content)
                 club_name = str(found[0]["clubInfo"]["name"]) if found else f"Club {club_id}"
+                # delete the user's post so our response "replaces" it
+                asyncio.create_task(safe_delete(message))
                 await send_stats_message_to_channel(message.channel, club_id, club_name)
                 return
 
-            # Otherwise search by name (same endpoint you use elsewhere)
-            matches = await search_clubs_ea(content)  # reuses your robust search
+            # Search by name
+            matches = await search_clubs_ea(content)
             if not matches:
+                # delete the user’s message and show a short-lived note
+                asyncio.create_task(safe_delete(message))
                 m = await message.channel.send("No matching clubs found.")
                 asyncio.create_task(delete_after_delay(m, 15))
                 return
 
-            # One exact hit → show stats
             if len(matches) == 1:
                 c = matches[0]["clubInfo"]
+                asyncio.create_task(safe_delete(message))
                 await send_stats_message_to_channel(message.channel, str(c["clubId"]), c["name"])
                 return
 
-            # Multiple hits → show a selector that edits in place
-            view = FreeStatsDropdown(matches)
+            # Multiple matches → present selector; delete the original user message
+            asyncio.create_task(safe_delete(message))
+            view = FreeStatsDropdown(matches)  # your dropdown class from before
             m = await message.channel.send("Multiple clubs found. Please select:", view=view)
             asyncio.create_task(delete_after_delay(m, 90))
 
