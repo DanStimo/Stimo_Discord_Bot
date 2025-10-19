@@ -309,30 +309,6 @@ async def safe_delete(msg: discord.Message, delay: float | None = None):
     except (discord.Forbidden, discord.NotFound, discord.HTTPException):
         pass
 
-async def log_free_stats(message: discord.Message, *, query: str, resolved: str | None = None):
-    """Log a free-typed stats lookup to LOG_CHANNEL_ID."""
-    try:
-        log_ch = message.guild.get_channel(LOG_CHANNEL_ID) or client.get_channel(LOG_CHANNEL_ID)
-        if not log_ch:
-            print(f"[WARN] Free-stats log channel {LOG_CHANNEL_ID} not found")
-            return
-
-        desc_lines = [f"**User**: {message.author.mention}",
-                      f"**Channel**: {message.channel.mention}",
-                      f"**Query**: `{query}`"]
-        if resolved:
-            desc_lines.append(f"**Resolved**: `{resolved}`")
-
-        embed = discord.Embed(
-            title="📊 Free stats lookup",
-            description="\n".join(desc_lines),
-            timestamp=message.created_at,
-            color=discord.Color.dark_grey()
-        )
-        await log_ch.send(embed=embed)
-    except Exception as e:
-        print(f"[WARN] Failed to log free-stats: {e}")
-
 async def log_stats_embed_for_request(
     *, guild: discord.Guild, author: discord.abc.User, origin_channel: discord.TextChannel, embed: discord.Embed
 ):
@@ -369,7 +345,7 @@ async def on_message(message: discord.Message):
                 club_name = str(found[0]["clubInfo"]["name"]) if found else f"Club {club_id}"
 
                 # 🔵 LOG: numeric path
-                await log_free_stats(message, query=content, resolved=f"{club_name} (ID {club_id})")
+                #await log_free_stats(message, query=content, resolved=f"{club_name} (ID {club_id})")
 
                 # delete the user's post so our response "replaces" it
                 asyncio.create_task(safe_delete(message))
@@ -380,7 +356,7 @@ async def on_message(message: discord.Message):
             matches = await search_clubs_ea(content)
             if not matches:
                 # 🔵 LOG: no matches
-                await log_free_stats(message, query=content, resolved="no matches")
+                #await log_free_stats(message, query=content, resolved="no matches")
 
                 # delete the user’s message and show a short-lived note
                 asyncio.create_task(safe_delete(message))
@@ -392,14 +368,14 @@ async def on_message(message: discord.Message):
                 c = matches[0]["clubInfo"]
 
                 # 🔵 LOG: single match resolved
-                await log_free_stats(message, query=content, resolved=f"{c['name']} (ID {c['clubId']})")
+                #await log_free_stats(message, query=content, resolved=f"{c['name']} (ID {c['clubId']})")
 
                 asyncio.create_task(safe_delete(message))
                 await send_stats_message_to_channel(message.channel, str(c["clubId"]), c["name"], origin_message=message)
                 return
 
             # 🔵 LOG: multiple matches, unresolved selection
-            await log_free_stats(message, query=content, resolved="multiple matches")
+            #await log_free_stats(message, query=content, resolved="multiple matches")
 
             # Multiple matches → present selector; delete the original user message
             asyncio.create_task(safe_delete(message))
@@ -1229,7 +1205,7 @@ class FreeStatsDropdown(discord.ui.View):
         value = self.children[0].values[0]
         if value == "none":
             # 🔵 LOG: user cancelled the selection
-            await log_free_stats(interaction.message, query=self.original_query, resolved="cancelled")
+            #await log_free_stats(interaction.message, query=self.original_query, resolved="cancelled")
 
             msg = await interaction.response.edit_message(content="Selection cancelled.", view=None)
             asyncio.create_task(delete_after_delay(msg, 60))
@@ -1238,7 +1214,7 @@ class FreeStatsDropdown(discord.ui.View):
         chosen = next((c for c in self.results if str(c["clubInfo"]["clubId"]) == str(value)), None)
         if not chosen:
             # 🔵 LOG: selection not found (edge case)
-            await log_free_stats(interaction.message, query=self.original_query, resolved="selection not found")
+            #await log_free_stats(interaction.message, query=self.original_query, resolved="selection not found")
 
             msg = await interaction.response.edit_message(content="Could not find that club.", view=None)
             asyncio.create_task(delete_after_delay(msg, 60))
@@ -1248,11 +1224,7 @@ class FreeStatsDropdown(discord.ui.View):
         club_name = chosen["clubInfo"]["name"]
 
         # 🔵 LOG: final selection resolved
-        await log_free_stats(
-            interaction.message,
-            query=self.original_query,
-            resolved=f"{club_name} (ID {club_id})"
-        )
+        #await log_free_stats(interaction.message, query=self.original_query, resolved=f"{club_name} (ID {club_id})")
 
         await interaction.response.defer()
 
