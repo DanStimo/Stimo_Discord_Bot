@@ -796,10 +796,7 @@ def build_stats_embed(club_id: str, club_name: str | None, data: dict) -> discor
     # Row 5 — full width (Last 5)
     fields.append(_field("Last 5 Matches", last5, inline=False))
 
-    # Row 6 — full width (Recent Form)
-    fields.append(_field("Recent Form", recent_form, inline=False))
-
-    # Row 7 — two columns
+    # Row 6 — two columns
     fields += [
         _field("Days Since Last Match", f"🗓️ {days_display}", inline=True),
         _field("Club ID", f"`{club_id}`", inline=True),
@@ -2004,11 +2001,10 @@ async def stats_command(interaction: discord.Interaction, club: str):
             embed = discord.Embed(title="❌ Error", description="Could not fetch all stats for this club.", color=discord.Color.red())
 
         view = PrintRecordButton(data["stats"], (club_name or f"Club {club_id}").upper())
+        
         await msg.edit(content=None, embed=embed, view=view)
-
+        msg = await interaction.channel.fetch_message(msg.id)
         await log_command_output(interaction, "stats", msg)
-
-        # 🔔 auto-delete after N seconds
         asyncio.create_task(delete_after_delay(msg, 60))
 
     except Exception as e:
