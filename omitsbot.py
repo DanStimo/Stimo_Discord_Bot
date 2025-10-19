@@ -900,7 +900,7 @@ async def safe_interaction_respond(interaction: discord.Interaction, **kwargs):
         print(f"[ERROR] Failed to respond to interaction: {e}")
         return None
 
-async def send_temporary_message(destination, content=None, embed=None, view=None, delay=30):
+async def send_temporary_message(destination, content=None, embed=None, view=None, delay=60):
     try:
         # Ask Discord to return the actual message object
         if view:
@@ -994,7 +994,7 @@ class StatsDropdown(discord.ui.View):
         final_msg = await interaction.edit_original_response(content=None, embed=embed, view=view)
 
         # 🔔 auto-delete the final embed after N seconds
-        asyncio.create_task(delete_after_delay(final_msg, 180))
+        asyncio.create_task(delete_after_delay(final_msg, 60))
         
 class LastMatchDropdown(discord.ui.Select):
     def __init__(self, interaction, options, club_data):
@@ -1141,7 +1141,7 @@ async def fetch_and_display_last5(interaction, club_id, club_name="Club", origin
         asyncio.create_task(delete_after_delay(message))
 
 
-async def delete_after_delay(message, delay=180):
+async def delete_after_delay(message, delay=60):
     await asyncio.sleep(delay)
     try:
         await message.delete()
@@ -1705,7 +1705,7 @@ async def handle_lastmatch(interaction: discord.Interaction, club: str, from_dro
             await original_message.edit(content=None, embed=embed, view=None)
             await log_command_output(interaction, "lastmatch", original_message)
             async def delete_after_timeout():
-                await asyncio.sleep(180)
+                await asyncio.sleep(60)
                 try:
                     await original_message.delete()
                 except Exception as e:
@@ -1715,7 +1715,7 @@ async def handle_lastmatch(interaction: discord.Interaction, club: str, from_dro
             message = await interaction.followup.send(embed=embed)
             await log_command_output(interaction, "lastmatch", message)
             async def delete_after_timeout():
-                await asyncio.sleep(180)
+                await asyncio.sleep(60)
                 try:
                     await message.delete()
                 except Exception as e:
@@ -1986,7 +1986,7 @@ async def stats_command(interaction: discord.Interaction, club: str):
                 view = StatsDropdown(hits)  # this view will handle its own auto-delete (see step 3)
                 msg = await interaction.followup.send("Multiple clubs found. Please choose the correct one:", view=view)
                 # optional timeout cleanup for an unselected dropdown:
-                asyncio.create_task(delete_after_delay(msg, 180))
+                asyncio.create_task(delete_after_delay(msg, 60))
                 return
             club_id = str(hits[0]["clubInfo"]["clubId"])
             club_name = hits[0]["clubInfo"]["name"]
@@ -2005,7 +2005,7 @@ async def stats_command(interaction: discord.Interaction, club: str):
         await msg.edit(content=None, embed=embed, view=view)
 
         # 🔔 auto-delete after N seconds
-        asyncio.create_task(delete_after_delay(msg, 180))
+        asyncio.create_task(delete_after_delay(msg, 60))
 
     except Exception as e:
         print(f"[ERROR] /stats failed: {e}")
