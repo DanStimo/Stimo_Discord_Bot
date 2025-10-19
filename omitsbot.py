@@ -82,6 +82,8 @@ tree = app_commands.CommandTree(client)
 
 # Channel where typing a club name without a command should trigger stats
 FREE_STATS_CHANNEL_ID = 1362795404185305129
+# Channel where we log free-typed stats lookups
+LOG_CHANNEL_ID = 1383731281577246810
 
 CREST_URL_TEMPLATE = os.getenv("CREST_URL_TEMPLATE", "").strip()
 
@@ -307,6 +309,30 @@ async def safe_delete(msg: discord.Message, delay: float | None = None):
     except (discord.Forbidden, discord.NotFound, discord.HTTPException):
         pass
 
+async def log_free_stats(message: discord.Message, *, query: str, resolved: str | None = None):
+    """Log a free-typed stats lookup to LOG_CHANNEL_ID."""
+    try:
+        log_ch = message.guild.get_channel(LOG_CHANNEL_ID) or client.get_channel(LOG_CHANNEL_ID)
+        if not log_ch:
+            print(f"[WARN] Free-stats log channel {LOG_CHANNEL_ID} not found")
+            return
+
+        desc_lines = [f"**User**: {message.author.mention}",
+                      f"**Channel**: {message.channel.mention}",
+                      f"**Query**: `{query}`"]
+        if resolved:
+            desc_lines.append(f"**Resolved**: `{resolved}`")
+
+        embed = discord.Embed(
+            title="📊 Free stats lookup",
+            description="\n".join(desc_lines),
+            timestamp=message.created_at,
+            color=discord.Color.dark_grey()
+        )
+        await log_ch.send(embed=embed)
+    except Exception as e:
+        print(f"[WARN] Failed to log free-stats: {e}")
+
 @client.event
 async def on_message(message: discord.Message):
     if message.author.bot or not message.guild:
@@ -327,6 +353,10 @@ async def on_message(message: discord.Message):
                 club_id = content
                 found = await search_clubs_ea(content)
                 club_name = str(found[0]["clubInfo"]["name"]) if found else f"Club {club_id}"
+
+                # 🔵 LOG: numeric path
+                await log_free_stats(message, query=content, resolved=f"{club_name} (ID {club_id})")
+
                 # delete the user's post so our response "replaces" it
                 asyncio.create_task(safe_delete(message))
                 await send_stats_message_to_channel(message.channel, club_id, club_name)
@@ -335,6 +365,9 @@ async def on_message(message: discord.Message):
             # Search by name
             matches = await search_clubs_ea(content)
             if not matches:
+                # 🔵 LOG: no matches
+                await log_free_stats(message, query=content, resolved="no matches")
+
                 # delete the user’s message and show a short-lived note
                 asyncio.create_task(safe_delete(message))
                 m = await message.channel.send("No matching clubs found.")
@@ -343,13 +376,20 @@ async def on_message(message: discord.Message):
 
             if len(matches) == 1:
                 c = matches[0]["clubInfo"]
+
+                # 🔵 LOG: single match resolved
+                await log_free_stats(message, query=content, resolved=f"{c['name']} (ID {c['clubId']})")
+
                 asyncio.create_task(safe_delete(message))
                 await send_stats_message_to_channel(message.channel, str(c["clubId"]), c["name"])
                 return
 
+            # 🔵 LOG: multiple matches, unresolved selection
+            await log_free_stats(message, query=content, resolved="multiple matches")
+
             # Multiple matches → present selector; delete the original user message
             asyncio.create_task(safe_delete(message))
-            view = FreeStatsDropdown(matches)  # your dropdown class from before
+            view = FreeStatsDropdown(matches, original_query=content)
             m = await message.channel.send("Multiple clubs found. Please select:", view=view)
             asyncio.create_task(delete_after_delay(m, 90))
 
@@ -1155,9 +1195,11 @@ class StatsDropdown(discord.ui.View):
         asyncio.create_task(delete_after_delay(final_msg, 60))
 
 class FreeStatsDropdown(discord.ui.View):
-    def __init__(self, results: list[dict]):
+    def __init__(self, results: list[dict], original_query: str):
         super().__init__(timeout=90)
         self.results = results
+        self.original_query = original_query  # 👈 keep what the user typed
+
         options = [
             discord.SelectOption(label=r["clubInfo"]["name"], value=str(r["clubInfo"]["clubId"]))
             for r in results[:25]
@@ -1171,21 +1213,38 @@ class FreeStatsDropdown(discord.ui.View):
     async def _on_select(self, interaction: discord.Interaction):
         value = self.children[0].values[0]
         if value == "none":
-            await interaction.response.edit_message(content="Selection cancelled.", view=None)
-            asyncio.create_task(delete_after_delay(interaction.message, 60))
+            # 🔵 LOG: user cancelled the selection
+            await log_free_stats(interaction.message, query=self.original_query, resolved="cancelled")
+
+            msg = await interaction.response.edit_message(content="Selection cancelled.", view=None)
+            asyncio.create_task(delete_after_delay(msg, 60))
             return
 
         chosen = next((c for c in self.results if str(c["clubInfo"]["clubId"]) == str(value)), None)
         if not chosen:
-            await interaction.response.edit_message(content="Could not find that club.", view=None)
-            asyncio.create_task(delete_after_delay(interaction.message, 60))
+            # 🔵 LOG: selection not found (edge case)
+            await log_free_stats(interaction.message, query=self.original_query, resolved="selection not found")
+
+            msg = await interaction.response.edit_message(content="Could not find that club.", view=None)
+            asyncio.create_task(delete_after_delay(msg, 60))
             return
 
         club_id = str(chosen["clubInfo"]["clubId"])
         club_name = chosen["clubInfo"]["name"]
 
-        await interaction.response.edit_message(content="⏳ Fetching club stats…", view=None)
-        # Replace the “picker” with the final stats embed
+        # 🔵 LOG: final selection resolved
+        await log_free_stats(
+            interaction.message,
+            query=self.original_query,
+            resolved=f"{club_name} (ID {club_id})"
+        )
+
+        await interaction.response.defer()
+
+        # turn the dropdown message → loading text
+        loading_msg = await interaction.edit_original_response(content="⏳ Fetching club stats…", view=None)
+
+        # fetch + render
         data = await fetch_all_stats_for_club(club_id)
         embed = build_stats_embed(club_id, club_name, data)
         view = PrintRecordButton(
@@ -1198,8 +1257,8 @@ class FreeStatsDropdown(discord.ui.View):
             },
             (club_name or f"Club {club_id}").upper()
         )
-        await interaction.message.edit(content=None, embed=embed, view=view)
-        asyncio.create_task(delete_after_delay(interaction.message, 60))
+        final_msg = await interaction.edit_original_response(content=None, embed=embed, view=view)
+        asyncio.create_task(delete_after_delay(final_msg, 60))
         
 class LastMatchDropdown(discord.ui.Select):
     def __init__(self, interaction, options, club_data):
