@@ -21,7 +21,6 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 CLUB_ID = os.getenv("CLUB_ID", "167054")  # fallback/default
 PLATFORM = os.getenv("PLATFORM", "gen5")
 OFFSIDE_KEY = "offside.json"
-DEFAULT_LINEUP_FORMATION = os.getenv("DEFAULT_LINEUP_FORMATION", "3-5-2")
 
 MATCH_TYPE_LABELS = {
     "leagueMatch": "League",
@@ -1564,16 +1563,53 @@ async def send_stats_message_to_channel(
             embed=embed,
         )
 
-async def auto_post_lineup_in_thread(ev: dict, thread: discord.Thread, formation: str | None = None):
+async def auto_post_lineup_in_thread(ev: dict, thread: discord.Thread, formation: str):
     """
     Create a lineup inside the provided event thread, save it, and pin the message.
-    Uses the event's role (if any) to restrict assignments. Title = "<event name> Lineup".
+    Formation is REQUIRED (no default).
     """
     try:
-        # Resolve formation safely
-        formation_str = (formation or DEFAULT_LINEUP_FORMATION) or "4-2-3-1"
+        formation_str = (formation or "").strip()
         if formation_str not in FORMATIONS:
-            formation_str = next(iter(FORMATIONS.keys()), "4-2-3-1")
+            raise ValueError("Formation is required and must be a valid option.")
+
+        # Allocate lineup id
+        lid = lineups_store.get("next_id", 1)
+
+        lp = {
+            "id": lid,
+            "title": f"{ev.get('name')} Lineup",
+            "formation": formation_str,
+            "positions": _build_positions_for_formation(formation_str),
+            "role_id": ev.get("role_id"),
+            "channel_id": thread.id,
+            "message_id": None,
+            "creator_id": ev.get("creator_id"),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": None,
+            "finished_once": False,
+            "pinged_user_ids": [],
+            "kickoff_at": ev.get("datetime"),
+        }
+
+        embed = make_lineup_embed(lp)
+        view = LineupAssignView(lp, editor_id=lp["creator_id"] or 0)
+
+        sent = await thread.send(embed=embed, view=view)
+        view.message = sent
+
+        lp["message_id"] = sent.id
+        lineups_store.setdefault("lineups", {})[str(lid)] = lp
+        lineups_store["next_id"] = lid + 1
+        save_lineups_store()
+
+        try:
+            await sent.pin(reason="Auto-pinned lineup for event thread")
+        except Exception as pe:
+            print(f"[WARN] Could not pin lineup message: {pe}")
+
+    except Exception as e:
+        print(f"[ERROR] auto_post_lineup_in_thread failed: {e}")
 
         # Allocate lineup id
         lid = lineups_store.get("next_id", 1)
@@ -2785,15 +2821,18 @@ async def deletetemplate_command(interaction: discord.Interaction, template_name
     template_name="Template to use",
     date="Date (DD-MM-YYYY) — local to Europe/London",
     time="Time (HH:MM 24-hour) — local to Europe/London",
+    formation="Formation (required) for the lineup in the event thread",
     channel="Optional channel to post the event in (defaults to template channel or current channel)",
     role="Optional role to ping (overrides template's saved role)",
     stream="Optional Twitch channel or URL (overrides template stream)"
 )
+@app_commands.choices(formation=[app_commands.Choice(name=f, value=f) for f in FORMATIONS.keys()])
 async def createfromtemplate_command(
     interaction: discord.Interaction,
     template_name: str,
     date: str,
     time: str,
+    formation: app_commands.Choice[str],  # ✅ REQUIRED
     channel: discord.TextChannel = None,
     role: discord.Role = None,
     stream: str = None
@@ -2886,7 +2925,7 @@ async def createfromtemplate_command(
 
             # 🚀 Auto-create + pin a lineup inside the new event thread
             try:
-                await auto_post_lineup_in_thread(ev, thread)  # uses DEFAULT_LINEUP_FORMATION
+                await auto_post_lineup_in_thread(ev, thread, formation.value)  # uses DEFAULT_LINEUP_FORMATION
             except Exception as le:
                 print(f"[WARN] Failed to auto-create lineup in thread: {le}")
 
@@ -2917,20 +2956,24 @@ async def createfromtemplate_command(
     description="Event description",
     date="Date (DD-MM-YYYY) — local to Europe/London",
     time="Time (HH:MM 24-hour) — local to Europe/London",
+    formation="Formation (required) for the lineup in the event thread",
     channel="Channel to post the event in (optional, defaults to current channel)",
     role="Optional role to ping (will be spoilered)",
-    stream="Optional Twitch channel or URL (e.g. ninja or https://twitch.tv/ninja)"  # NEW
+    stream="Optional Twitch channel or URL (e.g. ninja or https://twitch.tv/ninja)"
 )
+@app_commands.choices(formation=[app_commands.Choice(name=f, value=f) for f in FORMATIONS.keys()])
 async def createevent_command(
     interaction: discord.Interaction,
     name: str,
     description: str,
     date: str,
     time: str,
+    formation: app_commands.Choice[str],  # ✅ REQUIRED
     channel: discord.TextChannel = None,
     role: discord.Role = None,
     stream: str = None
 ):
+    
     await interaction.response.defer(ephemeral=True)
     member = interaction.user
     if not isinstance(member, discord.Member):
@@ -3002,7 +3045,7 @@ async def createevent_command(
 
             # 🚀 Auto-create + pin a lineup inside the new event thread
             try:
-                await auto_post_lineup_in_thread(ev, thread)  # uses DEFAULT_LINEUP_FORMATION
+                await auto_post_lineup_in_thread(ev, thread, formation.value)  # uses DEFAULT_LINEUP_FORMATION
             except Exception as le:
                 print(f"[WARN] Failed to auto-create lineup in thread: {le}")
 
