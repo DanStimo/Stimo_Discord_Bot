@@ -2807,8 +2807,18 @@ class AttendLaterTimeSelect(discord.ui.Select):
 
         # Thread membership (treat like attend/maybe)
         asyncio.create_task(add_user_to_event_thread(self.ev, self.user_id))
-
-        await interaction.response.edit_message(content="✅ Saved! You’re marked as Attend Later.", view=None)
+        
+        # Acknowledge the interaction without posting/editing visible text,
+        # then delete the dropdown prompt message.
+        await interaction.response.defer()
+        try:
+            await interaction.message.delete()
+        except Exception:
+            # Fallback: at least remove the UI and clear the message
+            try:
+                await interaction.edit_original_response(content="", view=None)
+            except Exception:
+                pass
 
 class AttendLaterTimeView(discord.ui.View):
     def __init__(self, ev: dict, user_id: int):
