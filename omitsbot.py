@@ -1431,6 +1431,11 @@ class PositionSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction):
         view: "LineupAssignView" = self.view  # type: ignore
+    
+        if getattr(view, "_formation_change_mode", False):
+            await interaction.response.send_message("Pick a new formation first.", ephemeral=True)
+            return
+    
         view.current_index = int(self.values[0])
     
         # Keep the picked position visible + selected
@@ -1465,6 +1470,25 @@ class PlayerSelect(discord.ui.UserSelect):
                     ephemeral=True
                 )
                 return
+
+class FormationSelect(discord.ui.Select):
+    def __init__(self):
+        options = [
+            discord.SelectOption(label=f, value=f)
+            for f in FORMATIONS.keys()
+        ]
+        super().__init__(
+            placeholder="Select a new formation…",
+            options=options,
+            min_values=1,
+            max_values=1
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        view: "LineupAssignView" = self.view  # type: ignore
+        new_formation = self.values[0]
+
+        await view.apply_new_formation(interaction, new_formation)        
 
         # Assign and update
         self.lp["positions"][position_index]["user_id"] = picked.id
@@ -1668,6 +1692,10 @@ class LineupAssignView(discord.ui.View):
         # Always include the position picker
         self.add_item(PositionSelect(lp))
 
+        # Formation Changer
+        self._formation_change_mode: bool = False
+        self._formation_select: FormationSelect | None = None
+
         # Decide which player picker to use
         role_id = lp.get("role_id")
         ch = client.get_channel(lp.get("channel_id"))
@@ -1751,6 +1779,81 @@ class LineupAssignView(discord.ui.View):
                     child.placeholder = "Choose a position to assign..."
                 child.options = _position_options_from_lp(self.lp, selected_index=selected)
                 break
+
+    def _set_assignment_controls_enabled(self, enabled: bool):
+        """Enable/disable position/player picking (and related buttons) as a group."""
+        for child in self.children:
+            # Leave formation dropdown alone (handled separately)
+            if isinstance(child, FormationSelect):
+                continue
+    
+            # Disable the assignment UI while waiting for formation selection
+            if isinstance(child, (PositionSelect, PlayerSelect, RoleMemberSelect, self._PrevButton, self._NextButton, discord.ui.Button)):
+                # But keep the "Change Formation" button enabled so they can re-open it if needed
+                if isinstance(child, discord.ui.Button) and getattr(child, "custom_id", None) == "change_formation_btn":
+                    child.disabled = False
+                else:
+                    child.disabled = not enabled
+    
+    async def enter_change_formation_mode(self, interaction: discord.Interaction):
+        """Clear current assignments and force selecting a new formation before assigning again."""
+        # Clear all assigned players
+        for p in self.lp.get("positions", []):
+            p["user_id"] = None
+        self.current_index = None
+    
+        self.lp["updated_at"] = datetime.now(timezone.utc).isoformat()
+        lineups_store["lineups"][str(self.lp["id"])] = self.lp
+        save_lineups_store()
+    
+        # Add dropdown if missing
+        if not any(isinstance(c, FormationSelect) for c in self.children):
+            self._formation_select = FormationSelect()
+            # Put it at the top-ish so it’s obvious
+            self.add_item(self._formation_select)
+    
+        self._formation_change_mode = True
+        self._set_assignment_controls_enabled(False)
+    
+        embed = make_lineup_embed(self.lp)
+        # Optional: add a hint line
+        embed.description = (embed.description or "") + "\n\n⚠️ **Pick a new formation to continue.**"
+        await safe_interaction_edit(interaction, embed=embed, view=self)
+    
+    async def apply_new_formation(self, interaction: discord.Interaction, formation: str):
+        """Apply a formation, rebuild positions, remove formation dropdown, re-enable assignments."""
+        formation = (formation or "").strip()
+        if formation not in FORMATIONS:
+            await interaction.response.send_message("❌ Invalid formation.", ephemeral=True)
+            return
+    
+        # Set new formation + rebuild positions (all unassigned)
+        self.lp["formation"] = formation
+        self.lp["positions"] = _build_positions_for_formation(formation)
+        self.lp["updated_at"] = datetime.now(timezone.utc).isoformat()
+    
+        lineups_store["lineups"][str(self.lp["id"])] = self.lp
+        save_lineups_store()
+    
+        # Exit formation-change mode
+        self._formation_change_mode = False
+        self.current_index = None
+    
+        # Remove the formation dropdown from the view
+        for child in list(self.children):
+            if isinstance(child, FormationSelect):
+                self.remove_item(child)
+    
+        # Refresh position dropdown options for the new positions list
+        self.refresh_position_options(keep_selected=False)
+        self._reset_player_placeholder()
+    
+        # Re-enable assignment controls
+        self._set_assignment_controls_enabled(True)
+    
+        embed = make_lineup_embed(self.lp)
+        await safe_interaction_edit(interaction, embed=embed, view=self)
+        
                 
     # ---------- Permissions + your existing buttons ----------
 
@@ -1803,6 +1906,10 @@ class LineupAssignView(discord.ui.View):
         # Update the embed in-place
         embed = make_lineup_embed(self.lp)
         await safe_interaction_edit(interaction, embed=embed, view=self)
+
+    @discord.ui.button(label="Change Formation", style=discord.ButtonStyle.primary, custom_id="change_formation_btn")
+    async def change_formation(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.enter_change_formation_mode(interaction)
 
     @discord.ui.button(label="Finish", style=discord.ButtonStyle.success)
     async def finish(self, interaction: discord.Interaction, button: discord.ui.Button):
