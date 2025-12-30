@@ -1474,10 +1474,7 @@ class PlayerSelect(discord.ui.UserSelect):
 
 class FormationSelect(discord.ui.Select):
     def __init__(self):
-        options = [
-            discord.SelectOption(label=f, value=f)
-            for f in FORMATIONS.keys()
-        ]
+        options = [discord.SelectOption(label=f, value=f) for f in FORMATIONS.keys()]
         super().__init__(
             placeholder="Select a new formation…",
             options=options,
@@ -1489,23 +1486,9 @@ class FormationSelect(discord.ui.Select):
         view: "LineupAssignView" = self.view  # type: ignore
         new_formation = self.values[0]
 
-        await view.apply_new_formation(interaction, new_formation)        
-
-        # Assign and update
-        self.lp["positions"][position_index]["user_id"] = picked.id
-        self.lp["updated_at"] = datetime.now(timezone.utc).isoformat()
-        lineups_store["lineups"][str(self.lp["id"])] = self.lp
-        save_lineups_store()
-        
-        # Reflect the assignment, then reset both dropdowns to defaults
-        view.refresh_position_options(keep_selected=True)  # briefly keep the highlight
-        view.current_index = None
-        view.refresh_position_options(keep_selected=False)
-        view._reset_player_placeholder()
-        
-        # Refresh embed
-        embed = make_lineup_embed(self.lp)
-        await safe_interaction_edit(interaction, embed=embed, view=view)
+        # FormationSelect should ONLY apply the formation.
+        # apply_new_formation() should rebuild positions, clear assignments, save, and refresh the embed/view.
+        await view.apply_new_formation(interaction, new_formation)
 
 class RoleMemberSelect(discord.ui.Select):
     def __init__(self, lp: dict, members: list[discord.Member], page: int = 0, per_page: int = 25):
