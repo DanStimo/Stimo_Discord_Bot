@@ -68,7 +68,8 @@ EVENTS_FILE = os.getenv("EVENTS_FILE", "events.json")
 TEMPLATES_FILE = os.getenv("TEMPLATES_FILE", "templates.json")
 ATTEND_EMOJI = "✅"
 ABSENT_EMOJI = "❌"
-MAYBE_EMOJI = "🤷"
+MAYBE_EMOJI  = "🤷"
+LATE_EMOJI   = "🕒"
 EVENT_EMBED_COLOR_HEX = os.getenv("EVENT_EMBED_COLOR_HEX", "#3498DB")
 DEFAULT_TZ = ZoneInfo("Europe/London")
 
@@ -2663,9 +2664,33 @@ def make_event_embed(ev: dict) -> discord.Embed:
             return "—"
         return "\n".join(f"<@{uid}>" for uid in user_ids)
 
-    embed.add_field(name=f"{ATTEND_EMOJI} Attend", value=users_to_text(ev.get("attend", [])), inline=True)
+    def late_to_text(ev: dict) -> str:
+        late_map = ev.get("attend_later_times") or {}
+        if not late_map:
+            return ""
+        lines = []
+        for uid_str, iso in late_map.items():
+            try:
+                uid = int(uid_str)
+            except Exception:
+                continue
+            try:
+                dt = datetime.fromisoformat(iso).astimezone(timezone.utc)
+                lines.append(f"<@{uid}> — {LATE_EMOJI} {discord.utils.format_dt(dt, style='t')}")
+            except Exception:
+                lines.append(f"<@{uid}> — {LATE_EMOJI} (time set)")
+        return "\n".join(lines)
+    
+    attend_txt = users_to_text(ev.get("attend", []))
+    late_txt = late_to_text(ev)
+    if late_txt:
+        attend_txt = attend_txt if attend_txt != "—" else ""
+        attend_txt = (attend_txt + ("\n" if attend_txt else "") + late_txt).strip() or "—"
+    
+    embed.add_field(name=f"{ATTEND_EMOJI} Attend", value=attend_txt, inline=True)
     embed.add_field(name=f"{ABSENT_EMOJI} Absent", value=users_to_text(ev.get("absent", [])), inline=True)
     embed.add_field(name=f"{MAYBE_EMOJI} Maybe", value=users_to_text(ev.get("maybe", [])), inline=True)
+
 
     # Server assets (thumbnail + footer icon)
     guild = None
@@ -2708,6 +2733,8 @@ def emoji_to_key(emoji: str):
         return "absent"
     if emoji == MAYBE_EMOJI:
         return "maybe"
+    if emoji == LATE_EMOJI:
+        return "attend_later"
     return None
 
 def save_events_store():
@@ -2715,6 +2742,82 @@ def save_events_store():
 
 def save_templates_store():
     save_json_file(TEMPLATES_FILE, templates_store)
+
+def build_late_time_options(ev: dict) -> list[discord.SelectOption]:
+    """
+    Options: every 15 minutes after kickoff, for 2 hours.
+    Stored/used as UTC ISO string values.
+    """
+    dt_iso = ev.get("datetime")
+    if not dt_iso:
+        return []
+
+    kickoff_utc = datetime.fromisoformat(dt_iso).astimezone(timezone.utc)
+
+    opts: list[discord.SelectOption] = []
+    # 15..120 minutes inclusive (8 options)
+    for mins in range(15, 121, 15):
+        arr = kickoff_utc + timedelta(minutes=mins)
+        label = arr.astimezone(DEFAULT_TZ).strftime("%H:%M")  # display in London time
+        value = arr.isoformat()
+        desc = f"{mins} mins late"
+        opts.append(discord.SelectOption(label=label, value=value, description=desc))
+    return opts
+
+class AttendLaterTimeSelect(discord.ui.Select):
+    def __init__(self, ev: dict, user_id: int):
+        self.ev = ev
+        self.user_id = user_id
+
+        options = build_late_time_options(ev)
+        super().__init__(
+            placeholder="Select your arrival time…",
+            options=options[:25],  # (we only have 8)
+            min_values=1,
+            max_values=1
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        # Only the reacting user can use it
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This dropdown isn’t for you 🙂", ephemeral=True)
+            return
+
+        arrival_iso = self.values[0]
+
+        # Save
+        self.ev.setdefault("attend_later_times", {})
+        self.ev["attend_later_times"][str(self.user_id)] = arrival_iso
+
+        # Ensure they’re not in absent/maybe/attend (optional: you can also remove from attend)
+        for k in ("absent", "maybe", "attend"):
+            if self.user_id in (self.ev.get(k) or []):
+                self.ev[k].remove(self.user_id)
+
+        # Persist + update embed
+        events_store["events"][str(self.ev["id"])] = self.ev
+        save_events_store()
+
+        try:
+            ch = client.get_channel(self.ev["channel_id"]) or await client.fetch_channel(self.ev["channel_id"])
+            msg = await ch.fetch_message(self.ev["message_id"])
+            await msg.edit(embed=make_event_embed(self.ev))
+        except Exception as e:
+            print(f"[WARN] Could not edit event embed after attend_later time pick: {e}")
+
+        # Thread membership (treat like attend/maybe)
+        asyncio.create_task(add_user_to_event_thread(self.ev, self.user_id))
+
+        await interaction.response.edit_message(content="✅ Saved! You’re marked as Attend Later.", view=None)
+
+class AttendLaterTimeView(discord.ui.View):
+    def __init__(self, ev: dict, user_id: int):
+        super().__init__(timeout=120)
+        self.add_item(AttendLaterTimeSelect(ev, user_id))
+
+    async def on_timeout(self):
+        # Optional: you can clean up if you stored the message reference elsewhere
+        return
 
 def make_lineup_embed(lp: dict) -> discord.Embed:
     """
@@ -3003,6 +3106,7 @@ async def createfromtemplate_command(
         "attend": [],
         "absent": [],
         "maybe": [],
+        "attend_later_times": {},
         "role_id": (chosen_role.id if chosen_role else None),
         "twitch_url": chosen_stream_url
     }
@@ -3017,6 +3121,7 @@ async def createfromtemplate_command(
         await sent.add_reaction(ATTEND_EMOJI)
         await sent.add_reaction(ABSENT_EMOJI)
         await sent.add_reaction(MAYBE_EMOJI)
+        await sent.add_reaction(LATE_EMOJI)
 
         try:
             thread = await sent.create_thread(name=ev["name"], auto_archive_duration=10080)
@@ -3118,6 +3223,7 @@ async def createevent_command(
         "attend": [],
         "absent": [],
         "maybe": [],
+        "attend_later_times": {},
         "role_id": (role.id if role else None),
         "twitch_url": _twitch_url_from_input(stream),
     }
@@ -3136,6 +3242,7 @@ async def createevent_command(
         await sent.add_reaction(ATTEND_EMOJI)
         await sent.add_reaction(ABSENT_EMOJI)
         await sent.add_reaction(MAYBE_EMOJI)
+        await sent.add_reaction(LATE_EMOJI)
 
         # Create a thread tied to the event message (same name as event)
         try:
@@ -3504,7 +3611,11 @@ async def remove_user_from_event_thread_if_needed(ev: dict, user_id: int):
     try:
         if not ev.get("thread_id"):
             return
-        still_should_be_in = (user_id in ev.get("attend", [])) or (user_id in ev.get("maybe", []))
+        still_should_be_in = (
+            (user_id in ev.get("attend", [])) or
+            (user_id in ev.get("maybe", [])) or
+            (str(user_id) in (ev.get("attend_later_times") or {}))
+        )
         if still_should_be_in:
             return
         thread = client.get_channel(ev["thread_id"])
@@ -3537,88 +3648,119 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             ev = e
             break
 
-    if not ev:
-        return
-
-    if ev.get("closed"):
+    if not ev or ev.get("closed"):
         return
 
     emoji_str = str(payload.emoji)
     key = emoji_to_key(emoji_str)
-    
-    # 🚫 Block any reaction that is not one of the 3 allowed (✅ ❌ 🤷)
+
+    # 🚫 Block invalid reactions
     if not key:
         try:
             ch = client.get_channel(ev["channel_id"]) or await client.fetch_channel(ev["channel_id"])
             msg = await ch.fetch_message(ev["message_id"])
-            # remove the unapproved reaction from the user
             guild = client.get_guild(payload.guild_id)
             user_obj = (guild.get_member(payload.user_id) if guild else None) or await client.fetch_user(payload.user_id)
+            await mark_suppressed_reaction(ev["message_id"], payload.user_id, emoji_str)
             await msg.remove_reaction(payload.emoji, user_obj)
-        except Exception as e:
-            print(f"[WARN] Failed to remove unapproved reaction: {e}")
+        except Exception:
+            pass
         return
 
+    # Fetch message (optional)
     try:
         ch = client.get_channel(ev["channel_id"]) or await client.fetch_channel(ev["channel_id"])
         msg = await ch.fetch_message(ev["message_id"])
     except Exception:
+        ch = None
         msg = None
 
     uid = payload.user_id
     changed = False
 
-    # Remove user from other lists and remove their old reactions (with suppression)
+    # 🕒 Attend Later — prompt for a time and stop here
+    if key == "attend_later":
+        # Remove from attend/absent/maybe
+        for k in ("attend", "absent", "maybe"):
+            if uid in ev.get(k, []):
+                ev[k].remove(uid)
+
+        # Clear any previous late time (forces selecting again)
+        ev.setdefault("attend_later_times", {}).pop(str(uid), None)
+
+        events_store["events"][str(ev["id"])] = ev
+        save_events_store()
+
+        # Update embed immediately
+        if msg:
+            try:
+                await msg.edit(embed=make_event_embed(ev))
+            except Exception:
+                pass
+
+            # Remove their 🕒 reaction so reactions don't pile up
+            try:
+                guild = client.get_guild(payload.guild_id)
+                user_obj = (guild.get_member(uid) if guild else None) or await client.fetch_user(uid)
+                await mark_suppressed_reaction(ev["message_id"], uid, emoji_str)
+                await mark_suppressed_reaction(ev["message_id"], payload.user_id, emoji_str)
+                await msg.remove_reaction(payload.emoji, user_obj)
+            except Exception:
+                pass
+
+        # Prompt dropdown
+        try:
+            if ch is None:
+                ch = client.get_channel(ev["channel_id"]) or await client.fetch_channel(ev["channel_id"])
+            await ch.send(
+                f"<@{uid}> You selected **Attend Later**. What time will you arrive?",
+                view=AttendLaterTimeView(ev, uid)
+            )
+        except Exception:
+            pass
+
+        return
+
+    # ✅ NORMAL reactions (attend / absent / maybe)
+
+    # Remove from other lists when switching
     for k in ("attend", "absent", "maybe"):
-        if uid in ev.get(k, []) and k != key:
+        if k != key and uid in ev.get(k, []):
             ev[k].remove(uid)
             changed = True
-            if msg:
-                try:
-                    guild = client.get_guild(payload.guild_id)
-                    member_obj = None
-                    if guild:
-                        member_obj = guild.get_member(uid)
-                        if member_obj is None:
-                            try:
-                                member_obj = await guild.fetch_member(uid)
-                            except Exception:
-                                member_obj = None
-                    user_obj = member_obj if member_obj else await client.fetch_user(uid)
-                    old_emoji = ATTEND_EMOJI if k == "attend" else ABSENT_EMOJI if k == "absent" else MAYBE_EMOJI
-                    try:
-                        await mark_suppressed_reaction(ev["message_id"], uid, str(old_emoji))
-                        await msg.remove_reaction(old_emoji, user_obj)
-                    except Exception:
-                        pass
-                except Exception:
-                    pass
 
-    # Add user to chosen list
+    # Remove late time if switching away from Attend Later
+    if str(uid) in ev.get("attend_later_times", {}):
+        ev["attend_later_times"].pop(str(uid), None)
+        changed = True
+
+    # Add to chosen list
     if uid not in ev.get(key, []):
         ev.setdefault(key, []).append(uid)
         changed = True
 
-    # Thread membership updates
+    # Thread membership (Attend + Maybe stay in thread)
     if key in ("attend", "maybe"):
         asyncio.create_task(add_user_to_event_thread(ev, uid))
     else:
         asyncio.create_task(remove_user_from_event_thread_if_needed(ev, uid))
 
+    # Save + update embed + remove the reaction (so reactions don’t accumulate)
+    # Save + update embed + remove the reaction (so reactions don’t accumulate)
     if changed:
         events_store["events"][str(ev["id"])] = ev
         save_events_store()
+    
         if msg:
             try:
-                embed = make_event_embed(ev)
-                await msg.edit(embed=embed)
-
-                # Remove the current reaction too, while keeping the signup (suppress removal)
+                await msg.edit(embed=make_event_embed(ev))
+    
                 guild = client.get_guild(payload.guild_id)
                 user_obj = (guild.get_member(uid) if guild else None) or await client.fetch_user(uid)
-                await mark_suppressed_reaction(ev["message_id"], uid, str(payload.emoji))
+    
+                await mark_suppressed_reaction(ev["message_id"], uid, emoji_str)
                 await msg.remove_reaction(payload.emoji, user_obj)
-
+    
             except Exception as e:
                 print(f"[ERROR] Failed to update event embed or remove reaction: {e}")
 
@@ -3628,17 +3770,18 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
         return
 
     emoji_str = str(payload.emoji)
+
+    # ✅ Ignore bot-initiated removals (matches your mark_suppressed_reaction flow)
     key_tuple = (payload.message_id, payload.user_id, emoji_str)
     if key_tuple in pending_reaction_removals:
         pending_reaction_removals.discard(key_tuple)
-        return  # ignore bot-initiated removals
+        return
 
     ev = None
-    for eid, e in events_store.get("events", {}).items():
+    for e in events_store.get("events", {}).values():
         if e.get("message_id") == payload.message_id:
             ev = e
             break
-
     if not ev:
         return
 
@@ -3647,22 +3790,31 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
         return
 
     uid = payload.user_id
-    if uid in ev.get(key, []):
-        ev[key].remove(uid)
-        events_store["events"][str(ev["id"])] = ev
-        save_events_store()
 
-        # If they removed Attend/Maybe and are no longer in either, remove from thread
-        if key in ("attend", "maybe"):
-            asyncio.create_task(remove_user_from_event_thread_if_needed(ev, uid))
+    # 🕒 Attend Later removal (mapping)
+    if key == "attend_later":
+        late_map = ev.get("attend_later_times") or {}
+        if str(uid) in late_map:
+            late_map.pop(str(uid), None)
+            ev["attend_later_times"] = late_map
+    else:
+        # ✅ Normal lists
+        if uid in ev.get(key, []):
+            ev[key].remove(uid)
 
-        try:
-            ch = client.get_channel(ev["channel_id"]) or await client.fetch_channel(ev["channel_id"])
-            msg = await ch.fetch_message(ev["message_id"])
-            embed = make_event_embed(ev)
-            await msg.edit(embed=embed)
-        except Exception as e:
-            print(f"[ERROR] Failed to update event embed after reaction remove: {e}")
+    events_store["events"][str(ev["id"])] = ev
+    save_events_store()
+
+    # Removal might mean they should leave the thread
+    asyncio.create_task(remove_user_from_event_thread_if_needed(ev, uid))
+
+    # Update embed
+    try:
+        ch = client.get_channel(ev["channel_id"]) or await client.fetch_channel(ev["channel_id"])
+        msg = await ch.fetch_message(ev["message_id"])
+        await msg.edit(embed=make_event_embed(ev))
+    except Exception:
+        pass
 
 DB_POOL: asyncpg.pool.Pool | None = None
 DATABASE_URL = os.getenv("DATABASE_URL")
