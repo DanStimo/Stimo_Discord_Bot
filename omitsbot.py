@@ -94,18 +94,13 @@ def build_crest_url(team_id: str | int) -> str | None:
     return CREST_URL_TEMPLATE.format(teamId=str(team_id))
 
 async def get_team_id_for_club(club_id: str | int) -> str | None:
-    """
-    Try to find teamId for a club:
-      1) overallStats (fast, single call)
-      2) fall back to the newest matches and read clubs[club_id].details.teamId
-    """
     club_id = str(club_id)
 
-    # 1) overallStats
+    # 1) overallStats — MUST be gen5
     try:
         r = await _client_ea.get(
             "https://proclubs.ea.com/api/fc/clubs/overallStats",
-            params={"platform": PLATFORM, "clubIds": club_id},
+            params={"platform": "gen5", "clubIds": club_id},
         )
         if r.status_code == 200:
             data = r.json() or []
@@ -116,21 +111,27 @@ async def get_team_id_for_club(club_id: str | int) -> str | None:
     except Exception as e:
         print(f"[crest] overallStats lookup failed: {e}")
 
-    # 2) matches fallback (check newest first among common types)
+    # 2) matches fallback — MUST be gen5
     try:
         match_types = ["leagueMatch", "playoffMatch", "friendlyMatch"]
         newest = []
+
         for mt in match_types:
             mres = await _client_ea.get(
                 "https://proclubs.ea.com/api/fc/clubs/matches",
-                params={"matchType": mt, "platform": PLATFORM, "clubIds": club_id},
+                params={
+                    "matchType": mt,
+                    "platform": "gen5",
+                    "clubIds": club_id,
+                },
             )
             if mres.status_code == 404:
                 continue
             mres.raise_for_status()
-            arr = mres.json() or []
-            newest.extend(arr)
+            newest.extend(mres.json() or [])
+
         newest.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
+
         for m in newest:
             clubs = m.get("clubs", {}) or {}
             mine = clubs.get(club_id) or {}
@@ -138,6 +139,7 @@ async def get_team_id_for_club(club_id: str | int) -> str | None:
             tid = details.get("teamId")
             if tid:
                 return str(tid)
+
     except Exception as e:
         print(f"[crest] matches lookup failed: {e}")
 
