@@ -49,6 +49,14 @@ _client_ea = httpx.AsyncClient(
     follow_redirects=True,
 )
 
+async def init_ea_client():
+    # Warm EA session cookies (REQUIRED for leaderboard/search)
+    try:
+        await _client_ea.get("https://proclubs.ea.com/")
+        print("[EA] Session warmed")
+    except Exception as e:
+        print(f"[EA] Session warm failed: {e}")
+
 # --- Twitch live announce config ---
 TWITCH_CLIENT_ID = os.getenv("TWITCH_CLIENT_ID")
 TWITCH_CLIENT_SECRET = os.getenv("TWITCH_CLIENT_SECRET")
@@ -4042,6 +4050,10 @@ async def on_ready():
         print(f"[ERROR] Postgres init/load failed: {e}")
         # (Optional) raise here if persistence is required
         # raise
+    try:
+        await init_ea_client()
+    except Exception as e:
+        print(f"[ERROR] EA session init failed: {e}")
 
     # --- your existing command sync logic (unchanged) ---
     try:
