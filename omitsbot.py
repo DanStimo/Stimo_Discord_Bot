@@ -33,13 +33,13 @@ EA_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Accept": "application/json, text/plain, */*",
     "Accept-Language": "en-GB,en;q=0.9",
-    "Origin": "https://www.ea.com",
-    "Referer": "https://www.ea.com/ea-sports-fc/pro-clubs",
+
+    # IMPORTANT: match the domain you're calling
+    "Origin": "https://proclubs.ea.com",
+    "Referer": "https://proclubs.ea.com/",
+
     "Cache-Control": "no-cache",
     "Pragma": "no-cache",
-    "Sec-Fetch-Site": "same-site",
-    "Sec-Fetch-Mode": "cors",
-    "Sec-Fetch-Dest": "empty",
 }
 
 _client_ea = httpx.AsyncClient(
