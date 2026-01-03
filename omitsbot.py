@@ -19,7 +19,7 @@ load_dotenv()
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 CLUB_ID = os.getenv("CLUB_ID", "167054")  # fallback/default
-PLATFORM = os.getenv("PLATFORM", "common-gen5")
+PLATFORM = os.getenv("PLATFORM", "gen5")
 OFFSIDE_KEY = "offside.json"
 
 MATCH_TYPE_LABELS = {
@@ -33,28 +33,16 @@ EA_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Accept": "application/json, text/plain, */*",
     "Accept-Language": "en-GB,en;q=0.9",
-
-    # IMPORTANT: match the domain you're calling
     "Origin": "https://proclubs.ea.com",
     "Referer": "https://proclubs.ea.com/",
-
-    "Cache-Control": "no-cache",
-    "Pragma": "no-cache",
 }
 
 _client_ea = httpx.AsyncClient(
     timeout=12,
     headers=EA_HEADERS,
+    http2=True,
     follow_redirects=True,
 )
-
-async def init_ea_client():
-    # Warm EA session cookies (REQUIRED for leaderboard/search)
-    try:
-        await _client_ea.get("https://proclubs.ea.com/")
-        print("[EA] Session warmed")
-    except Exception as e:
-        print(f"[EA] Session warm failed: {e}")
 
 # --- Twitch live announce config ---
 TWITCH_CLIENT_ID = os.getenv("TWITCH_CLIENT_ID")
@@ -101,13 +89,18 @@ def build_crest_url(team_id: str | int) -> str | None:
     return CREST_URL_TEMPLATE.format(teamId=str(team_id))
 
 async def get_team_id_for_club(club_id: str | int) -> str | None:
+    """
+    Try to find teamId for a club:
+      1) overallStats (fast, single call)
+      2) fall back to the newest matches and read clubs[club_id].details.teamId
+    """
     club_id = str(club_id)
 
-    # 1) overallStats — MUST be gen5
+    # 1) overallStats
     try:
         r = await _client_ea.get(
             "https://proclubs.ea.com/api/fc/clubs/overallStats",
-            params={"platform": "gen5", "clubIds": club_id},
+            params={"platform": PLATFORM, "clubIds": club_id},
         )
         if r.status_code == 200:
             data = r.json() or []
@@ -118,27 +111,21 @@ async def get_team_id_for_club(club_id: str | int) -> str | None:
     except Exception as e:
         print(f"[crest] overallStats lookup failed: {e}")
 
-    # 2) matches fallback — MUST be gen5
+    # 2) matches fallback (check newest first among common types)
     try:
         match_types = ["leagueMatch", "playoffMatch", "friendlyMatch"]
         newest = []
-
         for mt in match_types:
             mres = await _client_ea.get(
                 "https://proclubs.ea.com/api/fc/clubs/matches",
-                params={
-                    "matchType": mt,
-                    "platform": "gen5",
-                    "clubIds": club_id,
-                },
+                params={"matchType": mt, "platform": PLATFORM, "clubIds": club_id},
             )
             if mres.status_code == 404:
                 continue
             mres.raise_for_status()
-            newest.extend(mres.json() or [])
-
+            arr = mres.json() or []
+            newest.extend(arr)
         newest.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
-
         for m in newest:
             clubs = m.get("clubs", {}) or {}
             mine = clubs.get(club_id) or {}
@@ -146,7 +133,6 @@ async def get_team_id_for_club(club_id: str | int) -> str | None:
             tid = details.get("teamId")
             if tid:
                 return str(tid)
-
     except Exception as e:
         print(f"[crest] matches lookup failed: {e}")
 
@@ -4049,10 +4035,6 @@ async def on_ready():
         print(f"[ERROR] Postgres init/load failed: {e}")
         # (Optional) raise here if persistence is required
         # raise
-    try:
-        await init_ea_client()
-    except Exception as e:
-        print(f"[ERROR] EA session init failed: {e}")
 
     # --- your existing command sync logic (unchanged) ---
     try:
