@@ -33,8 +33,13 @@ EA_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Accept": "application/json, text/plain, */*",
     "Accept-Language": "en-GB,en;q=0.9",
-    "Origin": "https://proclubs.ea.com",
-    "Referer": "https://proclubs.ea.com/",
+    "Origin": "https://www.ea.com",
+    "Referer": "https://www.ea.com/ea-sports-fc/pro-clubs",
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
+    "Sec-Fetch-Site": "same-site",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Dest": "empty",
 }
 
 _client_ea = httpx.AsyncClient(
@@ -304,10 +309,6 @@ async def safe_delete(msg: discord.Message, delay: float | None = None):
     except (discord.Forbidden, discord.NotFound, discord.HTTPException):
         pass
 
-class EAAccessDenied(Exception):
-    """Raised when EA blocks leaderboard search endpoints (403)."""
-    pass
-
 async def log_stats_embed_for_request(
     *, guild: discord.Guild, author: discord.abc.User, origin_channel: discord.TextChannel, embed: discord.Embed
 ):
@@ -381,18 +382,6 @@ async def on_message(message: discord.Message):
             view = FreeStatsDropdown(matches, original_query=content, request_message=message)
             m = await message.channel.send("Multiple clubs found. Please select:", view=view)
             asyncio.create_task(delete_after_delay(m, 90))
-
-    except EAAccessDenied:
-        # Delete the user's input AFTER the same delay as your other outputs
-        asyncio.create_task(safe_delete(message, delay=60))
-
-        # Post a short-lived denial message, then delete it too
-        denial = await message.channel.send(
-            "⚠️ EA has denied access to club name search right now.\n"
-            "Try again using a **Club ID** instead."
-        )
-        asyncio.create_task(delete_after_delay(denial, 60))
-        return
 
     except Exception as e:
         print(f"[ERROR] free-typed stats failed: {e}")
@@ -471,12 +460,7 @@ async def search_clubs_ea(query: str) -> list:
         return []
     url = "https://proclubs.ea.com/api/fc/allTimeLeaderboard/search"
     params = {"platform": PLATFORM, "clubName": query.strip()}
-
     resp = await _client_ea.get(url, params=params)
-
-    if resp.status_code == 403:
-        raise EAAccessDenied("EA denied access to leaderboard search (403)")
-
     resp.raise_for_status()
     data = resp.json()
     if not isinstance(data, list):
