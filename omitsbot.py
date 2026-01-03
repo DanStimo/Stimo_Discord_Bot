@@ -45,7 +45,6 @@ EA_HEADERS = {
 _client_ea = httpx.AsyncClient(
     timeout=12,
     headers=EA_HEADERS,
-    http2=True,
     follow_redirects=True,
 )
 
