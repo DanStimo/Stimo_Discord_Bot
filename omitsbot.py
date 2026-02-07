@@ -1966,8 +1966,9 @@ async def _twitch_fetch_app_token() -> dict:
     Client Credentials flow -> {"access_token", "expires_at"}.
     """
     global _twitch_token
+
     if not TWITCH_CLIENT_ID or not TWITCH_CLIENT_SECRET:
-        raise RuntimeError("TWITCH_CLIENT_ID/SECRET not set")
+        raise RuntimeError("TWITCH_CLIENT_ID/SECRET not set (check Railway env vars)")
 
     token_url = "https://id.twitch.tv/oauth2/token"
     form = {
@@ -1975,14 +1976,29 @@ async def _twitch_fetch_app_token() -> dict:
         "client_secret": TWITCH_CLIENT_SECRET,
         "grant_type": "client_credentials",
     }
-    async with httpx.AsyncClient(timeout=15) as c:
+
+    headers = {
+        "User-Agent": "omitS-DiscordBot/1.0",
+        "Accept": "application/json",
+    }
+
+    async with httpx.AsyncClient(timeout=15, headers=headers) as c:
         r = await c.post(token_url, data=form)
-        r.raise_for_status()
+
+        # 👇 THIS is the important change
+        if r.status_code != 200:
+            raise RuntimeError(f"Twitch token failed {r.status_code}: {r.text}")
+
         data = r.json()
+        expires_in = int(data.get("expires_in", 3600))
+
         _twitch_token = {
             "access_token": data["access_token"],
-            "expires_at": datetime.now(timezone.utc) + timedelta(seconds=int(data.get("expires_in", 3600))),
+            # refresh 60s early
+            "expires_at": datetime.now(timezone.utc)
+            + timedelta(seconds=max(expires_in - 60, 0)),
         }
+
         return _twitch_token
 
 async def _twitch_get_app_token_str() -> str:
