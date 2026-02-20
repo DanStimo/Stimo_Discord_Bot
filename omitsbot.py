@@ -1119,7 +1119,7 @@ async def log_command_output(interaction: discord.Interaction, command_name: str
     if message:
         if message.embeds:
             for em in message.embeds:
-                await archive_channel.send(content=f"📥 `/`{command_name} by {interaction.user.mention} in {interaction.channel.mention}:", embed=em)
+                await archive_channel.send(content=f"📥 /{command_name} by {interaction.user.name} in {interaction.channel.mention}:", embed=em)
         elif message.content:
             embed.add_field(name="Output", value=message.content[:1000], inline=False)
             await archive_channel.send(embed=embed)
