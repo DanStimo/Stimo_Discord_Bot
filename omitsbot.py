@@ -1112,7 +1112,7 @@ async def log_command_output(interaction: discord.Interaction, command_name: str
         title=f"📦 Command Archive: /{command_name}",
         color=discord.Color.dark_grey()
     )
-    embed.add_field(name="User", value=f"{interaction.user.mention}", inline=False)
+    embed.add_field(name="User", value=f"{interaction.user.name}", inline=False)
     embed.add_field(name="Used In", value=f"{interaction.channel.mention}", inline=False)
     embed.add_field(name="Timestamp", value=discord.utils.format_dt(interaction.created_at, style='F'), inline=False)
 
