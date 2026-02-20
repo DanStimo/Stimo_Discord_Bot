@@ -320,7 +320,7 @@ async def log_stats_embed_for_request(
     if not log_ch:
         print(f"[WARN] Log channel {LOG_CHANNEL_ID} not found")
         return
-    header = f"/stats by {author.mention} in {origin_channel.mention}:"
+    header = f"📥/stats by {author.name} in {origin_channel.mention}:"
     await log_ch.send(content=header, embed=embed)
 
 @client.event
