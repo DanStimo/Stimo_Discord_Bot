@@ -1107,24 +1107,36 @@ def _format_player_stats_row(player_name: str, stats: dict) -> str:
     goals = int(stats.get("goals", 0))
     assists = int(stats.get("assists", 0))
     shots = int(stats.get("shots", 0))
-    attempts = int(stats.get("passattempts", 0))
-    completed = int(stats.get("passesmade", 0))
-    passes = f"{completed}/{attempts}"
-    attempts = int(stats.get("tacklesmade", 0))
-    won = int(stats.get("tacklesuccessful", 0))
-    tackles = f"{won}/{attempts}"
+
+    # Pass %
+    pass_attempts = int(stats.get("passattempts", 0))
+    pass_completed = int(stats.get("passesmade", 0))
+    pass_pct = round((pass_completed / pass_attempts) * 100) if pass_attempts else 0
+
+    # Tackle %
+    tackle_attempts = int(stats.get("tacklesmade", 0))
+    tackle_won = int(stats.get("tacklesuccessful", 0))
+    tackle_pct = round((tackle_won / tackle_attempts) * 100) if tackle_attempts else 0
+
     yc = int(stats.get("yellowcards", 0))
     rc = int(stats.get("redcards", 0))
 
-    rating_total = stats.get("rating", 0)
-    rating = 0.0
-    if apps and rating_total:
-        rating = round(float(rating_total) / apps, 1)
+    rating_total = float(stats.get("rating", 0) or 0)
+    rating = round(rating_total / apps, 1) if apps else 0.0
 
-    # trim long names so the table stays aligned
     name = player_name[:12]
 
-    return f"{name:<12} {goals:>2} {assists:>2} {shots:>3} {passes:>6} {tackles:>5} {rating:>4} {yc:>3} {rc:>3}"
+    return (
+        f"{name:<12} "
+        f"{goals:>2} "
+        f"{assists:>2} "
+        f"{shots:>3} "
+        f"{pass_pct:>3}% "
+        f"{tackle_pct:>3}% "
+        f"{rating:>4} "
+        f"{yc:>3} "
+        f"{rc:>3}"
+    )
 
 async def build_stats5_embeds(club_id: str, club_name: str | None):
     club_name = club_name or f"Club {club_id}"
@@ -1147,7 +1159,7 @@ async def build_stats5_embeds(club_id: str, club_name: str | None):
     # one table row per player
     rows = [_format_player_stats_row(player_name, player_stats) for player_name, player_stats in player_items]
 
-    header = "Player        G  A  Sh  Ps  Tk   Rt  YC  RC"
+    header = "Player        G  A  Sh   PA%   TK%   Rt  YC  RC"
     divider = "-" * len(header)
 
     # keep each embed safely under Discord limits
