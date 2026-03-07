@@ -1107,8 +1107,12 @@ def _format_player_stats_row(player_name: str, stats: dict) -> str:
     goals = int(stats.get("goals", 0))
     assists = int(stats.get("assists", 0))
     shots = int(stats.get("shots", 0))
-    passes = int(stats.get("passesmade", 0))
-    tackles = int(stats.get("tacklesmade", 0))
+    attempts = int(stats.get("passattempts", 0))
+    completed = int(stats.get("passesmade", 0))
+    passes = f"{completed}/{attempts}"
+    attempts = int(stats.get("tacklesmade", 0))
+    won = int(stats.get("tacklesuccessful", 0))
+    tackles = f"{won}/{attempts}"
     yc = int(stats.get("yellowcards", 0))
     rc = int(stats.get("redcards", 0))
 
@@ -1120,7 +1124,7 @@ def _format_player_stats_row(player_name: str, stats: dict) -> str:
     # trim long names so the table stays aligned
     name = player_name[:12]
 
-    return f"{name:<12} {goals:>2} {assists:>2} {shots:>3} {passes:>3} {tackles:>3} {rating:>4} {yc:>3} {rc:>3}"
+    return f"{name:<12} {goals:>2} {assists:>2} {shots:>3} {passes:>6} {tackles:>5} {rating:>4} {yc:>3} {rc:>3}"
 
 async def build_stats5_embeds(club_id: str, club_name: str | None):
     club_name = club_name or f"Club {club_id}"
