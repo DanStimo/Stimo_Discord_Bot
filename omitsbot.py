@@ -1131,7 +1131,7 @@ def _format_player_stats_row(player_name: str, stats: dict):
         f"{shots:>4}"
         f"{pass_pct:>4}%"
         f"{tackle_pct:>4}%"
-        f"{rating:>4.1f}"
+        f"{rating:>5.1f}"
         f"{yc:>3}"
         f"{rc:>3}"
     )
@@ -1152,12 +1152,28 @@ async def build_stats5_embeds(club_id: str, club_name: str | None):
     base_title = f"📊 {club_name.upper()} — LAST 5 PLAYER TOTALS"
     subtitle = f"Across League, Playoff and Friendly matches ({len(matches)} matches)"
 
-    player_items = list(totals.items())
+    player_items = sorted(
+        totals.items(),
+        key=lambda item: (
+            -(item[1].get("rating", 0) / item[1].get("appearances", 1))
+            if item[1].get("appearances", 0) else 0
+        )
+    )
 
     # one table row per player
     rows = [_format_player_stats_row(player_name, player_stats) for player_name, player_stats in player_items]
 
-    header = "Player        G  A  Sh  PA% TK%  Rt  YC RC"
+    header = (
+    f"{'Player':<12}"
+    f"{'G':>3}"
+    f"{'A':>3}"
+    f"{'Sh':>4}"
+    f"{'PA%':>5}"
+    f"{'TK%':>5}"
+    f"{'Rt':>5}"
+    f"{'YC':>3}"
+    f"{'RC':>3}"
+    )
     divider = "-" * len(header)
 
     # keep each embed safely under Discord limits
