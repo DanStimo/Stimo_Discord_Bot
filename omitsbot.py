@@ -1009,30 +1009,58 @@ async def get_last5_player_totals(club_id: str):
         "stat_keys": ordered_stat_keys,
     }
 
-def _format_player_stats_block(stats: dict, stat_keys: list[str]) -> str:
+STATS5_PRIORITY_ORDER = [
+    "appearances",
+    "goals",
+    "assists",
+    "rating",
+    "shots",
+    "shotson",
+    "passattempts",
+    "passesmade",
+    "dribblesmade",
+    "tacklesmade",
+    "tacklesuccessful",
+    "interceptions",
+    "blocks",
+    "saves",
+    "goalsconceded",
+    "cleansheets",
+    "yellowcards",
+    "redcards",
+    "fouls",
+    "foulssuffered",
+    "motm",
+]
+
+def _format_stat_value(key: str, val):
+    if isinstance(val, float):
+        if key == "rating":
+            return f"{val:.1f}"
+        if val.is_integer():
+            return str(int(val))
+        return f"{val:.2f}"
+    return str(val)
+
+def _format_player_stats_block(stats: dict, stat_keys: list[str], max_len: int = 900) -> str:
+    ordered_keys = [k for k in STATS5_PRIORITY_ORDER if k in stats]
+    ordered_keys += [k for k in stat_keys if k in stats and k not in ordered_keys]
+
     parts = []
-    for key in stat_keys:
-        if key not in stats:
-            continue
+    total_len = 0
 
-        val = stats[key]
+    for key in ordered_keys:
+        shown = f"**{_pretty_stat_name(key)}:** {_format_stat_value(key, stats[key])}"
+        extra = len(shown) + (3 if parts else 0)
 
-        if isinstance(val, float):
-            if key == "rating":
-                shown = f"{val:.1f}"
-            elif val.is_integer():
-                shown = str(int(val))
-            else:
-                shown = f"{val:.2f}"
-        else:
-            shown = str(val)
+        if total_len + extra > max_len:
+            parts.append("...")
+            break
 
-        parts.append(f"**{_pretty_stat_name(key)}:** {shown}")
+        parts.append(shown)
+        total_len += extra
 
-    text = " | ".join(parts)
-    if len(text) > 1000:
-        text = text[:997] + "..."
-    return text or "—"
+    return " | ".join(parts) if parts else "—"
 
 async def build_stats5_embeds(club_id: str, club_name: str | None):
     club_name = club_name or f"Club {club_id}"
@@ -1049,31 +1077,63 @@ async def build_stats5_embeds(club_id: str, club_name: str | None):
     crest_url = build_crest_url(team_id) if team_id else None
 
     base_title = f"📊 {club_name.upper()} — LAST 5 PLAYER TOTALS"
-    subtitle = "Across League, Playoff and Friendly matches"
+    subtitle = f"Across League, Playoff and Friendly matches ({len(matches)} matches)"
 
     player_items = list(totals.items())
-    pages = [player_items[i:i+10] for i in range(0, len(player_items), 10)] or [[]]
 
     embeds = []
-    for page_index, page_items in enumerate(pages, start=1):
-        embed = discord.Embed(
-            title=base_title,
-            description=f"{subtitle}\nPage {page_index}/{len(pages)}",
-            color=0xB30000
-        )
+    current_embed = discord.Embed(
+        title=base_title,
+        description=subtitle,
+        color=0xB30000
+    )
 
-        if crest_url:
-            embed.set_thumbnail(url=crest_url)
+    if crest_url:
+        current_embed.set_thumbnail(url=crest_url)
 
-        for player_name, player_stats in page_items:
-            embed.add_field(
-                name=escape_markdown(player_name),
-                value=_format_player_stats_block(player_stats, stat_keys),
-                inline=False
+    current_size = len(base_title) + len(subtitle)
+
+    for player_name, player_stats in player_items:
+        safe_name = escape_markdown(player_name)[:256]
+        safe_value = _format_player_stats_block(player_stats, stat_keys, max_len=900)
+
+        field_size = len(safe_name) + len(safe_value)
+
+        would_exceed_fields = len(current_embed.fields) >= 25
+        would_exceed_chars = (current_size + field_size) >= 5400
+
+        if would_exceed_fields or would_exceed_chars:
+            current_embed.set_footer(
+                text=f"EAFC — Aggregated from the most recent {len(matches)} matches"
+            )
+            embeds.append(current_embed)
+
+            current_embed = discord.Embed(
+                title=base_title,
+                description=subtitle,
+                color=0xB30000
             )
 
-        embed.set_footer(text=f"EAFC — Aggregated from the most recent {len(matches)} matches")
-        embeds.append(embed)
+            if crest_url:
+                current_embed.set_thumbnail(url=crest_url)
+
+            current_size = len(base_title) + len(subtitle)
+
+        current_embed.add_field(
+            name=safe_name,
+            value=safe_value,
+            inline=False
+        )
+        current_size += field_size
+
+    current_embed.set_footer(
+        text=f"EAFC — Aggregated from the most recent {len(matches)} matches"
+    )
+    embeds.append(current_embed)
+
+    total_pages = len(embeds)
+    for idx, embed in enumerate(embeds, start=1):
+        embed.description = f"{subtitle}\nPage {idx}/{total_pages}"
 
     return embeds
 
