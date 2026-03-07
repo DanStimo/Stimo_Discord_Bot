@@ -1122,7 +1122,7 @@ def _format_player_stats_row(player_name: str, stats: dict) -> str:
 
     return f"{name:<12} {goals:>2} {assists:>2} {shots:>3} {passes:>3} {tackles:>3} {rating:>4} {yc:>3} {rc:>3}"
 
-aasync def build_stats5_embeds(club_id: str, club_name: str | None):
+async def build_stats5_embeds(club_id: str, club_name: str | None):
     club_name = club_name or f"Club {club_id}"
     data = await get_last5_player_totals(club_id)
 
