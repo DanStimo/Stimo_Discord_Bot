@@ -441,30 +441,42 @@ import random
 import urllib.parse
 import asyncio
 
-async def _ea_get_json(url: str, params: dict) -> dict | list | None:
+async def _ea_get_json(url: str, params: dict, retries: int = 5) -> dict | list | None:
     """GET JSON with retries + short body log on non-200."""
-    for attempt in range(3):
+    for attempt in range(retries):
         try:
             r = await _client_ea.get(url, params=params)
+
             if r.status_code == 200:
                 return r.json()
-            print(f"[EA] {r.status_code} {url} try {attempt+1}/3 :: {r.text[:200]}")
+
+            print(f"[EA] {r.status_code} {url} try {attempt+1}/{retries} :: {r.text[:200]}")
+
+            # For anti-bot / transient blocking, back off a bit more
+            if r.status_code in (403, 429, 500, 502, 503, 504):
+                await asyncio.sleep(1.2 + attempt * 1.5 + random.random())
+                continue
+
         except Exception as e:
-            print(f"[EA] exception {url} try {attempt+1}/3 :: {e}")
-        await asyncio.sleep(0.4 + random.random()*0.6)
+            print(f"[EA] exception {url} try {attempt+1}/{retries} :: {e}")
+
+        await asyncio.sleep(0.8 + random.random())
+
     return None
 
 async def search_clubs_ea(query: str) -> list:
-    """Robust partial-name search (uses EA's endpoint), filters 'None of these' rows."""
+    """Partial-name search with retries/backoff."""
     if not query or not query.strip():
         return []
-    url = "https://proclubs.ea.com/api/fc/allTimeLeaderboard/search"
-    params = {"platform": PLATFORM, "clubName": query.strip()}
-    resp = await _client_ea.get(url, params=params)
-    resp.raise_for_status()
-    data = resp.json()
+
+    data = await _ea_get_json(
+        "https://proclubs.ea.com/api/fc/allTimeLeaderboard/search",
+        {"platform": PLATFORM, "clubName": query.strip()},
+    )
+
     if not isinstance(data, list):
         return []
+
     return [
         c for c in data
         if c.get("clubInfo", {}).get("name", "").strip().lower() != "none of these"
@@ -588,6 +600,19 @@ def build_crest_url(team_id: str | int | None) -> str | None:
     return f"https://eafc24.content.easports.com/fifa/fltOnlineAssets/24B23FDE-7835-41C2-87A2-F453DFDB2E82/2024/fcweb/crests/256x256/l{team_id}.png"
 
 # --- Web helpers for EA endpoints ---
+async def warm_ea_session():
+    try:
+        print("[EA] Warming session...")
+        await _ea_get_json(
+            "https://proclubs.ea.com/api/fc/allTimeLeaderboard",
+            {"platform": PLATFORM},
+            retries=3,
+        )
+        await asyncio.sleep(1.5)
+        print("[EA] Warm session complete.")
+    except Exception as e:
+        print(f"[EA] Warm session failed: {e}")
+        
 async def get_club_stats(club_id):
     data = await _ea_get_json(
         "https://proclubs.ea.com/api/fc/clubs/overallStats",
@@ -4672,7 +4697,8 @@ async def on_ready():
         print(f"[ERROR] Command sync failed: {e}")
 
     print(f"Bot is ready as {client.user}")
-
+    await warm_ea_session()
+    
     # Run background tasks once (avoid duplicates on reconnect)
     if not getattr(client, "background_started", False):
         try:
