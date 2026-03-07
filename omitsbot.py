@@ -862,6 +862,221 @@ async def fetch_all_stats_for_club(club_id: str):
         "current_squad": current_squad,
     }
 
+STAT_LABELS = {
+    "appearances": "Apps",
+    "goals": "Goals",
+    "assists": "Assists",
+    "shots": "Shots",
+    "shotson": "Shots On",
+    "passesmade": "Passes",
+    "passesintercepted": "Int",
+    "passattempts": "Pass Att",
+    "dribblesmade": "Dribbles",
+    "tacklesmade": "Tackles",
+    "tacklesuccessful": "Tackle Won",
+    "blocks": "Blocks",
+    "interceptions": "Interceptions",
+    "fouls": "Fouls",
+    "foulssuffered": "Won Fouls",
+    "yellowcards": "YC",
+    "redcards": "RC",
+    "saves": "Saves",
+    "goalsconceded": "Conceded",
+    "cleansheets": "CS",
+    "rating": "Rating Total",
+    "motm": "POTM",
+    "possession": "Poss",
+    "corners": "Corners",
+    "offsides": "Offsides",
+}
+
+NON_STAT_KEYS = {
+    "playername", "name", "avatar", "kitno", "kitnumber", "position",
+    "pos", "isCaptain", "captain", "slot", "userId", "proName"
+}
+
+def _to_number(value):
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, float)):
+        return value
+    try:
+        s = str(value).strip()
+        if not s:
+            return None
+        if "." in s:
+            return float(s)
+        return int(s)
+    except Exception:
+        return None
+
+def _pretty_stat_name(key: str) -> str:
+    return STAT_LABELS.get(key, key.replace("_", " ").title())
+
+def _player_display_name(player: dict) -> str:
+    return (
+        player.get("playername")
+        or player.get("name")
+        or player.get("proName")
+        or "Unknown"
+    )
+
+def _sort_players_for_stats5(item: tuple[str, dict]):
+    _, stats = item
+    return (
+        -int(stats.get("appearances", 0)),
+        -float(stats.get("goals", 0)),
+        -float(stats.get("assists", 0)),
+        -float(stats.get("rating", 0)),
+        item[0].lower(),
+    )
+
+async def get_last5_player_totals(club_id: str):
+    """
+    Aggregate all numeric player stats from the club's last 5 matches
+    across league/playoff/friendly.
+    """
+    club_id = str(club_id)
+    match_types = ["leagueMatch", "playoffMatch", "friendlyMatch"]
+    all_matches = []
+
+    for match_type in match_types:
+        data = await _ea_get_json(
+            "https://proclubs.ea.com/api/fc/clubs/matches",
+            {"matchType": match_type, "platform": PLATFORM, "clubIds": club_id},
+        ) or []
+        for m in data:
+            m["_matchType"] = match_type
+        all_matches.extend(data)
+
+    all_matches.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
+    last_5 = all_matches[:5]
+
+    if not last_5:
+        return {
+            "matches": [],
+            "totals": {},
+            "stat_keys": [],
+        }
+
+    totals: dict[str, dict] = {}
+
+    for match in last_5:
+        club_players = ((match.get("players") or {}).get(club_id) or {})
+
+        for _, player in club_players.items():
+            if not isinstance(player, dict):
+                continue
+
+            name = _player_display_name(player)
+            if name not in totals:
+                totals[name] = {"appearances": 0}
+
+            totals[name]["appearances"] += 1
+
+            for key, value in player.items():
+                if key in NON_STAT_KEYS:
+                    continue
+
+                num = _to_number(value)
+                if num is None:
+                    continue
+
+                totals[name][key] = totals[name].get(key, 0) + num
+
+    # collect every stat key that appeared for at least one player
+    stat_keys = set()
+    for player_stats in totals.values():
+        stat_keys.update(player_stats.keys())
+
+    # keep appearances first, then common football stats, then everything else
+    preferred_order = [
+        "appearances", "goals", "assists", "rating", "shots", "shotson",
+        "passesmade", "passattempts", "dribblesmade", "tacklesmade",
+        "interceptions", "blocks", "saves", "goalsconceded",
+        "yellowcards", "redcards", "fouls", "foulssuffered",
+        "cleansheets", "motm"
+    ]
+
+    ordered_stat_keys = [k for k in preferred_order if k in stat_keys]
+    ordered_stat_keys += sorted(k for k in stat_keys if k not in ordered_stat_keys)
+
+    return {
+        "matches": last_5,
+        "totals": dict(sorted(totals.items(), key=_sort_players_for_stats5)),
+        "stat_keys": ordered_stat_keys,
+    }
+
+def _format_player_stats_block(stats: dict, stat_keys: list[str]) -> str:
+    parts = []
+    for key in stat_keys:
+        if key not in stats:
+            continue
+
+        val = stats[key]
+
+        if isinstance(val, float):
+            if key == "rating":
+                shown = f"{val:.1f}"
+            elif val.is_integer():
+                shown = str(int(val))
+            else:
+                shown = f"{val:.2f}"
+        else:
+            shown = str(val)
+
+        parts.append(f"**{_pretty_stat_name(key)}:** {shown}")
+
+    text = " | ".join(parts)
+    if len(text) > 1000:
+        text = text[:997] + "..."
+    return text or "—"
+
+async def build_stats5_embeds(club_id: str, club_name: str | None):
+    club_name = club_name or f"Club {club_id}"
+    data = await get_last5_player_totals(club_id)
+
+    matches = data["matches"]
+    totals = data["totals"]
+    stat_keys = data["stat_keys"]
+
+    if not matches:
+        return []
+
+    team_id = await get_team_id_for_club(club_id)
+    crest_url = build_crest_url(team_id) if team_id else None
+
+    base_title = f"📊 {club_name.upper()} — LAST 5 PLAYER TOTALS"
+    subtitle = "Across League, Playoff and Friendly matches"
+
+    player_items = list(totals.items())
+    pages = [player_items[i:i+10] for i in range(0, len(player_items), 10)] or [[]]
+
+    embeds = []
+    for page_index, page_items in enumerate(pages, start=1):
+        embed = discord.Embed(
+            title=base_title,
+            description=f"{subtitle}\nPage {page_index}/{len(pages)}",
+            color=0xB30000
+        )
+
+        if crest_url:
+            embed.set_thumbnail(url=crest_url)
+
+        for player_name, player_stats in page_items:
+            embed.add_field(
+                name=escape_markdown(player_name),
+                value=_format_player_stats_block(player_stats, stat_keys),
+                inline=False
+            )
+
+        embed.set_footer(text=f"EAFC — Aggregated from the most recent {len(matches)} matches")
+        embeds.append(embed)
+
+    return embeds
+
 # Helpers + embed builder for /stats
 ZWSP = "\u200b"
 
@@ -1255,6 +1470,69 @@ class FreeStatsDropdown(discord.ui.View):
         )
         final_msg = await interaction.edit_original_response(content=None, embed=embed, view=view)
         asyncio.create_task(delete_after_delay(final_msg, 60))
+
+class Stats5Dropdown(discord.ui.View):
+    def __init__(self, results: list[dict]):
+        super().__init__(timeout=90)
+        self.results = results
+
+        options = [
+            discord.SelectOption(
+                label=r["clubInfo"]["name"],
+                value=str(r["clubInfo"]["clubId"])
+            )
+            for r in results[:25]
+        ]
+        options.append(discord.SelectOption(label="None of these", value="none"))
+
+        select = discord.ui.Select(
+            placeholder="Choose a club…",
+            options=options,
+            min_values=1,
+            max_values=1
+        )
+        select.callback = self._on_select
+        self.add_item(select)
+
+    async def _on_select(self, interaction: discord.Interaction):
+        value = self.children[0].values[0]
+
+        if value == "none":
+            msg = await interaction.response.edit_message(content="Selection cancelled.", view=None)
+            asyncio.create_task(delete_after_delay(msg, 60))
+            return
+
+        chosen = next((c for c in self.results if str(c["clubInfo"]["clubId"]) == str(value)), None)
+        if not chosen:
+            msg = await interaction.response.edit_message(content="Could not find that club.", view=None)
+            asyncio.create_task(delete_after_delay(msg, 60))
+            return
+
+        club_id = str(chosen["clubInfo"]["clubId"])
+        club_name = chosen["clubInfo"]["name"]
+
+        await interaction.response.defer()
+        await interaction.edit_original_response(content="⏳ Fetching last 5 player totals…", view=None)
+
+        embeds = await build_stats5_embeds(club_id, club_name)
+        if not embeds:
+            final_msg = await interaction.edit_original_response(
+                content="No recent matches found for this club.",
+                embed=None,
+                view=None
+            )
+            asyncio.create_task(delete_after_delay(final_msg, 60))
+            return
+
+        # first page edits the original message
+        final_msg = await interaction.edit_original_response(content=None, embed=embeds[0], view=None)
+        await log_command_output(interaction, "stats5", final_msg)
+        asyncio.create_task(delete_after_delay(final_msg, 60))
+
+        # extra pages are sent as followups
+        for extra_embed in embeds[1:]:
+            extra_msg = await interaction.followup.send(embed=extra_embed)
+            asyncio.create_task(delete_after_delay(extra_msg, 60))
         
 class LastMatchDropdown(discord.ui.Select):
     def __init__(self, interaction, options, club_data):
@@ -2396,6 +2674,62 @@ async def last5_command(interaction: discord.Interaction, club: str):
 @app_commands.describe(club="Club name or club ID")
 async def l5_command(interaction: discord.Interaction, club: str):
     await last5_command.callback(interaction, club)
+
+@tree.command(name="stats5", description="Show total player stats from a club's last 5 matches across all match types.")
+@app_commands.describe(club="Club name or club ID")
+async def stats5_command(interaction: discord.Interaction, club: str):
+    await interaction.response.defer()
+
+    try:
+        if club.isdigit():
+            club_id = club
+            club_name = None
+        else:
+            hits = await search_clubs_ea(club)
+            if not hits:
+                await interaction.followup.send("No matching clubs found.", ephemeral=True)
+                return
+
+            if len(hits) > 1:
+                view = Stats5Dropdown(hits)
+                msg = await interaction.followup.send(
+                    "Multiple clubs found. Please choose the correct one:",
+                    view=view
+                )
+                asyncio.create_task(delete_after_delay(msg, 60))
+                return
+
+            club_id = str(hits[0]["clubInfo"]["clubId"])
+            club_name = hits[0]["clubInfo"]["name"]
+
+        msg = await interaction.followup.send("⏳ Fetching last 5 player totals…")
+
+        embeds = await build_stats5_embeds(club_id, club_name)
+        if not embeds:
+            await msg.edit(content="No recent matches found for this club.", embed=None, view=None)
+            asyncio.create_task(delete_after_delay(msg, 60))
+            return
+
+        await msg.edit(content=None, embed=embeds[0], view=None)
+        refreshed = await interaction.channel.fetch_message(msg.id)
+        await log_command_output(interaction, "stats5", refreshed)
+        asyncio.create_task(delete_after_delay(refreshed, 60))
+
+        for extra_embed in embeds[1:]:
+            extra_msg = await interaction.followup.send(embed=extra_embed)
+            asyncio.create_task(delete_after_delay(extra_msg, 60))
+
+    except Exception as e:
+        print(f"[ERROR] /stats5 failed: {e}")
+        await interaction.followup.send(
+            "❌ An unexpected error occurred while fetching last 5 player totals.",
+            ephemeral=True
+        )
+
+@tree.command(name="s5", description="Alias for /stats5")
+@app_commands.describe(club="Club name or club ID")
+async def s5_command(interaction: discord.Interaction, club: str):
+    await stats5_command.callback(interaction, club)
 
 @tree.command(name="stats", description="All-in-one club stats: rank, rating, record, form, last 5 matches, activity.")
 @app_commands.describe(club="Club name or club ID")
