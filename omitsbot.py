@@ -1042,33 +1042,6 @@ def _format_stat_value(key: str, val):
         return f"{val:.2f}"
     return str(val)
 
-STATS5_DISPLAY = {
-    "appearances": ("👟", "Apps"),
-    "goals": ("⚽", "Goals"),
-    "assists": ("🅰️", "Assists"),
-    "rating": ("⭐", "Rating"),
-    "shots": ("🎯", "Shots"),
-    "shotson": ("🥅", "On Target"),
-    "passattempts": ("📦", "Pass Att"),
-    "passesmade": ("🥾", "Passes"),
-    "dribblesmade": ("🪄", "Dribbles"),
-    "tacklesmade": ("🛡️", "Tackles"),
-    "tacklesuccessful": ("✅", "Tkl Won"),
-    "interceptions": ("🚫", "Interceptions"),
-    "blocks": ("🧱", "Blocks"),
-    "saves": ("🧤", "Saves"),
-    "goalsconceded": ("🥲", "Conceded"),
-    "cleansheets": ("🧼", "Clean Sheets"),
-    "yellowcards": ("🟨", "Yellow"),
-    "redcards": ("🟥", "Red"),
-    "fouls": ("❌", "Fouls"),
-    "foulssuffered": ("🎁", "Won Fouls"),
-    "motm": ("👑", "POTM"),
-    "possession": ("📊", "Possession"),
-    "corners": ("🚩", "Corners"),
-    "offsides": ("⛔", "Offsides"),
-}
-
 STATS5_HIDE_KEYS = {
     "archetypeid",
     "balllivesaves",
@@ -1129,40 +1102,31 @@ def _format_stat_value(key: str, val):
         return f"{val:.2f}"
     return str(val)
 
-def _format_player_stats_block(stats: dict, stat_keys: list[str], max_lines: int = 6) -> str:
-    ordered_keys = [k for k in STATS5_PRIORITY_ORDER if k in stats and k not in STATS5_HIDE_KEYS]
-    ordered_keys += [
-        k for k in stat_keys
-        if k in stats and k not in ordered_keys and k not in STATS5_HIDE_KEYS
-    ]
+def _format_player_stats_block(stats: dict) -> str:
 
-    rows = []
-    i = 0
+    apps = int(stats.get("appearances", 0))
+    goals = int(stats.get("goals", 0))
+    assists = int(stats.get("assists", 0))
+    shots = int(stats.get("shots", 0))
+    passes = int(stats.get("passesmade", 0))
+    tackles = int(stats.get("tacklesmade", 0))
+    yc = int(stats.get("yellowcards", 0))
+    rc = int(stats.get("redcards", 0))
 
-    while i < len(ordered_keys):
-        left_key = ordered_keys[i]
-        right_key = ordered_keys[i + 1] if i + 1 < len(ordered_keys) else None
+    rating = stats.get("rating", 0)
+    if isinstance(rating, float):
+        rating = round(rating / apps, 1) if apps else rating
 
-        left_label = STATS5_COMPACT_LABELS.get(left_key, _pretty_stat_name(left_key)[:7])
-        left_val = _format_stat_value(left_key, stats[left_key])
-        left_text = f"{left_label:<8} {left_val:>5}"
-
-        if right_key:
-            right_label = STATS5_COMPACT_LABELS.get(right_key, _pretty_stat_name(right_key)[:7])
-            right_val = _format_stat_value(right_key, stats[right_key])
-            right_text = f"{right_label:<8} {right_val:>5}"
-            row = f"{left_text}   {right_text}"
-        else:
-            row = left_text
-
-        rows.append(row)
-        i += 2
-
-    if len(rows) > max_lines:
-        rows = rows[:max_lines]
-        rows.append("...")
-
-    return "```text\n" + "\n".join(rows) + "\n```"
+    return (
+        f"⚽{goals:<3} "
+        f"🅰{assists:<3} "
+        f"🎯{shots:<3} "
+        f"🥾{passes:<3} "
+        f"🛡{tackles:<3} "
+        f"⭐{rating:<4} "
+        f"🟨{yc:<2} "
+        f"🟥{rc:<2}"
+    )
 
 async def build_stats5_embeds(club_id: str, club_name: str | None):
     club_name = club_name or f"Club {club_id}"
@@ -1179,10 +1143,14 @@ async def build_stats5_embeds(club_id: str, club_name: str | None):
     crest_url = build_crest_url(team_id) if team_id else None
 
     base_title = f"📊 {club_name.upper()} — LAST 5 PLAYER TOTALS"
-    subtitle = f"Across League, Playoff and Friendly matches ({len(matches)} matches)"
 
+    subtitle = (
+        f"Across League, Playoff and Friendly matches ({len(matches)} matches)\n\n"
+        "`        G   A   Sh   Ps   Tk   Rt   YC   RC`"
+    )
+    
     player_items = list(totals.items())
-
+    
     embeds = []
     current_embed = discord.Embed(
         title=base_title,
@@ -1197,7 +1165,7 @@ async def build_stats5_embeds(club_id: str, club_name: str | None):
 
     for player_name, player_stats in player_items:
         safe_name = escape_markdown(player_name)[:256]
-        safe_value = _format_player_stats_block(player_stats, stat_keys, max_lines=6)
+        safe_value = _format_player_stats_block(player_stats)
 
         field_size = len(safe_name) + len(safe_value)
 
