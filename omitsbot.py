@@ -1102,7 +1102,7 @@ def _format_stat_value(key: str, val):
         return f"{val:.2f}"
     return str(val)
 
-def _format_player_stats_block(stats: dict) -> str:
+def _format_player_stats_block(stats: dict):
 
     apps = int(stats.get("appearances", 0))
     goals = int(stats.get("goals", 0))
@@ -1113,19 +1113,17 @@ def _format_player_stats_block(stats: dict) -> str:
     yc = int(stats.get("yellowcards", 0))
     rc = int(stats.get("redcards", 0))
 
-    rating = stats.get("rating", 0)
-    if isinstance(rating, float):
-        rating = round(rating / apps, 1) if apps else rating
+    rating_total = stats.get("rating", 0)
+
+    rating = 0
+    if apps and rating_total:
+        rating = round(rating_total / apps, 1)
 
     return (
-        f"⚽{goals:<3} "
-        f"🅰{assists:<3} "
-        f"🎯{shots:<3} "
-        f"🥾{passes:<3} "
-        f"🛡{tackles:<3} "
-        f"⭐{rating:<4} "
-        f"🟨{yc:<2} "
-        f"🟥{rc:<2}"
+        "```"
+        f"{goals:>3} {assists:>3} {shots:>4} {passes:>4} "
+        f"{tackles:>3} {rating:>4} {yc:>3} {rc:>3}"
+        "```"
     )
 
 async def build_stats5_embeds(club_id: str, club_name: str | None):
@@ -1145,9 +1143,9 @@ async def build_stats5_embeds(club_id: str, club_name: str | None):
     base_title = f"📊 {club_name.upper()} — LAST 5 PLAYER TOTALS"
 
     subtitle = (
-        f"Across League, Playoff and Friendly matches ({len(matches)} matches)\n\n"
-        "`        G   A   Sh   Ps   Tk   Rt   YC   RC`"
-    )
+    f"Across League, Playoff and Friendly matches ({len(matches)} matches)\n\n"
+    "`⚽ G   🅰 A   🎯 Sh   🥾 Ps   🛡 Tk   ⭐ Rt   🟨 YC   🟥 RC`"
+)
     
     player_items = list(totals.items())
     
