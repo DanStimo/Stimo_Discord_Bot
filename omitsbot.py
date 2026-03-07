@@ -934,23 +934,24 @@ def _build_stats5_leaders_text(totals: dict) -> str:
 
     def join_names(names: list[str]) -> str:
         escaped = [f"**{escape_markdown(name)}**" for name in names]
-        return ", ".join(escaped)
+        if len(escaped) == 1:
+            return escaped[0]
+        if len(escaped) == 2:
+            return f"{escaped[0]} and {escaped[1]}"
+        return ", ".join(escaped[:-1]) + f", and {escaped[-1]}"
 
-    # Top scorers
     best_goals = max(int(stats.get("goals", 0) or 0) for stats in totals.values())
     top_scorers = sorted(
         name for name, stats in totals.items()
         if int(stats.get("goals", 0) or 0) == best_goals
     )
 
-    # Top assisters
     best_assists = max(int(stats.get("assists", 0) or 0) for stats in totals.values())
     top_assisters = sorted(
         name for name, stats in totals.items()
         if int(stats.get("assists", 0) or 0) == best_assists
     )
 
-    # Best average rating
     best_rating = max(avg_rating(stats) for stats in totals.values())
     best_rated_players = sorted(
         name for name, stats in totals.items()
@@ -1237,6 +1238,9 @@ async def build_stats5_embeds(club_id: str, club_name: str | None):
     if not matches:
         return []
 
+    if not totals:
+        return []
+
     team_id = await get_team_id_for_club(club_id)
     crest_url = build_crest_url(team_id) if team_id else None
 
@@ -1246,16 +1250,21 @@ async def build_stats5_embeds(club_id: str, club_name: str | None):
     player_items = sorted(
         totals.items(),
         key=lambda item: (
-            -(item[1].get("rating", 0) / item[1].get("appearances", 1))
-            if item[1].get("appearances", 0) else 0
+            -((float(item[1].get("rating", 0) or 0) / int(item[1].get("appearances", 1) or 1))
+              if int(item[1].get("appearances", 0) or 0) > 0 else 0),
+            -int(item[1].get("goals", 0) or 0),
+            -int(item[1].get("assists", 0) or 0),
+            item[0].lower()
         )
     )
 
-    # one table row per player
     rows = [_format_player_stats_row(player_name, player_stats) for player_name, player_stats in player_items]
+    if not rows:
+        return []
+
     team_totals_row = _format_stats5_team_totals(totals)
     leaders_text = _build_stats5_leaders_text(totals)
-    
+
     header = (
         f"{'Player':<12}"
         f"{'G':>3}"
@@ -1269,7 +1278,6 @@ async def build_stats5_embeds(club_id: str, club_name: str | None):
     )
     divider = "-" * len(header)
 
-    # keep each embed safely under Discord limits
     pages = []
     current_rows = []
     current_len = len(header) + len(divider) + 20
@@ -1287,38 +1295,41 @@ async def build_stats5_embeds(club_id: str, club_name: str | None):
     if current_rows:
         pages.append(current_rows)
 
+    if not pages:
+        return []
+
     embeds = []
 
     for idx, page_rows in enumerate(pages, start=1):
         table_body = "\n".join(page_rows)
 
-    if idx == len(pages):
-        table = (
-            "```text\n"
-            + header + "\n"
-            + divider + "\n"
-            + table_body + "\n"
-            + divider + "\n"
-            + team_totals_row + "\n```"
-        )
-    else:
-        table = "```text\n" + header + "\n" + divider + "\n" + table_body + "\n```"
+        if idx == len(pages):
+            table = (
+                "```text\n"
+                + header + "\n"
+                + divider + "\n"
+                + table_body + "\n"
+                + divider + "\n"
+                + team_totals_row + "\n```"
+            )
+        else:
+            table = (
+                "```text\n"
+                + header + "\n"
+                + divider + "\n"
+                + table_body + "\n```"
+            )
 
         embed = discord.Embed(
-        title=base_title,
-        description=f"{subtitle}\nPage {idx}/{len(pages)}\n\n{leaders_text}",
-        color=0xB30000
-    )
+            title=base_title,
+            description=f"{subtitle}\nPage {idx}/{len(pages)}\n\n{leaders_text}",
+            color=0xB30000
+        )
 
         if crest_url:
             embed.set_thumbnail(url=crest_url)
 
-        embed.add_field(
-            name="Totals",
-            value=table,
-            inline=False
-        )
-
+        embed.add_field(name="Totals", value=table, inline=False)
         embed.set_footer(text=f"EAFC — Aggregated from the most recent {len(matches)} matches")
         embeds.append(embed)
 
