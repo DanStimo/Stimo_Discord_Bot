@@ -1169,7 +1169,6 @@ def _format_stats5_team_totals(totals: dict) -> str:
         tackle_attempts += int(stats.get("tackleattempts", 0) or 0)
         tackles_won += int(stats.get("tacklesmade", 0) or 0)
 
-        yc += int(stats.get("yellowcards", 0) or 0)
         rc += int(stats.get("redcards", 0) or 0)
 
         player_apps = int(stats.get("appearances", 0) or 0)
@@ -1190,7 +1189,6 @@ def _format_stats5_team_totals(totals: dict) -> str:
         f"{pass_pct:>4}%"
         f"{tackle_pct:>4}%"
         f"{avg_rating:>5.1f}"
-        f"{yc:>3}"
         f"{rc:>3}"
     )
 
@@ -1224,7 +1222,6 @@ def _format_player_stats_row(player_name: str, stats: dict):
         f"{pass_pct:>4}%"
         f"{tackle_pct:>4}%"
         f"{rating:>5.1f}"
-        f"{yc:>3}"
         f"{rc:>3}"
     )
 
@@ -1273,7 +1270,6 @@ async def build_stats5_embeds(club_id: str, club_name: str | None):
         f"{'PA%':>5}"
         f"{'TK%':>5}"
         f"{'Rt':>5}"
-        f"{'YC':>3}"
         f"{'RC':>3}"
     )
     divider = "-" * len(header)
