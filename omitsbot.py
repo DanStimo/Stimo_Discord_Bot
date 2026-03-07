@@ -923,6 +923,46 @@ def _player_display_name(player: dict) -> str:
         or "Unknown"
     )
 
+def _build_stats5_leaders_text(totals: dict) -> str:
+    if not totals:
+        return "No player data."
+
+    def avg_rating(stats: dict) -> float:
+        apps = int(stats.get("appearances", 0) or 0)
+        rating_total = float(stats.get("rating", 0) or 0)
+        return round(rating_total / apps, 1) if apps else 0.0
+
+    def join_names(names: list[str]) -> str:
+        escaped = [f"**{escape_markdown(name)}**" for name in names]
+        return ", ".join(escaped)
+
+    # Top scorers
+    best_goals = max(int(stats.get("goals", 0) or 0) for stats in totals.values())
+    top_scorers = sorted(
+        name for name, stats in totals.items()
+        if int(stats.get("goals", 0) or 0) == best_goals
+    )
+
+    # Top assisters
+    best_assists = max(int(stats.get("assists", 0) or 0) for stats in totals.values())
+    top_assisters = sorted(
+        name for name, stats in totals.items()
+        if int(stats.get("assists", 0) or 0) == best_assists
+    )
+
+    # Best average rating
+    best_rating = max(avg_rating(stats) for stats in totals.values())
+    best_rated_players = sorted(
+        name for name, stats in totals.items()
+        if avg_rating(stats) == best_rating
+    )
+
+    return (
+        f"⚽ Top scorer: {join_names(top_scorers)} ({best_goals})\n"
+        f"🅰️ Top assister: {join_names(top_assisters)} ({best_assists})\n"
+        f"⭐ Best avg rating: {join_names(best_rated_players)} ({best_rating:.1f})"
+    )
+
 def _sort_players_for_stats5(item: tuple[str, dict]):
     _, stats = item
     return (
@@ -1102,6 +1142,57 @@ def _format_stat_value(key: str, val):
         return f"{val:.2f}"
     return str(val)
 
+def _format_stats5_team_totals(totals: dict) -> str:
+    apps = 0
+    goals = 0
+    assists = 0
+    shots = 0
+    pass_attempts = 0
+    pass_completed = 0
+    tackle_attempts = 0
+    tackles_won = 0
+    yc = 0
+    rc = 0
+    rating_sum = 0.0
+    rating_count = 0
+
+    for _, stats in totals.items():
+        apps += int(stats.get("appearances", 0) or 0)
+        goals += int(stats.get("goals", 0) or 0)
+        assists += int(stats.get("assists", 0) or 0)
+        shots += int(stats.get("shots", 0) or 0)
+
+        pass_attempts += int(stats.get("passattempts", 0) or 0)
+        pass_completed += int(stats.get("passesmade", 0) or 0)
+
+        tackle_attempts += int(stats.get("tackleattempts", 0) or 0)
+        tackles_won += int(stats.get("tacklesmade", 0) or 0)
+
+        yc += int(stats.get("yellowcards", 0) or 0)
+        rc += int(stats.get("redcards", 0) or 0)
+
+        player_apps = int(stats.get("appearances", 0) or 0)
+        player_rating_total = float(stats.get("rating", 0) or 0)
+        if player_apps > 0:
+            rating_sum += player_rating_total / player_apps
+            rating_count += 1
+
+    pass_pct = round((pass_completed / pass_attempts) * 100) if pass_attempts else 0
+    tackle_pct = round((tackles_won / tackle_attempts) * 100) if tackle_attempts else 0
+    avg_rating = round(rating_sum / rating_count, 1) if rating_count else 0.0
+
+    return (
+        f"{'TEAM':<12}"
+        f"{goals:>3}"
+        f"{assists:>3}"
+        f"{shots:>4}"
+        f"{pass_pct:>4}%"
+        f"{tackle_pct:>4}%"
+        f"{avg_rating:>5.1f}"
+        f"{yc:>3}"
+        f"{rc:>3}"
+    )
+
 def _format_player_stats_row(player_name: str, stats: dict):
     apps = int(stats.get("appearances", 0))
     goals = int(stats.get("goals", 0))
@@ -1162,17 +1253,19 @@ async def build_stats5_embeds(club_id: str, club_name: str | None):
 
     # one table row per player
     rows = [_format_player_stats_row(player_name, player_stats) for player_name, player_stats in player_items]
-
+    team_totals_row = _format_stats5_team_totals(totals)
+    leaders_text = _build_stats5_leaders_text(totals)
+    
     header = (
-    f"{'Player':<12}"
-    f"{'G':>3}"
-    f"{'A':>3}"
-    f"{'Sh':>4}"
-    f"{'PA%':>5}"
-    f"{'TK%':>5}"
-    f"{'Rt':>5}"
-    f"{'YC':>3}"
-    f"{'RC':>3}"
+        f"{'Player':<12}"
+        f"{'G':>3}"
+        f"{'A':>3}"
+        f"{'Sh':>4}"
+        f"{'PA%':>5}"
+        f"{'TK%':>5}"
+        f"{'Rt':>5}"
+        f"{'YC':>3}"
+        f"{'RC':>3}"
     )
     divider = "-" * len(header)
 
@@ -1197,13 +1290,25 @@ async def build_stats5_embeds(club_id: str, club_name: str | None):
     embeds = []
 
     for idx, page_rows in enumerate(pages, start=1):
-        table = "```text\n" + header + "\n" + divider + "\n" + "\n".join(page_rows) + "\n```"
+        table_body = "\n".join(page_rows)
+
+    if idx == len(pages):
+        table = (
+            "```text\n"
+            + header + "\n"
+            + divider + "\n"
+            + table_body + "\n"
+            + divider + "\n"
+            + team_totals_row + "\n```"
+        )
+    else:
+        table = "```text\n" + header + "\n" + divider + "\n" + table_body + "\n```"
 
         embed = discord.Embed(
-            title=base_title,
-            description=f"{subtitle}\nPage {idx}/{len(pages)}",
-            color=0xB30000
-        )
+        title=base_title,
+        description=f"{subtitle}\nPage {idx}/{len(pages)}\n\n{leaders_text}",
+        color=0xB30000
+    )
 
         if crest_url:
             embed.set_thumbnail(url=crest_url)
