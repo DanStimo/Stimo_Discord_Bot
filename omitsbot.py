@@ -1069,6 +1069,57 @@ STATS5_DISPLAY = {
     "offsides": ("⛔", "Offsides"),
 }
 
+STATS5_HIDE_KEYS = {
+    "archetypeid",
+    "balllivesaves",
+    "cleansheetsany",
+    "cleansheetsdef",
+    "cleansheetsgk",
+    "gooddirectionsaves",
+    "namespace",
+    "parrysaves",
+    "punchsaves",
+    "realtimegame",
+    "realtimeidle",
+    "reflexsaves",
+    "score",
+    "secondsplayed",
+    "secondplayed",
+    "tackleattempts",
+    "userresult",
+    "vprohackreason",
+    "wins",
+    "crosssaves",
+    "mom",
+}
+
+STATS5_COMPACT_LABELS = {
+    "appearances": "Apps",
+    "goals": "Goals",
+    "assists": "Ast",
+    "rating": "Rating",
+    "shots": "Shots",
+    "shotson": "OnTgt",
+    "passattempts": "PassAtt",
+    "passesmade": "Passes",
+    "dribblesmade": "Dribbles",
+    "tacklesmade": "Tackles",
+    "tacklesuccessful": "TklWon",
+    "interceptions": "Int",
+    "blocks": "Blocks",
+    "saves": "Saves",
+    "goalsconceded": "Conceded",
+    "cleansheets": "CS",
+    "yellowcards": "YC",
+    "redcards": "RC",
+    "fouls": "Fouls",
+    "foulssuffered": "WonFld",
+    "motm": "POTM",
+    "possession": "Poss",
+    "corners": "Corners",
+    "offsides": "Offside",
+}
+
 def _format_stat_value(key: str, val):
     if isinstance(val, float):
         if key == "rating":
@@ -1078,9 +1129,12 @@ def _format_stat_value(key: str, val):
         return f"{val:.2f}"
     return str(val)
 
-def _format_player_stats_block(stats: dict, stat_keys: list[str], max_lines: int = 8) -> str:
-    ordered_keys = [k for k in STATS5_PRIORITY_ORDER if k in stats]
-    ordered_keys += [k for k in stat_keys if k in stats and k not in ordered_keys]
+def _format_player_stats_block(stats: dict, stat_keys: list[str], max_lines: int = 6) -> str:
+    ordered_keys = [k for k in STATS5_PRIORITY_ORDER if k in stats and k not in STATS5_HIDE_KEYS]
+    ordered_keys += [
+        k for k in stat_keys
+        if k in stats and k not in ordered_keys and k not in STATS5_HIDE_KEYS
+    ]
 
     rows = []
     i = 0
@@ -1089,19 +1143,14 @@ def _format_player_stats_block(stats: dict, stat_keys: list[str], max_lines: int
         left_key = ordered_keys[i]
         right_key = ordered_keys[i + 1] if i + 1 < len(ordered_keys) else None
 
-        left_emoji, left_label = STATS5_DISPLAY.get(
-            left_key, ("•", _pretty_stat_name(left_key))
-        )
+        left_label = STATS5_COMPACT_LABELS.get(left_key, _pretty_stat_name(left_key)[:7])
         left_val = _format_stat_value(left_key, stats[left_key])
-
-        left_text = f"{left_emoji} {left_label:<12} {left_val:>5}"
+        left_text = f"{left_label:<8} {left_val:>5}"
 
         if right_key:
-            right_emoji, right_label = STATS5_DISPLAY.get(
-                right_key, ("•", _pretty_stat_name(right_key))
-            )
+            right_label = STATS5_COMPACT_LABELS.get(right_key, _pretty_stat_name(right_key)[:7])
             right_val = _format_stat_value(right_key, stats[right_key])
-            right_text = f"{right_emoji} {right_label:<12} {right_val:>5}"
+            right_text = f"{right_label:<8} {right_val:>5}"
             row = f"{left_text}   {right_text}"
         else:
             row = left_text
@@ -1148,7 +1197,7 @@ async def build_stats5_embeds(club_id: str, club_name: str | None):
 
     for player_name, player_stats in player_items:
         safe_name = escape_markdown(player_name)[:256]
-        safe_value = _format_player_stats_block(player_stats, stat_keys, max_lines=8)
+        safe_value = _format_player_stats_block(player_stats, stat_keys, max_lines=6)
 
         field_size = len(safe_name) + len(safe_value)
 
