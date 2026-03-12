@@ -341,15 +341,15 @@ async def on_message(message: discord.Message):
             # If they typed a clubId directly
             if content.isdigit():
                 club_id = content
-                found = await search_clubs_ea(content)
-                club_name = str(found[0]["clubInfo"]["name"]) if found else f"Club {club_id}"
-
-                # 🔵 LOG: numeric path
-                #await log_free_stats(message, query=content, resolved=f"{club_name} (ID {club_id})")
-
-                # delete the user's post so our response "replaces" it
+                club_name = f"Club {club_id}"   # ✅ do NOT call search endpoint
+            
                 asyncio.create_task(safe_delete(message))
-                await send_stats_message_to_channel(message.channel, club_id, club_name, origin_message=message)
+                await send_stats_message_to_channel(
+                    message.channel,
+                    club_id,
+                    club_name,
+                    origin_message=message
+                )
                 return
 
             # Search by name
@@ -465,21 +465,23 @@ async def _ea_get_json(url: str, params: dict, retries: int = 5) -> dict | list 
     return None
 
 async def search_clubs_ea(query: str) -> list:
-    """Partial-name search with retries/backoff."""
-    if not query or not query.strip():
+    if not query.strip():
         return []
 
-    data = await _ea_get_json(
-        "https://proclubs.ea.com/api/fc/allTimeLeaderboard/search",
-        {"platform": PLATFORM, "clubName": query.strip()},
-    )
+    try:
+        data = await _ea_get_json(
+            "https://proclubs.ea.com/api/fc/allTimeLeaderboard/search",
+            {"platform": PLATFORM, "clubName": query.strip()},
+        )
+    except Exception:
+        return []
 
     if not isinstance(data, list):
         return []
 
     return [
         c for c in data
-        if c.get("clubInfo", {}).get("name", "").strip().lower() != "none of these"
+        if c.get("clubInfo", {}).get("name", "").lower() != "none of these"
     ]
     
 from datetime import datetime, timezone
@@ -599,20 +601,7 @@ def build_crest_url(team_id: str | int | None) -> str | None:
         return None
     return f"https://eafc24.content.easports.com/fifa/fltOnlineAssets/24B23FDE-7835-41C2-87A2-F453DFDB2E82/2024/fcweb/crests/256x256/l{team_id}.png"
 
-# --- Web helpers for EA endpoints ---
-async def warm_ea_session():
-    try:
-        print("[EA] Warming session...")
-        await _ea_get_json(
-            "https://proclubs.ea.com/api/fc/allTimeLeaderboard",
-            {"platform": PLATFORM},
-            retries=3,
-        )
-        await asyncio.sleep(1.5)
-        print("[EA] Warm session complete.")
-    except Exception as e:
-        print(f"[EA] Warm session failed: {e}")
-        
+# --- Web helpers for EA endpoints ---        
 async def get_club_stats(club_id):
     data = await _ea_get_json(
         "https://proclubs.ea.com/api/fc/clubs/overallStats",
