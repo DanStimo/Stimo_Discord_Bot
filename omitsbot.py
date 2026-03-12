@@ -4686,7 +4686,6 @@ async def on_ready():
         print(f"[ERROR] Command sync failed: {e}")
 
     print(f"Bot is ready as {client.user}")
-    await warm_ea_session()
     
     # Run background tasks once (avoid duplicates on reconnect)
     if not getattr(client, "background_started", False):
