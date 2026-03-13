@@ -219,6 +219,8 @@ def _twitch_url_from_input(value: str | None) -> str | None:
     return f"https://twitch.tv/{username}"
 
 async def run_stats5_command(interaction: discord.Interaction, club: str):
+    global EA_API_AVAILABLE
+
     await interaction.response.defer()
 
     try:
@@ -267,9 +269,7 @@ async def run_stats5_command(interaction: discord.Interaction, club: str):
             extra_msg = await interaction.followup.send(embed=extra_embed)
             asyncio.create_task(delete_after_delay(extra_msg, 60))
 
-        except RuntimeError as e:
-        global EA_API_AVAILABLE
-
+    except RuntimeError as e:
         if "EA API blocked" in str(e):
             EA_API_AVAILABLE = False
             await interaction.followup.send(
