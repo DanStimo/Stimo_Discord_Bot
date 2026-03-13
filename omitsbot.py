@@ -254,60 +254,60 @@ async def ea_api_monitor():
                 EA_API_AVAILABLE = True
 
             if EA_API_AVAILABLE != EA_LAST_STATE:
-    global ea_status_message_id
-
-    channel = client.get_channel(EA_MONITOR_CHANNEL_ID)
-
-    if channel:
-        public_ip = await get_public_ip()
-
-        if not EA_API_AVAILABLE:
-            # EA has just become blocked
-            msg = await channel.send(
-                f"⚠️ **EA API appears to be BLOCKED (403 Access Denied)**\n"
-                f"Public IP: `{public_ip}`"
-            )
-            ea_status_message_id = msg.id
-
-        else:
-            # EA has recovered
-            if ea_status_message_id:
-                try:
-                    old_msg = await channel.fetch_message(ea_status_message_id)
-
-                    await old_msg.edit(
-                        content=(
-                            f"✅ **EA API block resolved**\n"
-                            f"Public IP at time of block: `{public_ip}`"
+                global ea_status_message_id
+            
+                channel = client.get_channel(EA_MONITOR_CHANNEL_ID)
+            
+                if channel:
+                    public_ip = await get_public_ip()
+            
+                    if not EA_API_AVAILABLE:
+                        # EA has just become blocked
+                        msg = await channel.send(
+                            f"⚠️ **EA API appears to be BLOCKED (403 Access Denied)**\n"
+                            f"Public IP: `{public_ip}`"
                         )
-                    )
-
-                    await old_msg.reply(
-                        f"🔔 **EA API connectivity restored**\n"
-                        f"Current Public IP: `{public_ip}`"
-                    )
-
-                except discord.NotFound:
-                    await channel.send(
-                        f"✅ **EA API connectivity restored**\n"
-                        f"Public IP: `{public_ip}`"
-                    )
-                except Exception as e:
-                    print(f"[EA MONITOR ERROR] Failed to update alert message: {e}")
-                    await channel.send(
-                        f"✅ **EA API connectivity restored**\n"
-                        f"Public IP: `{public_ip}`"
-                    )
-
-            else:
-                await channel.send(
-                    f"✅ **EA API connectivity restored**\n"
-                    f"Public IP: `{public_ip}`"
-                )
-
-            ea_status_message_id = None
-
-    EA_LAST_STATE = EA_API_AVAILABLE
+                        ea_status_message_id = msg.id
+            
+                    else:
+                        # EA has recovered
+                        if ea_status_message_id:
+                            try:
+                                old_msg = await channel.fetch_message(ea_status_message_id)
+            
+                                await old_msg.edit(
+                                    content=(
+                                        f"✅ **EA API block resolved**\n"
+                                        f"Public IP at time of block: `{public_ip}`"
+                                    )
+                                )
+            
+                                await old_msg.reply(
+                                    f"🔔 **EA API connectivity restored**\n"
+                                    f"Current Public IP: `{public_ip}`"
+                                )
+            
+                            except discord.NotFound:
+                                await channel.send(
+                                    f"✅ **EA API connectivity restored**\n"
+                                    f"Public IP: `{public_ip}`"
+                                )
+                            except Exception as e:
+                                print(f"[EA MONITOR ERROR] Failed to update alert message: {e}")
+                                await channel.send(
+                                    f"✅ **EA API connectivity restored**\n"
+                                    f"Public IP: `{public_ip}`"
+                                )
+            
+                        else:
+                            await channel.send(
+                                f"✅ **EA API connectivity restored**\n"
+                                f"Public IP: `{public_ip}`"
+                            )
+            
+                        ea_status_message_id = None
+            
+                EA_LAST_STATE = EA_API_AVAILABLE
 
         except Exception as e:
             print(f"[EA MONITOR ERROR] {e}")
