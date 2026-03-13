@@ -224,6 +224,69 @@ def _twitch_url_from_input(value: str | None) -> str | None:
     username = v
     return f"https://twitch.tv/{username}"
 
+async def run_stats5_command(interaction: discord.Interaction, club: str):
+    await interaction.response.defer()
+
+    try:
+        if club.isdigit():
+            club_id = club
+            club_name = None
+        else:
+            hits = await search_clubs_ea(club)
+            if not hits:
+                await interaction.followup.send("No matching clubs found.", ephemeral=True)
+                return
+
+            if len(hits) > 1:
+                view = Stats5Dropdown(hits)
+                msg = await interaction.followup.send(
+                    "Multiple clubs found. Please choose the correct one:",
+                    view=view
+                )
+                asyncio.create_task(delete_after_delay(msg, 60))
+                return
+
+            club_id = str(hits[0]["clubInfo"]["clubId"])
+            club_name = hits[0]["clubInfo"]["name"]
+
+        msg = await interaction.followup.send("⏳ Fetching last 5 player totals…")
+
+        embeds = await build_stats5_embeds(club_id, club_name)
+        if not embeds:
+            await msg.edit(content="No recent matches found for this club.", embed=None, view=None)
+            asyncio.create_task(delete_after_delay(msg, 60))
+            return
+
+        await msg.edit(content=None, embed=embeds[0], view=None)
+        refreshed = await interaction.channel.fetch_message(msg.id)
+        await log_command_output(interaction, "stats5", refreshed)
+        asyncio.create_task(delete_after_delay(refreshed, 60))
+
+        for extra_embed in embeds[1:]:
+            extra_msg = await interaction.followup.send(embed=extra_embed)
+            asyncio.create_task(delete_after_delay(extra_msg, 60))
+
+    except RuntimeError as e:
+        if "EA API blocked" in str(e):
+            await interaction.followup.send(
+                "⚠️ EA Clubs API is currently blocking requests from this host. Please try again later.",
+                ephemeral=True
+            )
+            return
+
+        print(f"[ERROR] /stats5 failed: {e}")
+        await interaction.followup.send(
+            "❌ An unexpected error occurred while fetching last 5 player totals.",
+            ephemeral=True
+        )
+
+    except Exception as e:
+        print(f"[ERROR] /stats5 failed: {e}")
+        await interaction.followup.send(
+            "❌ An unexpected error occurred while fetching last 5 player totals.",
+            ephemeral=True
+        )
+
 @client.event
 async def on_member_join(member: discord.Member):
     print(f"[JOIN] on_member_join fired for {member} (id={member.id})")
@@ -442,17 +505,25 @@ import urllib.parse
 import asyncio
 
 async def _ea_get_json(url: str, params: dict, retries: int = 5) -> dict | list | None:
-    """GET JSON with retries + short body log on non-200."""
+    """GET JSON with retries. Returns a marker dict for hard EA 403 blocks."""
     for attempt in range(retries):
         try:
             r = await _client_ea.get(url, params=params)
+            body = r.text[:300]
 
             if r.status_code == 200:
                 return r.json()
 
-            print(f"[EA] {r.status_code} {url} try {attempt+1}/{retries} :: {r.text[:200]}")
+            print(f"[EA] {r.status_code} {url} try {attempt+1}/{retries} :: {body}")
 
-            # For anti-bot / transient blocking, back off a bit more
+            # Hard CDN / edge deny page from EA
+            if r.status_code == 403 and "Access Denied" in body:
+                return {
+                    "_ea_blocked": True,
+                    "_status": 403,
+                    "_url": str(r.request.url),
+                }
+
             if r.status_code in (403, 429, 500, 502, 503, 504):
                 await asyncio.sleep(1.2 + attempt * 1.5 + random.random())
                 continue
@@ -473,6 +544,9 @@ async def search_clubs_ea(query: str) -> list:
         "https://proclubs.ea.com/api/fc/allTimeLeaderboard/search",
         {"platform": PLATFORM, "clubName": query.strip()},
     )
+
+    if isinstance(data, dict) and data.get("_ea_blocked"):
+        raise RuntimeError("EA API blocked this host with 403 Access Denied")
 
     if not isinstance(data, list):
         return []
@@ -2957,6 +3031,7 @@ async def l5_command(interaction: discord.Interaction, club: str):
 @tree.command(name="stats5", description="Show total player stats from a club's last 5 matches across all match types.")
 @app_commands.describe(club="Club name or club ID")
 async def stats5_command(interaction: discord.Interaction, club: str):
+    await run_stats5_command(interaction, club)
     await interaction.response.defer()
 
     try:
@@ -3008,6 +3083,7 @@ async def stats5_command(interaction: discord.Interaction, club: str):
 @tree.command(name="s5", description="Alias for /stats5")
 @app_commands.describe(club="Club name or club ID")
 async def s5_command(interaction: discord.Interaction, club: str):
+    await run_stats5_command(interaction, club)
     await stats5_command.callback(interaction, club)
 
 @tree.command(name="stats", description="All-in-one club stats: rank, rating, record, form, last 5 matches, activity.")
