@@ -23,6 +23,8 @@ CLUB_ID = os.getenv("CLUB_ID", "167054")  # fallback/default
 PLATFORM = os.getenv("PLATFORM", "gen5")
 OFFSIDE_KEY = "offside.json"
 EA_API_AVAILABLE = True
+EA_LAST_STATE = True
+EA_MONITOR_CHANNEL_ID = 1481950979900575765  # your admin channel
 
 MATCH_TYPE_LABELS = {
     "leagueMatch": "League",
@@ -217,6 +219,42 @@ def _twitch_url_from_input(value: str | None) -> str | None:
 
     username = v
     return f"https://twitch.tv/{username}"
+
+async def ea_api_monitor():
+    global EA_API_AVAILABLE, EA_LAST_STATE
+
+    await bot.wait_until_ready()
+
+    while not bot.is_closed():
+        try:
+            data = await _ea_get_json(
+                "https://proclubs.ea.com/api/fc/allTimeLeaderboard",
+                {"platform": PLATFORM},
+                retries=1,
+            )
+
+            if isinstance(data, dict) and data.get("_ea_blocked"):
+                EA_API_AVAILABLE = False
+            elif data is None:
+                EA_API_AVAILABLE = False
+            else:
+                EA_API_AVAILABLE = True
+
+            if EA_API_AVAILABLE != EA_LAST_STATE:
+                channel = bot.get_channel(EA_MONITOR_CHANNEL_ID)
+
+                if channel:
+                    if EA_API_AVAILABLE:
+                        await channel.send("✅ **EA API connectivity restored**")
+                    else:
+                        await channel.send("⚠️ **EA API appears to be BLOCKED (403 Access Denied)**")
+
+                EA_LAST_STATE = EA_API_AVAILABLE
+
+        except Exception as e:
+            print(f"[EA MONITOR ERROR] {e}")
+
+        await asyncio.sleep(300)  # check every 5 minutes
 
 async def run_stats5_command(interaction: discord.Interaction, club: str):
     global EA_API_AVAILABLE
@@ -4842,6 +4880,8 @@ async def on_ready():
 
     print(f"Bot is ready as {client.user}")
     await warm_ea_session()
+
+    bot.loop.create_task(ea_api_monitor())
     
     # Run background tasks once (avoid duplicates on reconnect)
     if not getattr(client, "background_started", False):
