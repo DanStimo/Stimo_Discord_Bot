@@ -559,13 +559,33 @@ async def _ea_get_json(url: str, params: dict, retries: int = 5, silent: bool = 
             ) as client:
                 r = await client.get(url, params=params)
                 
-            body = r.text[:300]
+            body = r.text[:1000]
 
             if r.status_code == 200:
                 return r.json()
-
+            
             if not silent:
-                print(f"[EA] {r.status_code} {url} try {attempt+1}/{retries} :: {body}")
+                short_reason = "HTTP error"
+                if "Access Denied" in body:
+                    short_reason = "Access Denied"
+            
+                    ref = None
+                    marker = "Reference&#32;&#35;"
+                    if marker in body:
+                        try:
+                            ref_part = body.split(marker, 1)[1]
+                            ref = ref_part.split("<", 1)[0]
+                            ref = ref.replace("&#46;", ".")
+                        except Exception:
+                            ref = None
+            
+                    if ref:
+                        short_reason += f" (Ref #{ref})"
+            
+                else:
+                    short_reason = body[:120].replace("\n", " ").replace("\r", " ")
+            
+                print(f"[EA] {r.status_code} {url} try {attempt+1}/{retries} :: {short_reason}")
 
             # Hard CDN / edge deny page from EA
             if r.status_code == 403 and "Access Denied" in body:
