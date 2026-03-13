@@ -343,7 +343,8 @@ async def test_ea_via_relay() -> tuple[bool, str]:
 async def run_stats5_command(interaction: discord.Interaction, club: str):
     global EA_API_AVAILABLE
 
-    await interaction.response.defer()
+    if not interaction.response.is_done():
+        await interaction.response.defer()
 
     try:
         if not EA_API_AVAILABLE:
@@ -3301,7 +3302,6 @@ async def stats5_command(interaction: discord.Interaction, club: str):
 @app_commands.describe(club="Club name or club ID")
 async def s5_command(interaction: discord.Interaction, club: str):
     await run_stats5_command(interaction, club)
-    await stats5_command.callback(interaction, club)
 
 @tree.command(name="stats", description="All-in-one club stats: rank, rating, record, form, last 5 matches, activity.")
 @app_commands.describe(club="Club name or club ID")
