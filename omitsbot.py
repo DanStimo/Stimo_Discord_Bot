@@ -223,6 +223,14 @@ def _twitch_url_from_input(value: str | None) -> str | None:
     username = v
     return f"https://twitch.tv/{username}"
 
+async def get_public_ip() -> str:
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get("https://api.ipify.org")
+            return r.text.strip()
+    except Exception:
+        return "unknown"
+
 async def ea_api_monitor():
     global EA_API_AVAILABLE, EA_LAST_STATE
 
@@ -245,15 +253,23 @@ async def ea_api_monitor():
                 EA_API_AVAILABLE = True
 
             if EA_API_AVAILABLE != EA_LAST_STATE:
-                channel = client.get_channel(EA_MONITOR_CHANNEL_ID)
+    channel = client.get_channel(EA_MONITOR_CHANNEL_ID)
 
-                if channel:
-                    if EA_API_AVAILABLE:
-                        await channel.send("✅ **EA API connectivity restored**")
-                    else:
-                        await channel.send("⚠️ **EA API appears to be BLOCKED (403 Access Denied)**")
+    if channel:
+        public_ip = await get_public_ip()
 
-                EA_LAST_STATE = EA_API_AVAILABLE
+        if EA_API_AVAILABLE:
+            await channel.send(
+                f"✅ **EA API connectivity restored**\n"
+                f"Public IP: `{public_ip}`"
+            )
+        else:
+            await channel.send(
+                f"⚠️ **EA API appears to be BLOCKED (403 Access Denied)**\n"
+                f"Public IP: `{public_ip}`"
+            )
+
+    EA_LAST_STATE = EA_API_AVAILABLE
 
         except Exception as e:
             print(f"[EA MONITOR ERROR] {e}")
@@ -2887,6 +2903,8 @@ async def eahealth_command(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
 
     try:
+        public_ip = await get_public_ip()
+
         data = await _ea_get_json(
             "https://proclubs.ea.com/api/fc/allTimeLeaderboard",
             {"platform": PLATFORM},
@@ -2895,23 +2913,23 @@ async def eahealth_command(interaction: discord.Interaction):
 
         if isinstance(data, dict) and data.get("_ea_blocked"):
             await interaction.followup.send(
-                "❌ EA API is **blocking this host (403 Access Denied)**.\n"
-                "Likely caused by EA blocking the server IP.",
+                f"❌ EA API is **blocking this host (403 Access Denied)**.\n"
+                f"Public IP: `{public_ip}`",
                 ephemeral=True
             )
             return
 
         if data is None:
             await interaction.followup.send(
-                "⚠️ EA API did not respond after retries.",
+                f"⚠️ EA API did not respond after retries.\n"
+                f"Public IP: `{public_ip}`",
                 ephemeral=True
             )
             return
 
-        host_ip = socket.gethostbyname(socket.gethostname())
-
         await interaction.followup.send(
-            f"✅ EA API responded successfully.\nServer IP: `{host_ip}`",
+            f"✅ EA API responded successfully.\n"
+            f"Public IP: `{public_ip}`",
             ephemeral=True
         )
 
