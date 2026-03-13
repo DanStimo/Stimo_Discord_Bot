@@ -253,23 +253,23 @@ async def ea_api_monitor():
                 EA_API_AVAILABLE = True
 
             if EA_API_AVAILABLE != EA_LAST_STATE:
-    channel = client.get_channel(EA_MONITOR_CHANNEL_ID)
-
-    if channel:
-        public_ip = await get_public_ip()
-
-        if EA_API_AVAILABLE:
-            await channel.send(
-                f"✅ **EA API connectivity restored**\n"
-                f"Public IP: `{public_ip}`"
-            )
-        else:
-            await channel.send(
-                f"⚠️ **EA API appears to be BLOCKED (403 Access Denied)**\n"
-                f"Public IP: `{public_ip}`"
-            )
-
-    EA_LAST_STATE = EA_API_AVAILABLE
+                channel = client.get_channel(EA_MONITOR_CHANNEL_ID)
+            
+                if channel:
+                    public_ip = await get_public_ip()
+            
+                    if EA_API_AVAILABLE:
+                        await channel.send(
+                            f"✅ **EA API connectivity restored**\n"
+                            f"Public IP: `{public_ip}`"
+                        )
+                    else:
+                        await channel.send(
+                            f"⚠️ **EA API appears to be BLOCKED (403 Access Denied)**\n"
+                            f"Public IP: `{public_ip}`"
+                        )
+            
+                EA_LAST_STATE = EA_API_AVAILABLE
 
         except Exception as e:
             print(f"[EA MONITOR ERROR] {e}")
