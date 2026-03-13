@@ -25,6 +25,12 @@ OFFSIDE_KEY = "offside.json"
 EA_API_AVAILABLE = True
 EA_LAST_STATE = True
 EA_MONITOR_CHANNEL_ID = 1481950979900575765  # your admin channel
+ea_monitor_task = None
+
+global ea_monitor_task
+
+if ea_monitor_task is None or ea_monitor_task.done():
+    ea_monitor_task = client.loop.create_task(ea_api_monitor())
 
 MATCH_TYPE_LABELS = {
     "leagueMatch": "League",
@@ -546,7 +552,7 @@ import random
 import urllib.parse
 import asyncio
 
-async def _ea_get_json(url: str, params: dict, retries: int = 5) -> dict | list | None:
+async def _ea_get_json(url: str, params: dict, retries: int = 5, silent: bool = False) -> dict | list | None:
     """GET JSON with retries. Returns a marker dict for hard EA 403 blocks."""
     for attempt in range(retries):
         try:
@@ -563,7 +569,8 @@ async def _ea_get_json(url: str, params: dict, retries: int = 5) -> dict | list 
             if r.status_code == 200:
                 return r.json()
 
-            print(f"[EA] {r.status_code} {url} try {attempt+1}/{retries} :: {body}")
+            if not silent:
+                print(f"[EA] {r.status_code} {url} try {attempt+1}/{retries} :: {body}")
 
             # Hard CDN / edge deny page from EA
             if r.status_code == 403 and "Access Denied" in body:
@@ -578,7 +585,8 @@ async def _ea_get_json(url: str, params: dict, retries: int = 5) -> dict | list 
                 continue
 
         except Exception as e:
-            print(f"[EA] exception {url} try {attempt+1}/{retries} :: {e}")
+            if not silent:
+                print(f"[EA] exception {url} try {attempt+1}/{retries} :: {e}")
 
         await asyncio.sleep(0.8 + random.random())
 
@@ -590,8 +598,10 @@ async def search_clubs_ea(query: str) -> list:
         return []
 
     data = await _ea_get_json(
-        "https://proclubs.ea.com/api/fc/allTimeLeaderboard/search",
-        {"platform": PLATFORM, "clubName": query.strip()},
+        "https://proclubs.ea.com/api/fc/allTimeLeaderboard",
+        {"platform": PLATFORM},
+        retries=1,
+        silent=True,
     )
 
     if isinstance(data, dict) and data.get("_ea_blocked"):
