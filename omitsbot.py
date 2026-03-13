@@ -26,6 +26,8 @@ EA_API_AVAILABLE = True
 EA_LAST_STATE = True
 EA_MONITOR_CHANNEL_ID = 1481950979900575765  # your admin channel
 ea_monitor_task = None
+presence_task = None
+twitch_monitor_task = None
 
 MATCH_TYPE_LABELS = {
     "leagueMatch": "League",
@@ -4907,13 +4909,11 @@ async def on_ready():
     print(f"Bot is ready as {client.user}")
     await warm_ea_session()
     
-    global ea_monitor_task
-    
-    if ea_monitor_task is None or ea_monitor_task.done():
-        ea_monitor_task = client.loop.create_task(ea_api_monitor())
-    
     # Run background tasks once (avoid duplicates on reconnect)
     if not getattr(client, "background_started", False):
+    
+        global ea_monitor_task
+    
         try:
             client.loop.create_task(rotate_presence())
             print("🌀 Presence rotation started.")
@@ -4925,6 +4925,13 @@ async def on_ready():
             print("📡 Twitch live monitor started.")
         except Exception as e:
             print(f"[ERROR] Could not start Twitch monitor: {e}")
+    
+        try:
+            if ea_monitor_task is None or ea_monitor_task.done():
+                ea_monitor_task = client.loop.create_task(ea_api_monitor())
+                print("🛡️ EA API monitor started.")
+        except Exception as e:
+            print(f"[ERROR] Could not start EA monitor: {e}")
     
         client.background_started = True
 
