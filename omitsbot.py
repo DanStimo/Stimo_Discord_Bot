@@ -232,6 +232,7 @@ async def ea_api_monitor():
                 "https://proclubs.ea.com/api/fc/allTimeLeaderboard",
                 {"platform": PLATFORM},
                 retries=1,
+                silent=True,
             )
 
             if isinstance(data, dict) and data.get("_ea_blocked"):
@@ -575,7 +576,7 @@ async def _ea_get_json(url: str, params: dict, retries: int = 5, silent: bool = 
                         try:
                             ref_part = body.split(marker, 1)[1]
                             ref = ref_part.split("<", 1)[0]
-                            ref = ref.replace("&#46;", ".")
+                            ref = ref.replace("&#46;", ".").strip()
                         except Exception:
                             ref = None
             
