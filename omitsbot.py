@@ -235,86 +235,110 @@ async def get_public_ip() -> str:
         return "unknown"
 
 async def ea_api_monitor():
-    global EA_API_AVAILABLE, EA_LAST_STATE
+    global EA_API_AVAILABLE, EA_LAST_STATE, ea_status_message_id
 
     await client.wait_until_ready()
 
     while not client.is_closed():
         try:
-            data = await _ea_get_json(
+            public_ip = await get_public_ip()
+
+            # Direct Railway -> EA
+            direct_data = await _ea_get_json(
                 "https://proclubs.ea.com/api/fc/allTimeLeaderboard",
                 {"platform": PLATFORM},
                 retries=1,
                 silent=True,
             )
 
-            if isinstance(data, dict) and data.get("_ea_blocked"):
-                EA_API_AVAILABLE = False
-            elif data is None:
-                EA_API_AVAILABLE = False
+            if isinstance(direct_data, dict) and direct_data.get("_ea_blocked"):
+                direct_ok = False
+            elif direct_data is None:
+                direct_ok = False
             else:
-                EA_API_AVAILABLE = True
+                direct_ok = True
+
+            # Relay -> EA
+            relay_ok, relay_msg = await test_ea_via_relay()
+
+            # Bot availability should follow relay if configured, otherwise direct
+            if EA_RELAY_URL and EA_RELAY_TOKEN:
+                EA_API_AVAILABLE = relay_ok
+            else:
+                EA_API_AVAILABLE = direct_ok
 
             if EA_API_AVAILABLE != EA_LAST_STATE:
-                global ea_status_message_id
-            
                 channel = client.get_channel(EA_MONITOR_CHANNEL_ID)
-            
+
                 if channel:
-                    public_ip = await get_public_ip()
-            
+                    direct_status = "✅ OK" if direct_ok else "❌ Blocked/Failed"
+                    relay_status = "✅ OK" if relay_ok else f"❌ {relay_msg}"
+
                     if not EA_API_AVAILABLE:
-                        # EA has just become blocked
                         msg = await channel.send(
-                            f"⚠️ **EA API appears to be BLOCKED (403 Access Denied)**\n"
-                            f"Public IP: `{public_ip}`"
+                            f"⚠️ **EA API unavailable for the bot**\n"
+                            f"Direct Railway → EA: {direct_status}\n"
+                            f"Relay → EA: {relay_status}\n"
+                            f"Railway Public IP: `{public_ip}`"
                         )
                         ea_status_message_id = msg.id
-            
+
                     else:
-                        # EA has recovered
+                        recovery_text = (
+                            f"✅ **EA API connectivity restored for the bot**\n"
+                            f"Direct Railway → EA: {direct_status}\n"
+                            f"Relay → EA: {relay_status}\n"
+                            f"Railway Public IP: `{public_ip}`"
+                        )
+
                         if ea_status_message_id:
                             try:
                                 old_msg = await channel.fetch_message(ea_status_message_id)
-            
-                                await old_msg.edit(
-                                    content=(
-                                        f"✅ **EA API block resolved**\n"
-                                        f"Public IP at time of block: `{public_ip}`"
-                                    )
-                                )
-            
-                                await old_msg.reply(
-                                    f"🔔 **EA API connectivity restored**\n"
-                                    f"Current Public IP: `{public_ip}`"
-                                )
-            
+                                await old_msg.edit(content=recovery_text)
                             except discord.NotFound:
-                                await channel.send(
-                                    f"✅ **EA API connectivity restored**\n"
-                                    f"Public IP: `{public_ip}`"
-                                )
+                                await channel.send(recovery_text)
                             except Exception as e:
                                 print(f"[EA MONITOR ERROR] Failed to update alert message: {e}")
-                                await channel.send(
-                                    f"✅ **EA API connectivity restored**\n"
-                                    f"Public IP: `{public_ip}`"
-                                )
-            
+                                await channel.send(recovery_text)
                         else:
-                            await channel.send(
-                                f"✅ **EA API connectivity restored**\n"
-                                f"Public IP: `{public_ip}`"
-                            )
-            
+                            await channel.send(recovery_text)
+
                         ea_status_message_id = None
-            
+
                 EA_LAST_STATE = EA_API_AVAILABLE
 
         except Exception as e:
-            print(f"[EA MONITOR ERROR] {e}")
+            print(f"[EA MONITOR ERROR] {type(e).__name__}: {e}")
 
-        await asyncio.sleep(300)  # check every 5 minutes
+        await asyncio.sleep(300)
+
+async def test_ea_via_relay() -> tuple[bool, str]:
+    if not EA_RELAY_URL or not EA_RELAY_TOKEN:
+        return False, "Relay not configured"
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.get(
+                f"{EA_RELAY_URL}/ea",
+                params={
+                    "url": "https://proclubs.ea.com/api/fc/allTimeLeaderboard",
+                    "platform": PLATFORM,
+                },
+                headers={"X-Relay-Token": EA_RELAY_TOKEN},
+            )
+
+        body = r.text[:500]
+
+        if r.status_code == 200:
+            return True, "OK"
+
+        if r.status_code == 403 and "Access Denied" in body:
+            return False, "Blocked by EA"
+
+        return False, f"HTTP {r.status_code}"
+
+    except Exception as e:
+        return False, f"{type(e).__name__}: {e}" 
 
 async def run_stats5_command(interaction: discord.Interaction, club: str):
     global EA_API_AVAILABLE
@@ -2952,37 +2976,31 @@ async def eahealth_command(interaction: discord.Interaction):
     try:
         public_ip = await get_public_ip()
 
-        data = await _ea_get_json(
+        direct_data = await _ea_get_json(
             "https://proclubs.ea.com/api/fc/allTimeLeaderboard",
             {"platform": PLATFORM},
-            retries=2,
+            retries=1,
+            silent=True,
         )
 
-        if isinstance(data, dict) and data.get("_ea_blocked"):
-            await interaction.followup.send(
-                f"❌ EA API is **blocking this host (403 Access Denied)**.\n"
-                f"Public IP: `{public_ip}`",
-                ephemeral=True
-            )
-            return
+        direct_ok = not (isinstance(direct_data, dict) and direct_data.get("_ea_blocked")) and direct_data is not None
 
-        if data is None:
-            await interaction.followup.send(
-                f"⚠️ EA API did not respond after retries.\n"
-                f"Public IP: `{public_ip}`",
-                ephemeral=True
-            )
-            return
+        relay_ok, relay_msg = await test_ea_via_relay()
+
+        direct_status = "✅ OK" if direct_ok else "❌ Blocked/Failed"
+        relay_status = "✅ OK" if relay_ok else f"❌ {relay_msg}"
 
         await interaction.followup.send(
-            f"✅ EA API responded successfully.\n"
-            f"Public IP: `{public_ip}`",
+            f"**EA Health Check**\n"
+            f"Direct Railway → EA: {direct_status}\n"
+            f"Relay → EA: {relay_status}\n"
+            f"Railway Public IP: `{public_ip}`",
             ephemeral=True
         )
 
     except Exception as e:
         await interaction.followup.send(
-            f"❌ EA API test failed:\n`{e}`",
+            f"❌ EA API test failed:\n`{type(e).__name__}: {e}`",
             ephemeral=True
         )
 
