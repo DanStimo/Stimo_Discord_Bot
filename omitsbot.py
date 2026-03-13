@@ -223,9 +223,9 @@ def _twitch_url_from_input(value: str | None) -> str | None:
 async def ea_api_monitor():
     global EA_API_AVAILABLE, EA_LAST_STATE
 
-    await bot.wait_until_ready()
+    await client.wait_until_ready()
 
-    while not bot.is_closed():
+    while not client.is_closed():
         try:
             data = await _ea_get_json(
                 "https://proclubs.ea.com/api/fc/allTimeLeaderboard",
@@ -241,7 +241,7 @@ async def ea_api_monitor():
                 EA_API_AVAILABLE = True
 
             if EA_API_AVAILABLE != EA_LAST_STATE:
-                channel = bot.get_channel(EA_MONITOR_CHANNEL_ID)
+                channel = client.get_channel(EA_MONITOR_CHANNEL_ID)
 
                 if channel:
                     if EA_API_AVAILABLE:
@@ -4881,7 +4881,7 @@ async def on_ready():
     print(f"Bot is ready as {client.user}")
     await warm_ea_session()
 
-    bot.loop.create_task(ea_api_monitor())
+    client.loop.create_task(ea_api_monitor())
     
     # Run background tasks once (avoid duplicates on reconnect)
     if not getattr(client, "background_started", False):
