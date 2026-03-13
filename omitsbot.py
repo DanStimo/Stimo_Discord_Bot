@@ -614,7 +614,14 @@ async def _ea_get_json(url: str, params: dict, retries: int = 5, silent: bool = 
                 http2=True,
                 follow_redirects=True,
             ) as client:
-                r = await client.get(url, params=params)
+                if EA_RELAY_URL:
+                    r = await client.get(
+                        f"{EA_RELAY_URL}/ea",
+                        params={"url": url, **params},
+                        headers={"X-Relay-Token": EA_RELAY_TOKEN},
+                    )
+                else:
+                    r = await client.get(url, params=params)
                 
             body = r.text[:1000]
 
