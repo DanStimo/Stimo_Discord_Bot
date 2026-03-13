@@ -14,6 +14,7 @@ import asyncpg
 import logging
 from discord.utils import escape_markdown
 import math
+import socket
 
 load_dotenv()
 
@@ -21,6 +22,7 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 CLUB_ID = os.getenv("CLUB_ID", "167054")  # fallback/default
 PLATFORM = os.getenv("PLATFORM", "gen5")
 OFFSIDE_KEY = "offside.json"
+EA_API_AVAILABLE = True
 
 MATCH_TYPE_LABELS = {
     "leagueMatch": "League",
@@ -41,14 +43,6 @@ EA_HEADERS = {
     "Sec-Fetch-Mode": "cors",
     "Sec-Fetch-Dest": "empty",
 }
-
-_client_ea = httpx.AsyncClient(
-    timeout=12,
-    headers=EA_HEADERS,
-    http2=True,
-    follow_redirects=True,
-)
-
 # --- Twitch live announce config ---
 TWITCH_CLIENT_ID = os.getenv("TWITCH_CLIENT_ID")
 TWITCH_CLIENT_SECRET = os.getenv("TWITCH_CLIENT_SECRET")
@@ -228,6 +222,13 @@ async def run_stats5_command(interaction: discord.Interaction, club: str):
     await interaction.response.defer()
 
     try:
+        if not EA_API_AVAILABLE:
+            await interaction.followup.send(
+                "⚠️ EA Clubs API is currently blocking requests from this host. Please try again later.",
+                ephemeral=True
+            )
+            return
+
         if club.isdigit():
             club_id = club
             club_name = None
@@ -266,8 +267,11 @@ async def run_stats5_command(interaction: discord.Interaction, club: str):
             extra_msg = await interaction.followup.send(embed=extra_embed)
             asyncio.create_task(delete_after_delay(extra_msg, 60))
 
-    except RuntimeError as e:
+        except RuntimeError as e:
+        global EA_API_AVAILABLE
+
         if "EA API blocked" in str(e):
+            EA_API_AVAILABLE = False
             await interaction.followup.send(
                 "⚠️ EA Clubs API is currently blocking requests from this host. Please try again later.",
                 ephemeral=True
@@ -508,7 +512,14 @@ async def _ea_get_json(url: str, params: dict, retries: int = 5) -> dict | list 
     """GET JSON with retries. Returns a marker dict for hard EA 403 blocks."""
     for attempt in range(retries):
         try:
-            r = await _client_ea.get(url, params=params)
+            async with httpx.AsyncClient(
+                timeout=12,
+                headers=EA_HEADERS,
+                http2=True,
+                follow_redirects=True,
+            ) as client:
+                r = await client.get(url, params=params)
+                
             body = r.text[:300]
 
             if r.status_code == 200:
@@ -675,17 +686,35 @@ def build_crest_url(team_id: str | int | None) -> str | None:
 
 # --- Web helpers for EA endpoints ---
 async def warm_ea_session():
+    global EA_API_AVAILABLE
+
     try:
         print("[EA] Warming session...")
-        await _ea_get_json(
+        data = await _ea_get_json(
             "https://proclubs.ea.com/api/fc/allTimeLeaderboard",
             {"platform": PLATFORM},
             retries=3,
         )
+
+        if isinstance(data, dict) and data.get("_ea_blocked"):
+            EA_API_AVAILABLE = False
+            print("[EA] Warm session blocked by EA (403 Access Denied).")
+            return False
+
+        if data is None:
+            EA_API_AVAILABLE = False
+            print("[EA] Warm session failed: no response data.")
+            return False
+
+        EA_API_AVAILABLE = True
         await asyncio.sleep(1.5)
         print("[EA] Warm session complete.")
+        return True
+
     except Exception as e:
+        EA_API_AVAILABLE = False
         print(f"[EA] Warm session failed: {e}")
+        return False
         
 async def get_club_stats(club_id):
     data = await _ea_get_json(
@@ -2786,6 +2815,45 @@ async def handle_lastmatch(interaction: discord.Interaction, club: str, from_dro
     except Exception as e:
         print(f"[ERROR] Failed to fetch last match: {e}")
         await send_temporary_message(interaction.followup, content="An error occurred while fetching opponent stats.")
+
+@tree.command(name="eahealth", description="Check if the EA Pro Clubs API is reachable.")
+async def eahealth_command(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+
+    try:
+        data = await _ea_get_json(
+            "https://proclubs.ea.com/api/fc/allTimeLeaderboard",
+            {"platform": PLATFORM},
+            retries=2,
+        )
+
+        if isinstance(data, dict) and data.get("_ea_blocked"):
+            await interaction.followup.send(
+                "❌ EA API is **blocking this host (403 Access Denied)**.\n"
+                "Likely caused by EA blocking the server IP.",
+                ephemeral=True
+            )
+            return
+
+        if data is None:
+            await interaction.followup.send(
+                "⚠️ EA API did not respond after retries.",
+                ephemeral=True
+            )
+            return
+
+        host_ip = socket.gethostbyname(socket.gethostname())
+
+        await interaction.followup.send(
+            f"✅ EA API responded successfully.\nServer IP: `{host_ip}`",
+            ephemeral=True
+        )
+
+    except Exception as e:
+        await interaction.followup.send(
+            f"❌ EA API test failed:\n`{e}`",
+            ephemeral=True
+        )
 
 @tree.command(name="lastmatch", description="Show the last match stats for a club.")
 @app_commands.describe(club="Club name or club ID")
