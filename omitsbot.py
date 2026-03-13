@@ -27,11 +27,6 @@ EA_LAST_STATE = True
 EA_MONITOR_CHANNEL_ID = 1481950979900575765  # your admin channel
 ea_monitor_task = None
 
-global ea_monitor_task
-
-if ea_monitor_task is None or ea_monitor_task.done():
-    ea_monitor_task = client.loop.create_task(ea_api_monitor())
-
 MATCH_TYPE_LABELS = {
     "leagueMatch": "League",
     "playoffMatch": "Playoff",
@@ -4890,8 +4885,11 @@ async def on_ready():
 
     print(f"Bot is ready as {client.user}")
     await warm_ea_session()
-
-    client.loop.create_task(ea_api_monitor())
+    
+    global ea_monitor_task
+    
+    if ea_monitor_task is None or ea_monitor_task.done():
+        ea_monitor_task = client.loop.create_task(ea_api_monitor())
     
     # Run background tasks once (avoid duplicates on reconnect)
     if not getattr(client, "background_started", False):
