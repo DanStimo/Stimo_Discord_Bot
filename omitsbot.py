@@ -14,7 +14,6 @@ import asyncpg
 import logging
 from discord.utils import escape_markdown
 import math
-import socket
 
 load_dotenv()
 
@@ -22,15 +21,6 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 CLUB_ID = os.getenv("CLUB_ID", "167054")  # fallback/default
 PLATFORM = os.getenv("PLATFORM", "gen5")
 OFFSIDE_KEY = "offside.json"
-EA_API_AVAILABLE = True
-EA_LAST_STATE = True
-EA_MONITOR_CHANNEL_ID = 1481950979900575765  # your admin channel
-EA_RELAY_URL = os.getenv("EA_RELAY_URL", "").strip()
-EA_RELAY_TOKEN = os.getenv("EA_RELAY_TOKEN", "").strip()
-ea_monitor_task = None
-ea_status_message_id = None
-presence_task = None
-twitch_monitor_task = None
 
 MATCH_TYPE_LABELS = {
     "leagueMatch": "League",
@@ -51,6 +41,14 @@ EA_HEADERS = {
     "Sec-Fetch-Mode": "cors",
     "Sec-Fetch-Dest": "empty",
 }
+
+_client_ea = httpx.AsyncClient(
+    timeout=12,
+    headers=EA_HEADERS,
+    http2=True,
+    follow_redirects=True,
+)
+
 # --- Twitch live announce config ---
 TWITCH_CLIENT_ID = os.getenv("TWITCH_CLIENT_ID")
 TWITCH_CLIENT_SECRET = os.getenv("TWITCH_CLIENT_SECRET")
@@ -225,194 +223,6 @@ def _twitch_url_from_input(value: str | None) -> str | None:
 
     username = v
     return f"https://twitch.tv/{username}"
-
-async def get_public_ip() -> str:
-    try:
-        async with httpx.AsyncClient(timeout=5) as client:
-            r = await client.get("https://api.ipify.org")
-            return r.text.strip()
-    except Exception:
-        return "unknown"
-
-async def ea_api_monitor():
-    global EA_API_AVAILABLE, EA_LAST_STATE, ea_status_message_id
-
-    await client.wait_until_ready()
-
-    while not client.is_closed():
-        try:
-            public_ip = await get_public_ip()
-
-            # Direct Railway -> EA
-            direct_data = await _ea_get_json(
-                "https://proclubs.ea.com/api/fc/allTimeLeaderboard",
-                {"platform": PLATFORM},
-                retries=1,
-                silent=True,
-            )
-
-            if isinstance(direct_data, dict) and direct_data.get("_ea_blocked"):
-                direct_ok = False
-            elif direct_data is None:
-                direct_ok = False
-            else:
-                direct_ok = True
-
-            # Relay -> EA
-            relay_ok, relay_msg = await test_ea_via_relay()
-
-            # Bot availability should follow relay if configured, otherwise direct
-            if EA_RELAY_URL and EA_RELAY_TOKEN:
-                EA_API_AVAILABLE = relay_ok
-            else:
-                EA_API_AVAILABLE = direct_ok
-
-            if EA_API_AVAILABLE != EA_LAST_STATE:
-                channel = client.get_channel(EA_MONITOR_CHANNEL_ID)
-
-                if channel:
-                    direct_status = "✅ OK" if direct_ok else "❌ Blocked/Failed"
-                    relay_status = "✅ OK" if relay_ok else f"❌ {relay_msg}"
-
-                    if not EA_API_AVAILABLE:
-                        msg = await channel.send(
-                            f"⚠️ **EA API unavailable for the bot**\n"
-                            f"Direct Railway → EA: {direct_status}\n"
-                            f"Relay → EA: {relay_status}\n"
-                            f"Railway Public IP: `{public_ip}`"
-                        )
-                        ea_status_message_id = msg.id
-
-                    else:
-                        recovery_text = (
-                            f"✅ **EA API connectivity restored for the bot**\n"
-                            f"Direct Railway → EA: {direct_status}\n"
-                            f"Relay → EA: {relay_status}\n"
-                            f"Railway Public IP: `{public_ip}`"
-                        )
-
-                        if ea_status_message_id:
-                            try:
-                                old_msg = await channel.fetch_message(ea_status_message_id)
-                                await old_msg.edit(content=recovery_text)
-                            except discord.NotFound:
-                                await channel.send(recovery_text)
-                            except Exception as e:
-                                print(f"[EA MONITOR ERROR] Failed to update alert message: {e}")
-                                await channel.send(recovery_text)
-                        else:
-                            await channel.send(recovery_text)
-
-                        ea_status_message_id = None
-
-                EA_LAST_STATE = EA_API_AVAILABLE
-
-        except Exception as e:
-            print(f"[EA MONITOR ERROR] {type(e).__name__}: {e}")
-
-        await asyncio.sleep(300)
-
-async def test_ea_via_relay() -> tuple[bool, str]:
-    if not EA_RELAY_URL or not EA_RELAY_TOKEN:
-        return False, "Relay not configured"
-
-    try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            r = await client.get(
-                f"{EA_RELAY_URL}/ea",
-                params={
-                    "url": "https://proclubs.ea.com/api/fc/allTimeLeaderboard",
-                    "platform": PLATFORM,
-                },
-                headers={"X-Relay-Token": EA_RELAY_TOKEN},
-            )
-
-        body = r.text[:500]
-
-        if r.status_code == 200:
-            return True, "OK"
-
-        if r.status_code == 403 and "Access Denied" in body:
-            return False, "Blocked by EA"
-
-        return False, f"HTTP {r.status_code}"
-
-    except Exception as e:
-        return False, f"{type(e).__name__}: {e}" 
-
-async def run_stats5_command(interaction: discord.Interaction, club: str):
-    global EA_API_AVAILABLE
-
-    if not interaction.response.is_done():
-        await interaction.response.defer()
-
-    try:
-        if not EA_API_AVAILABLE:
-            await interaction.followup.send(
-                "⚠️ EA Clubs API is currently blocking requests from this host. Please try again later.",
-                ephemeral=True
-            )
-            return
-
-        if club.isdigit():
-            club_id = club
-            club_name = None
-        else:
-            hits = await search_clubs_ea(club)
-            if not hits:
-                await interaction.followup.send("No matching clubs found.", ephemeral=True)
-                return
-
-            if len(hits) > 1:
-                view = Stats5Dropdown(hits)
-                msg = await interaction.followup.send(
-                    "Multiple clubs found. Please choose the correct one:",
-                    view=view
-                )
-                asyncio.create_task(delete_after_delay(msg, 60))
-                return
-
-            club_id = str(hits[0]["clubInfo"]["clubId"])
-            club_name = hits[0]["clubInfo"]["name"]
-
-        msg = await interaction.followup.send("⏳ Fetching last 5 player totals…")
-
-        embeds = await build_stats5_embeds(club_id, club_name)
-        if not embeds:
-            await msg.edit(content="No recent matches found for this club.", embed=None, view=None)
-            asyncio.create_task(delete_after_delay(msg, 60))
-            return
-
-        await msg.edit(content=None, embed=embeds[0], view=None)
-        refreshed = await interaction.channel.fetch_message(msg.id)
-        await log_command_output(interaction, "stats5", refreshed)
-        asyncio.create_task(delete_after_delay(refreshed, 60))
-
-        for extra_embed in embeds[1:]:
-            extra_msg = await interaction.followup.send(embed=extra_embed)
-            asyncio.create_task(delete_after_delay(extra_msg, 60))
-
-    except RuntimeError as e:
-        if "EA API blocked" in str(e):
-            EA_API_AVAILABLE = False
-            await interaction.followup.send(
-                "⚠️ EA Clubs API is currently blocking requests from this host. Please try again later.",
-                ephemeral=True
-            )
-            return
-
-        print(f"[ERROR] /stats5 failed: {e}")
-        await interaction.followup.send(
-            "❌ An unexpected error occurred while fetching last 5 player totals.",
-            ephemeral=True
-        )
-
-    except Exception as e:
-        print(f"[ERROR] /stats5 failed: {e}")
-        await interaction.followup.send(
-            "❌ An unexpected error occurred while fetching last 5 player totals.",
-            ephemeral=True
-        )
 
 @client.event
 async def on_member_join(member: discord.Member):
@@ -631,68 +441,24 @@ import random
 import urllib.parse
 import asyncio
 
-async def _ea_get_json(url: str, params: dict, retries: int = 5, silent: bool = False) -> dict | list | None:
-    """GET JSON with retries. Returns a marker dict for hard EA 403 blocks."""
+async def _ea_get_json(url: str, params: dict, retries: int = 5) -> dict | list | None:
+    """GET JSON with retries + short body log on non-200."""
     for attempt in range(retries):
         try:
-            async with httpx.AsyncClient(
-                timeout=12,
-                headers=EA_HEADERS,
-                http2=True,
-                follow_redirects=True,
-            ) as client:
-                if EA_RELAY_URL:
-                    r = await client.get(
-                        f"{EA_RELAY_URL}/ea",
-                        params={"url": url, **params},
-                        headers={"X-Relay-Token": EA_RELAY_TOKEN},
-                    )
-                else:
-                    r = await client.get(url, params=params)
-                
-            body = r.text[:1000]
+            r = await _client_ea.get(url, params=params)
 
             if r.status_code == 200:
                 return r.json()
-            
-            if not silent:
-                short_reason = "HTTP error"
-                if "Access Denied" in body:
-                    short_reason = "Access Denied"
-            
-                    ref = None
-                    marker = "Reference&#32;&#35;"
-                    if marker in body:
-                        try:
-                            ref_part = body.split(marker, 1)[1]
-                            ref = ref_part.split("<", 1)[0]
-                            ref = ref.replace("&#46;", ".").strip()
-                        except Exception:
-                            ref = None
-            
-                    if ref:
-                        short_reason += f" (Ref #{ref})"
-            
-                else:
-                    short_reason = body[:120].replace("\n", " ").replace("\r", " ")
-            
-                print(f"[EA] {r.status_code} {url} try {attempt+1}/{retries} :: {short_reason}")
 
-            # Hard CDN / edge deny page from EA
-            if r.status_code == 403 and "Access Denied" in body:
-                return {
-                    "_ea_blocked": True,
-                    "_status": 403,
-                    "_url": str(r.request.url),
-                }
+            print(f"[EA] {r.status_code} {url} try {attempt+1}/{retries} :: {r.text[:200]}")
 
+            # For anti-bot / transient blocking, back off a bit more
             if r.status_code in (403, 429, 500, 502, 503, 504):
                 await asyncio.sleep(1.2 + attempt * 1.5 + random.random())
                 continue
 
         except Exception as e:
-            if not silent:
-                print(f"[EA] exception {url} try {attempt+1}/{retries} :: {e}")
+            print(f"[EA] exception {url} try {attempt+1}/{retries} :: {e}")
 
         await asyncio.sleep(0.8 + random.random())
 
@@ -704,14 +470,9 @@ async def search_clubs_ea(query: str) -> list:
         return []
 
     data = await _ea_get_json(
-        "https://proclubs.ea.com/api/fc/allTimeLeaderboard",
-        {"platform": PLATFORM},
-        retries=1,
-        silent=True,
+        "https://proclubs.ea.com/api/fc/allTimeLeaderboard/search",
+        {"platform": PLATFORM, "clubName": query.strip()},
     )
-
-    if isinstance(data, dict) and data.get("_ea_blocked"):
-        raise RuntimeError("EA API blocked this host with 403 Access Denied")
 
     if not isinstance(data, list):
         return []
@@ -840,35 +601,17 @@ def build_crest_url(team_id: str | int | None) -> str | None:
 
 # --- Web helpers for EA endpoints ---
 async def warm_ea_session():
-    global EA_API_AVAILABLE
-
     try:
         print("[EA] Warming session...")
-        data = await _ea_get_json(
+        await _ea_get_json(
             "https://proclubs.ea.com/api/fc/allTimeLeaderboard",
             {"platform": PLATFORM},
             retries=3,
         )
-
-        if isinstance(data, dict) and data.get("_ea_blocked"):
-            EA_API_AVAILABLE = False
-            print("[EA] Warm session blocked by EA (403 Access Denied).")
-            return False
-
-        if data is None:
-            EA_API_AVAILABLE = False
-            print("[EA] Warm session failed: no response data.")
-            return False
-
-        EA_API_AVAILABLE = True
         await asyncio.sleep(1.5)
         print("[EA] Warm session complete.")
-        return True
-
     except Exception as e:
-        EA_API_AVAILABLE = False
         print(f"[EA] Warm session failed: {e}")
-        return False
         
 async def get_club_stats(club_id):
     data = await _ea_get_json(
@@ -2970,41 +2713,6 @@ async def handle_lastmatch(interaction: discord.Interaction, club: str, from_dro
         print(f"[ERROR] Failed to fetch last match: {e}")
         await send_temporary_message(interaction.followup, content="An error occurred while fetching opponent stats.")
 
-@tree.command(name="eahealth", description="Check if the EA Pro Clubs API is reachable.")
-async def eahealth_command(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
-
-    try:
-        public_ip = await get_public_ip()
-
-        direct_data = await _ea_get_json(
-            "https://proclubs.ea.com/api/fc/allTimeLeaderboard",
-            {"platform": PLATFORM},
-            retries=1,
-            silent=True,
-        )
-
-        direct_ok = not (isinstance(direct_data, dict) and direct_data.get("_ea_blocked")) and direct_data is not None
-
-        relay_ok, relay_msg = await test_ea_via_relay()
-
-        direct_status = "✅ OK" if direct_ok else "❌ Blocked/Failed"
-        relay_status = "✅ OK" if relay_ok else f"❌ {relay_msg}"
-
-        await interaction.followup.send(
-            f"**EA Health Check**\n"
-            f"Direct Railway → EA: {direct_status}\n"
-            f"Relay → EA: {relay_status}\n"
-            f"Railway Public IP: `{public_ip}`",
-            ephemeral=True
-        )
-
-    except Exception as e:
-        await interaction.followup.send(
-            f"❌ EA API test failed:\n`{type(e).__name__}: {e}`",
-            ephemeral=True
-        )
-
 @tree.command(name="lastmatch", description="Show the last match stats for a club.")
 @app_commands.describe(club="Club name or club ID")
 async def lastmatch_command(interaction: discord.Interaction, club: str):
@@ -3249,7 +2957,6 @@ async def l5_command(interaction: discord.Interaction, club: str):
 @tree.command(name="stats5", description="Show total player stats from a club's last 5 matches across all match types.")
 @app_commands.describe(club="Club name or club ID")
 async def stats5_command(interaction: discord.Interaction, club: str):
-    await run_stats5_command(interaction, club)
     await interaction.response.defer()
 
     try:
@@ -3301,7 +3008,7 @@ async def stats5_command(interaction: discord.Interaction, club: str):
 @tree.command(name="s5", description="Alias for /stats5")
 @app_commands.describe(club="Club name or club ID")
 async def s5_command(interaction: discord.Interaction, club: str):
-    await run_stats5_command(interaction, club)
+    await stats5_command.callback(interaction, club)
 
 @tree.command(name="stats", description="All-in-one club stats: rank, rating, record, form, last 5 matches, activity.")
 @app_commands.describe(club="Club name or club ID")
@@ -4994,9 +4701,6 @@ async def on_ready():
     
     # Run background tasks once (avoid duplicates on reconnect)
     if not getattr(client, "background_started", False):
-    
-        global ea_monitor_task
-    
         try:
             client.loop.create_task(rotate_presence())
             print("🌀 Presence rotation started.")
@@ -5008,13 +4712,6 @@ async def on_ready():
             print("📡 Twitch live monitor started.")
         except Exception as e:
             print(f"[ERROR] Could not start Twitch monitor: {e}")
-    
-        try:
-            if ea_monitor_task is None or ea_monitor_task.done():
-                ea_monitor_task = client.loop.create_task(ea_api_monitor())
-                print("🛡️ EA API monitor started.")
-        except Exception as e:
-            print(f"[ERROR] Could not start EA monitor: {e}")
     
         client.background_started = True
 
