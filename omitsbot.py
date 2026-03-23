@@ -1594,12 +1594,15 @@ async def send_temporary_message(destination, content=None, embed=None, view=Non
     except Exception as e:
         print(f"[ERROR] Failed to auto-delete message: {e}")
 
-async def log_command_output(interaction: discord.Interaction, command_name: str, message: discord.Message = None, extra_text: str = None):
-    archive_channel_id = int(os.getenv("ARCHIVE_CHANNEL_ID", "0"))
-    archive_channel = client.get_channel(archive_channel_id)
-
+async def log_command_output(
+    interaction: discord.Interaction,
+    command_name: str,
+    message: discord.Message = None,
+    extra_text: str = None
+):
+    archive_channel = client.get_channel(LOG_CHANNEL_ID)
     if not archive_channel:
-        print(f"[WARN] Archive channel not found for ID {archive_channel_id}")
+        print(f"[WARN] Archive channel not found for ID {LOG_CHANNEL_ID}")
         return
 
     embed = discord.Embed(
@@ -1613,7 +1616,10 @@ async def log_command_output(interaction: discord.Interaction, command_name: str
     if message:
         if message.embeds:
             for em in message.embeds:
-                await archive_channel.send(content=f"📥 /{command_name} by {interaction.user.name} in {interaction.channel.mention}:", embed=em)
+                await archive_channel.send(
+                    content=f"📥 /{command_name} by {interaction.user.name} in {interaction.channel.mention}:",
+                    embed=em
+                )
         elif message.content:
             embed.add_field(name="Output", value=message.content[:1000], inline=False)
             await archive_channel.send(embed=embed)
