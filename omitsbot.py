@@ -1948,13 +1948,17 @@ class CommodityDropdown(discord.ui.View):
         results: list[dict],
         mode: str = "commodity",
         auto_load_only: bool = False,
-        system_filter: str | None = None
+        system_filter: str | None = None,
+        cargo_scu: int | None = None,
+        buy_price_override: float | None = None
     ):
         super().__init__(timeout=90)
         self.results = results
         self.mode = mode
         self.auto_load_only = auto_load_only
         self.system_filter = system_filter
+        self.cargo_scu = cargo_scu
+        self.buy_price_override = buy_price_override
 
         options = []
         for item in results[:25]:
@@ -1998,15 +2002,28 @@ class CommodityDropdown(discord.ui.View):
                 auto_load_only=self.auto_load_only,
                 system_filter=self.system_filter
             )
-        else:
+        elif self.mode == "route":
             embed = await build_route_embed(
                 chosen,
                 auto_load_only=self.auto_load_only,
                 system_filter=self.system_filter
             )
+        elif self.mode == "cargo":
+            embed = await build_cargo_embed(
+                chosen,
+                cargo_scu=self.cargo_scu,
+                buy_price_override=self.buy_price_override,
+                auto_load_only=self.auto_load_only,
+                system_filter=self.system_filter
+            )
+        else:
+            await interaction.edit_original_response(
+                content="Unknown dropdown mode.",
+                view=None
+            )
+            return
 
         await interaction.edit_original_response(content=None, embed=embed, view=None)
-
 async def search_terminal_uex(query: str) -> list[dict]:
     data = await _uex_get("terminals")
     if not isinstance(data, list):
@@ -5014,9 +5031,24 @@ async def cargo_command(
             await interaction.followup.send("No matching commodities found.", ephemeral=True)
             return
 
-        chosen = matches[0]
-
         selected_system = system_filter.value if system_filter else None
+
+        if len(matches) > 1:
+            view = CommodityDropdown(
+                matches,
+                mode="cargo",
+                auto_load_only=auto_load_only,
+                system_filter=selected_system,
+                cargo_scu=scu,
+                buy_price_override=buy_price
+            )
+            await interaction.followup.send(
+                "Multiple commodities found. Please choose:",
+                view=view
+            )
+            return
+
+        chosen = matches[0]
 
         embed = await build_cargo_embed(
             chosen,
