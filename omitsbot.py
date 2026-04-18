@@ -1694,6 +1694,28 @@ async def _uex_get(resource: str, params: dict | None = None, retries: int = 3):
 def _normalize_sc_name(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", (value or "").lower())
 
+async def get_trending_commodities(limit: int = 10) -> list[dict]:
+    data = await _uex_get("commodities_ranking")
+    if not isinstance(data, list):
+        return []
+
+    cleaned = []
+    for item in data:
+        try:
+            buy_scu = float(item.get("scu_buy_avg_month") or 0)
+            sell_scu = float(item.get("scu_sell_avg_month") or 0)
+            total_volume = buy_scu + sell_scu
+
+            item["_buy_scu_avg_month"] = buy_scu
+            item["_sell_scu_avg_month"] = sell_scu
+            item["_total_scu_avg_month"] = total_volume
+            cleaned.append(item)
+        except Exception:
+            continue
+
+    cleaned.sort(key=lambda x: x.get("_total_scu_avg_month", 0), reverse=True)
+    return cleaned[:limit]
+
 async def search_commodity_uex(query: str) -> list[dict]:
     data = await _uex_get("commodities")
     if not isinstance(data, list):
@@ -2372,7 +2394,18 @@ async def build_route_embed(
 
         lines.append(line)
 
-    embed.add_field(name="Top Routes", value="\n\n".join(lines)[:1024], inline=False)
+    field_text = ""
+    for line in lines:
+        # +2 accounts for the "\n\n"
+        if len(field_text) + len(line) + 2 > 1024:
+            break
+        field_text += line + "\n\n"
+    
+    embed.add_field(
+        name="Top Routes",
+        value=field_text.strip(),
+        inline=False
+    )
 
     if cargo_scu and ship_name:
         embed.set_author(name=f"Ship: {ship_name} • {cargo_scu} SCU")
@@ -2913,6 +2946,48 @@ def _best_sell_row(rows: list[dict]) -> dict | None:
     if not sell_rows:
         return None
     return max(sell_rows, key=lambda r: _to_float(r.get("price_sell")))
+
+async def build_trending_embed(limit: int = 10) -> discord.Embed:
+    items = await get_trending_commodities(limit=limit)
+
+    embed = discord.Embed(
+        title="📈 Trending Commodities",
+        description="Most traded commodities by average monthly SCU volume.",
+        color=0xF1C40F
+    )
+
+    if not items:
+        embed.add_field(
+            name="No Data",
+            value="No trending commodity data was returned by UEX.",
+            inline=False
+        )
+        embed.set_footer(text="Star Citizen — UEX")
+        return embed
+
+    lines = []
+    for idx, item in enumerate(items, start=1):
+        name = item.get("name", "Unknown")
+        code = item.get("code", "—")
+        buy_scu = int(item.get("_buy_scu_avg_month", 0))
+        sell_scu = int(item.get("_sell_scu_avg_month", 0))
+        total_scu = int(item.get("_total_scu_avg_month", 0))
+        cax_score = item.get("cax_score", "—")
+
+        lines.append(
+            f"**{idx}. {name}** (`{code}`)\n"
+            f"Buy: `{buy_scu:,}` SCU/mo • Sell: `{sell_scu:,}` SCU/mo • Total: `{total_scu:,}` SCU/mo • CAX: `{cax_score}`"
+        )
+
+    field_text = ""
+    for line in lines:
+        if len(field_text) + len(line) + 2 > 1024:
+            break
+        field_text += line + "\n\n"
+
+    embed.add_field(name="Top Commodities", value=field_text.strip(), inline=False)
+    embed.set_footer(text="Star Citizen — UEX")
+    return embed
 
 
 async def build_cargo_embed(
@@ -6155,6 +6230,27 @@ async def cargo_ship_autocomplete(
     current: str
 ) -> list[app_commands.Choice[str]]:
     return await ship_autocomplete(interaction, current)
+
+@tree.command(name="trending", description="Show the most traded Star Citizen commodities right now.")
+@app_commands.describe(limit="How many commodities to show (default 10)")
+async def trending_command(
+    interaction: discord.Interaction,
+    limit: app_commands.Range[int, 1, 15] = 10
+):
+    await interaction.response.defer()
+
+    try:
+        embed = await build_trending_embed(limit=limit)
+        msg = await send_temp_followup(interaction, embed=embed)
+        await log_star_command_usage(interaction, "trending", message=msg)
+
+    except Exception as e:
+        print(f"[ERROR] /trending failed: {e}")
+        await send_temp_followup(
+            interaction,
+            content="❌ An unexpected error occurred while fetching trending commodity data.",
+            ephemeral=True
+        )
 # ---------------------------------------------------
 # Reaction removal suppression so bot-initiated removals don't unregister users
 # ---------------------------------------------------
