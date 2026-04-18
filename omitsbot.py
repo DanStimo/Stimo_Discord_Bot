@@ -1682,9 +1682,16 @@ async def build_commodity_embed(commodity: dict) -> discord.Embed:
         lines = []
         for r in buy_rows:
             terminal = r.get("terminal_name") or r.get("name_terminal") or "Unknown"
-            price = r.get("price_buy", "—")
+            buy_price = float(r.get("price_buy") or 0)
+            best_sell = max(
+                [float(s.get("price_sell") or 0) for s in sell_rows],
+                default=0
+            )
+            profit = int(best_sell - buy_price)
             stock = r.get("scu_buy") or r.get("stock_buy") or "—"
-            lines.append(f"**{terminal}** — Buy: `{price}` aUEC/SCU • Stock: `{stock}`")
+            lines.append(
+                f"**{terminal}** — Buy: `{int(buy_price)}` • Profit: `+{profit}` • Stock: `{stock}`"
+            )
         embed.add_field(name="Best Buy", value="\n".join(lines), inline=False)
 
     if sell_rows:
@@ -1790,6 +1797,95 @@ class CommodityDropdown(discord.ui.View):
             embed = await build_route_embed(chosen)
 
         await interaction.edit_original_response(content=None, embed=embed, view=None)
+
+async def search_terminal_uex(query: str) -> list[dict]:
+    data = await _uex_get("terminals")
+    if not isinstance(data, list):
+        return []
+
+    q = _normalize_sc_name(query)
+    return [t for t in data if q in _normalize_sc_name(t.get("name", ""))]
+
+def _to_float(value, default=0.0) -> float:
+    try:
+        if value is None or value == "":
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _best_sell_row(rows: list[dict]) -> dict | None:
+    sell_rows = [r for r in rows if _to_float(r.get("price_sell")) > 0]
+    if not sell_rows:
+        return None
+    return max(sell_rows, key=lambda r: _to_float(r.get("price_sell")))
+
+
+async def build_cargo_embed(commodity: dict, cargo_scu: int, buy_price_override: float | None = None) -> discord.Embed:
+    commodity_id = commodity.get("id") or commodity.get("id_commodity")
+    commodity_name = commodity.get("name", "Unknown Commodity")
+
+    prices = await get_commodity_prices(commodity_id)
+    rows = prices if isinstance(prices, list) else []
+
+    embed = discord.Embed(
+        title=f"📦 Cargo Calculator — {commodity_name}",
+        color=0xF1C40F
+    )
+
+    if not rows:
+        embed.description = "No price data found for this commodity."
+        embed.set_footer(text="Star Citizen — UEX")
+        return embed
+
+    best_sell = _best_sell_row(rows)
+    buy_rows = [r for r in rows if _to_float(r.get("price_buy")) > 0]
+
+    if not best_sell or not buy_rows:
+        embed.description = "Not enough buy/sell data to calculate cargo profit."
+        embed.set_footer(text="Star Citizen — UEX")
+        return embed
+
+    sell_terminal = (
+        best_sell.get("terminal_name")
+        or best_sell.get("name_terminal")
+        or "Unknown"
+    )
+    sell_price = _to_float(best_sell.get("price_sell"))
+
+    # If the user supplied a buy price, use that.
+    # Otherwise use the cheapest available buy price.
+    if buy_price_override is not None:
+        buy_price = float(buy_price_override)
+        buy_terminal = "Manual price"
+    else:
+        best_buy = min(buy_rows, key=lambda r: _to_float(r.get("price_buy"), 999999999))
+        buy_terminal = (
+            best_buy.get("terminal_name")
+            or best_buy.get("name_terminal")
+            or "Unknown"
+        )
+        buy_price = _to_float(best_buy.get("price_buy"))
+
+    profit_per_scu = sell_price - buy_price
+    total_cost = buy_price * cargo_scu
+    total_sale = sell_price * cargo_scu
+    total_profit = profit_per_scu * cargo_scu
+
+    embed.add_field(name="Cargo Size", value=f"`{cargo_scu}` SCU", inline=True)
+    embed.add_field(name="Buy Price", value=f"`{buy_price:,.2f}` aUEC/SCU", inline=True)
+    embed.add_field(name="Sell Price", value=f"`{sell_price:,.2f}` aUEC/SCU", inline=True)
+
+    embed.add_field(name="Buy Location", value=buy_terminal, inline=False)
+    embed.add_field(name="Best Sell Location", value=sell_terminal, inline=False)
+
+    embed.add_field(name="Profit / SCU", value=f"`{profit_per_scu:,.2f}` aUEC", inline=True)
+    embed.add_field(name="Total Cost", value=f"`{total_cost:,.2f}` aUEC", inline=True)
+    embed.add_field(name="Total Profit", value=f"`{total_profit:,.2f}` aUEC", inline=True)
+
+    embed.set_footer(text="Star Citizen — UEX community data")
+    return embed
 
 # Safe interaction helpers
 async def safe_interaction_edit(interaction, embed, view):
@@ -4470,6 +4566,123 @@ async def route_command(interaction: discord.Interaction, name: str):
             ephemeral=True
         )
 
+@tree.command(name="terminal", description="Show what a terminal buys/sells")
+@app_commands.describe(name="Terminal name (e.g. Area18, Lorville)")
+async def terminal_command(interaction: discord.Interaction, name: str):
+    await interaction.response.defer()
+
+    try:
+        matches = await search_terminal_uex(name)
+
+        if not matches:
+            await interaction.followup.send("No matching terminals found.", ephemeral=True)
+            return
+
+        terminal = matches[0]  # keep simple for now
+        terminal_id = terminal.get("id")
+
+        data = await _uex_get("commodities_prices", params={"id_terminal": terminal_id})
+
+        if not data:
+            await interaction.followup.send("No trade data found for this terminal.")
+            return
+
+        buy = [c for c in data if c.get("price_buy")]
+        sell = [c for c in data if c.get("price_sell")]
+
+        embed = discord.Embed(
+            title=f"🏪 {terminal.get('name')}",
+            description="Available trading commodities",
+            color=0x3498DB
+        )
+
+        if buy:
+            lines = [f"{c['commodity_name']} — `{c['price_buy']}`" for c in buy[:10]]
+            embed.add_field(name="Buys", value="\n".join(lines), inline=False)
+
+        if sell:
+            lines = [f"{c['commodity_name']} — `{c['price_sell']}`" for c in sell[:10]]
+            embed.add_field(name="Sells", value="\n".join(lines), inline=False)
+
+        await interaction.followup.send(embed=embed)
+
+    except Exception as e:
+        print(f"[ERROR] /terminal failed: {e}")
+        await interaction.followup.send("Error fetching terminal data.", ephemeral=True)
+
+@tree.command(name="besttrade", description="Find most profitable trade routes")
+async def besttrade_command(interaction: discord.Interaction):
+    await interaction.response.defer()
+
+    try:
+        routes = await _uex_get("commodities_routes", params={"limit": 20})
+
+        if not routes:
+            await interaction.followup.send("No trade routes found.")
+            return
+
+        # Sort by profit
+        routes = sorted(routes, key=lambda x: float(x.get("profit", 0)), reverse=True)
+
+        embed = discord.Embed(
+            title="💰 Best Trade Routes",
+            description="Top profitable routes right now",
+            color=0x2ECC71
+        )
+
+        lines = []
+        for r in routes[:10]:
+            origin = r.get("origin_terminal_name", "Unknown")
+            dest = r.get("destination_terminal_name", "Unknown")
+            commodity = r.get("commodity_name", "Unknown")
+            profit = r.get("profit", "—")
+
+            lines.append(f"**{commodity}**\n{origin} → {dest}\nProfit: `{profit}` aUEC")
+
+        embed.add_field(name="Top Routes", value="\n\n".join(lines), inline=False)
+
+        await interaction.followup.send(embed=embed)
+
+    except Exception as e:
+        print(f"[ERROR] /besttrade failed: {e}")
+        await interaction.followup.send("Error fetching trade routes.", ephemeral=True)
+
+@tree.command(name="cargo", description="Calculate cargo run profit for a Star Citizen commodity.")
+@app_commands.describe(
+    name="Commodity name, e.g. Gold, Agricium, Quantanium",
+    scu="Your ship cargo size in SCU",
+    buy_price="Optional manual buy price per SCU"
+)
+async def cargo_command(
+    interaction: discord.Interaction,
+    name: str,
+    scu: app_commands.Range[int, 1, 100000],
+    buy_price: app_commands.Range[float, 0, 1000000] = None
+):
+    await interaction.response.defer()
+
+    try:
+        matches = await search_commodity_uex(name)
+
+        if not matches:
+            await interaction.followup.send("No matching commodities found.", ephemeral=True)
+            return
+
+        if len(matches) > 1:
+            # Keep first version simple to avoid rebuilding your dropdown flow again.
+            chosen = matches[0]
+        else:
+            chosen = matches[0]
+
+        embed = await build_cargo_embed(chosen, cargo_scu=scu, buy_price_override=buy_price)
+        await interaction.followup.send(embed=embed)
+
+    except Exception as e:
+        print(f"[ERROR] /cargo failed: {e}")
+        await interaction.followup.send(
+            "❌ An unexpected error occurred while calculating cargo profit.",
+            ephemeral=True
+        )
 # ---------------------------------------------------
 # Reaction removal suppression so bot-initiated removals don't unregister users
 # ---------------------------------------------------
