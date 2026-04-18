@@ -1695,15 +1695,15 @@ def _normalize_sc_name(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", (value or "").lower())
 
 async def get_trending_commodities(limit: int = 10) -> list[dict]:
-    data = await _uex_get("commodities_ranking")
+    data = await _uex_get("commodities_averages")
     if not isinstance(data, list):
         return []
 
     cleaned = []
     for item in data:
         try:
-            buy_scu = float(item.get("scu_buy_avg_month") or 0)
-            sell_scu = float(item.get("scu_sell_avg_month") or 0)
+            buy_scu = float(item.get("scu_buy_avg") or 0)
+            sell_scu = float(item.get("scu_sell_avg") or 0)
             total_volume = buy_scu + sell_scu
 
             item["_buy_scu_avg_month"] = buy_scu
@@ -1713,7 +1713,13 @@ async def get_trending_commodities(limit: int = 10) -> list[dict]:
         except Exception:
             continue
 
-    cleaned.sort(key=lambda x: x.get("_total_scu_avg_month", 0), reverse=True)
+    cleaned.sort(
+        key=lambda x: (
+            float(x.get("cax_score") or 0),
+            x.get("_total_scu_avg", 0)
+        ),
+        reverse=True
+    )
     return cleaned[:limit]
 
 async def search_commodity_uex(query: str) -> list[dict]:
