@@ -2079,18 +2079,35 @@ async def build_cargo_embed(
             r for r in rows
             if is_terminal_auto_load(r.get("terminal_name") or r.get("name_terminal") or "") is True
         ]
-
+    
     if wanted_system:
         rows = [
             r for r in rows
             if terminal_matches_system(r.get("terminal_name") or r.get("name_terminal") or "")
         ]
-
-    best_sell = _best_sell_row(rows)
-    buy_rows = [r for r in rows if _to_float(r.get("price_buy")) > 0]
+    
+    min_required_scu = cargo_scu * 0.75
+    
+    sell_candidates = [
+        r for r in rows
+        if _to_float(r.get("price_sell")) > 0
+        and _to_float(r.get("scu_sell")) >= min_required_scu
+    ]
+    
+    buy_rows = [
+        r for r in rows
+        if _to_float(r.get("price_buy")) > 0
+        and _to_float(r.get("scu_buy")) >= min_required_scu
+    ]
+    
+    best_sell = _best_sell_row(sell_candidates)
 
     if not best_sell or not buy_rows:
-        embed.description = "Not enough buy/sell data to calculate cargo profit."
+        embed.description = (
+            f"Not enough buy/sell data to calculate cargo profit.\n"
+            f"Locations must support at least `{min_required_scu:,.0f}` SCU "
+            f"(75% of your `{cargo_scu}` SCU ship)."
+        )
         footer_bits = ["Star Citizen — UEX"]
         if auto_load_only:
             footer_bits.append("Auto-load only")
@@ -2132,14 +2149,29 @@ async def build_cargo_embed(
     embed.add_field(name="Buy Price", value=f"`{buy_price:,.2f}` aUEC/SCU", inline=True)
     embed.add_field(name="Sell Price", value=f"`{sell_price:,.2f}` aUEC/SCU", inline=True)
 
+    if buy_price_override is not None:
+        buy_location_text = f"[{buy_system}] {buy_terminal}"
+    else:
+        buy_available = _to_float(best_buy.get("scu_buy"))
+        buy_location_text = (
+            f"[{buy_system}] {buy_terminal}\n"
+            f"Available to buy: `{buy_available:,.0f}` SCU"
+        )
+    
+    sell_capacity = _to_float(best_sell.get("scu_sell"))
+    sell_location_text = (
+        f"[{sell_system}] {sell_terminal}\n"
+        f"Sell capacity: `{sell_capacity:,.0f}` SCU"
+    )
+    
     embed.add_field(
         name="Buy Location",
-        value=f"[{buy_system}] {buy_terminal}",
+        value=buy_location_text,
         inline=False
     )
     embed.add_field(
         name="Best Sell Location",
-        value=f"[{sell_system}] {sell_terminal}",
+        value=sell_location_text,
         inline=False
     )
 
