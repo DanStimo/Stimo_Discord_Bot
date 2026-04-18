@@ -1758,6 +1758,8 @@ def _ship_scu(ship: dict) -> int:
 
 async def search_ships_scwiki(query: str) -> list[dict]:
     ships = await get_all_ships_scwiki()
+    print(f"[SCWIKI] loaded ships: {len(ships)}")
+    print("[SCWIKI] sample ship keys:", list(ships[0].keys()) if ships else [])
     if not isinstance(ships, list):
         return []
 
