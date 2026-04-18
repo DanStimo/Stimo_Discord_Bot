@@ -5648,8 +5648,8 @@ async def commodity_command(
             auto_load_only=auto_load_only,
             system_filter=selected_system
         )
-    msg = await send_temp_followup(interaction, embed=embed)
-    await log_star_command_usage(interaction, "commodity", message=msg)
+        msg = await send_temp_followup(interaction, embed=embed)
+        await log_star_command_usage(interaction, "commodity", message=msg)
 
     except Exception as e:
         print(f"[ERROR] /commodity failed: {e}")
