@@ -1907,6 +1907,43 @@ async def search_ships_scwiki(query: str) -> list[dict]:
 
     return results[:25]
 
+async def ship_autocomplete(
+    interaction: discord.Interaction,
+    current: str
+) -> list[app_commands.Choice[str]]:
+    if not current or not current.strip():
+        return []
+
+    try:
+        matches = await search_ships_scwiki(current)
+    except Exception as e:
+        print(f"[ERROR] ship_autocomplete failed: {e}")
+        return []
+
+    choices = []
+    seen = set()
+
+    for ship in matches[:25]:
+        ship_name = _ship_display_name(ship)
+        ship_scu = _ship_scu(ship)
+
+        if not ship_name:
+            continue
+
+        key = ship_name.lower().strip()
+        if key in seen:
+            continue
+        seen.add(key)
+
+        choices.append(
+            app_commands.Choice(
+                name=f"{ship_name} ({ship_scu} SCU)"[:100],
+                value=ship_name[:100]
+            )
+        )
+
+    return choices
+
 async def build_commodity_embed(
     commodity: dict,
     auto_load_only: bool = False,
@@ -5550,6 +5587,13 @@ async def route_command(
             ephemeral=True
         )
 
+@route_command.autocomplete("ship")
+async def route_ship_autocomplete(
+    interaction: discord.Interaction,
+    current: str
+) -> list[app_commands.Choice[str]]:
+    return await ship_autocomplete(interaction, current)
+
 @tree.command(name="terminal", description="Show what a terminal buys/sells")
 @app_commands.describe(name="Terminal name (e.g. Area18, Lorville)")
 async def terminal_command(interaction: discord.Interaction, name: str):
@@ -5761,6 +5805,13 @@ async def cargo_command(
             "❌ An unexpected error occurred while calculating cargo profit.",
             ephemeral=True
         )
+
+@cargo_command.autocomplete("ship")
+async def cargo_ship_autocomplete(
+    interaction: discord.Interaction,
+    current: str
+) -> list[app_commands.Choice[str]]:
+    return await ship_autocomplete(interaction, current)
 # ---------------------------------------------------
 # Reaction removal suppression so bot-initiated removals don't unregister users
 # ---------------------------------------------------
