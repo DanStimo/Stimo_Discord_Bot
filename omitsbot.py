@@ -1588,7 +1588,6 @@ async def _uex_get(resource: str, params: dict | None = None, retries: int = 3):
 
             if r.status_code == 200:
                 payload = r.json()
-                print("[UEX PAYLOAD]", payload)
                 if isinstance(payload, dict):
                     return payload.get("data", payload)
                 return payload
@@ -1684,6 +1683,90 @@ def terminal_system_name(terminal_info: dict | None) -> str:
         or terminal_info.get("name_star_system")
         or "Unknown"
     )
+
+SCWIKI_VEHICLES_URL = "https://api.star-citizen.wiki/api/vehicles"
+
+_ship_cache = None
+
+async def get_all_ships_scwiki():
+    global _ship_cache
+
+    if _ship_cache is not None:
+        return _ship_cache
+
+    try:
+        r = await _client_uex.get(SCWIKI_VEHICLES_URL)
+        if r.status_code != 200:
+            print(f"[SCWIKI] {r.status_code} {SCWIKI_VEHICLES_URL} :: {r.text[:300]}")
+            _ship_cache = []
+            return _ship_cache
+
+        payload = r.json()
+        if isinstance(payload, dict):
+            data = payload.get("data", [])
+        elif isinstance(payload, list):
+            data = payload
+        else:
+            data = []
+
+        _ship_cache = data if isinstance(data, list) else []
+        return _ship_cache
+
+    except Exception as e:
+        print(f"[SCWIKI] exception loading ships :: {e}")
+        _ship_cache = []
+        return _ship_cache
+
+
+def _ship_display_name(ship: dict) -> str:
+    return (
+        ship.get("game_name")
+        or ship.get("name")
+        or ship.get("shipmatrix_name")
+        or ship.get("slug")
+        or "Unknown Ship"
+    )
+
+
+def _ship_scu(ship: dict) -> int:
+    try:
+        return int(float(ship.get("cargo_capacity") or 0))
+    except Exception:
+        return 0
+
+
+async def search_ships_scwiki(query: str) -> list[dict]:
+    ships = await get_all_ships_scwiki()
+    if not isinstance(ships, list):
+        return []
+
+    q = _normalize_sc_name(query)
+    if not q:
+        return []
+
+    exact = []
+    partial = []
+
+    for ship in ships:
+        names = [
+            str(ship.get("name", "")),
+            str(ship.get("game_name", "")),
+            str(ship.get("slug", "")),
+            str(ship.get("shipmatrix_name", "")),
+        ]
+
+        norm_names = [_normalize_sc_name(n) for n in names if n]
+
+        if any(q == n for n in norm_names):
+            exact.append(ship)
+        elif any(q in n for n in norm_names):
+            partial.append(ship)
+
+    # keep only ships with usable cargo values
+    exact = [s for s in exact if _ship_scu(s) > 0]
+    partial = [s for s in partial if _ship_scu(s) > 0]
+
+    return exact + partial
 
 async def build_commodity_embed(
     commodity: dict,
@@ -2024,6 +2107,116 @@ class CommodityDropdown(discord.ui.View):
             return
 
         await interaction.edit_original_response(content=None, embed=embed, view=None)
+
+class ShipDropdown(discord.ui.View):
+    def __init__(
+        self,
+        ship_results: list[dict],
+        commodity_query: str,
+        buy_price_override: float | None = None,
+        auto_load_only: bool = False,
+        system_filter: str | None = None
+    ):
+        super().__init__(timeout=90)
+        self.ship_results = ship_results
+        self.commodity_query = commodity_query
+        self.buy_price_override = buy_price_override
+        self.auto_load_only = auto_load_only
+        self.system_filter = system_filter
+
+        options = []
+        for ship in ship_results[:25]:
+            ship_name = _ship_display_name(ship)
+            ship_scu = _ship_scu(ship)
+            ship_id = str(ship.get("uuid") or ship.get("id") or ship.get("slug") or ship_name)
+
+            options.append(
+                discord.SelectOption(
+                    label=ship_name[:100],
+                    value=ship_id,
+                    description=f"{ship_scu} SCU"[:100]
+                )
+            )
+
+        options.append(discord.SelectOption(label="None of these", value="none"))
+
+        select = discord.ui.Select(
+            placeholder="Choose a ship…",
+            options=options,
+            min_values=1,
+            max_values=1
+        )
+        select.callback = self._on_select
+        self.add_item(select)
+
+    async def _on_select(self, interaction: discord.Interaction):
+        value = self.children[0].values[0]
+
+        if value == "none":
+            await interaction.response.edit_message(content="Selection cancelled.", view=None)
+            return
+
+        chosen_ship = next(
+            (
+                s for s in self.ship_results
+                if str(s.get("uuid") or s.get("id") or s.get("slug") or _ship_display_name(s)) == value
+            ),
+            None
+        )
+
+        if not chosen_ship:
+            await interaction.response.edit_message(content="Could not find that ship.", view=None)
+            return
+
+        await interaction.response.defer()
+
+        ship_scu = _ship_scu(chosen_ship)
+        if ship_scu <= 0:
+            await interaction.edit_original_response(
+                content="That ship does not have a usable cargo capacity in the API.",
+                view=None
+            )
+            return
+
+        commodity_matches = await search_commodity_uex(self.commodity_query)
+
+        if not commodity_matches:
+            await interaction.edit_original_response(
+                content="No matching commodities found.",
+                view=None
+            )
+            return
+
+        if len(commodity_matches) > 1:
+            view = CommodityDropdown(
+                commodity_matches,
+                mode="cargo",
+                auto_load_only=self.auto_load_only,
+                system_filter=self.system_filter,
+                cargo_scu=ship_scu,
+                buy_price_override=self.buy_price_override
+            )
+            await interaction.edit_original_response(
+                content=f"Using **{_ship_display_name(chosen_ship)}** (`{ship_scu}` SCU).\nMultiple commodities found. Please choose:",
+                view=view,
+                embed=None
+            )
+            return
+
+        embed = await build_cargo_embed(
+            commodity_matches[0],
+            cargo_scu=ship_scu,
+            buy_price_override=self.buy_price_override,
+            auto_load_only=self.auto_load_only,
+            system_filter=self.system_filter
+        )
+
+        embed.set_author(
+            name=f"Ship: {_ship_display_name(chosen_ship)} • {ship_scu} SCU"
+        )
+
+        await interaction.edit_original_response(content=None, embed=embed, view=None)
+        
 async def search_terminal_uex(query: str) -> list[dict]:
     data = await _uex_get("terminals")
     if not isinstance(data, list):
@@ -5004,7 +5197,8 @@ async def besttrade_command(interaction: discord.Interaction):
 @tree.command(name="cargo", description="Calculate cargo run profit for a Star Citizen commodity.")
 @app_commands.describe(
     name="Commodity name, e.g. Gold, Agricium, Quantanium",
-    scu="Your ship cargo size in SCU",
+    ship="Optional ship name to auto-use its SCU capacity",
+    scu="Manual ship cargo size in SCU if no ship is provided",
     buy_price="Optional manual buy price per SCU",
     auto_load_only="Only use terminals that support auto loading",
     system_filter="Only use terminals in this star system"
@@ -5017,7 +5211,8 @@ async def besttrade_command(interaction: discord.Interaction):
 async def cargo_command(
     interaction: discord.Interaction,
     name: str,
-    scu: app_commands.Range[int, 1, 100000],
+    ship: str = None,
+    scu: app_commands.Range[int, 1, 100000] = None,
     buy_price: app_commands.Range[float, 0, 1000000] = None,
     auto_load_only: bool = False,
     system_filter: app_commands.Choice[str] = None
@@ -5025,13 +5220,55 @@ async def cargo_command(
     await interaction.response.defer()
 
     try:
+        selected_system = system_filter.value if system_filter else None
+
+        # Ship mode takes priority over manual SCU
+        if ship:
+            ship_matches = await search_ships_scwiki(ship)
+
+            if not ship_matches:
+                await interaction.followup.send("No matching ships found.", ephemeral=True)
+                return
+
+            if len(ship_matches) > 1:
+                view = ShipDropdown(
+                    ship_matches,
+                    commodity_query=name,
+                    buy_price_override=buy_price,
+                    auto_load_only=auto_load_only,
+                    system_filter=selected_system
+                )
+                await interaction.followup.send(
+                    "Multiple ships found. Please choose:",
+                    view=view
+                )
+                return
+
+            chosen_ship = ship_matches[0]
+            resolved_scu = _ship_scu(chosen_ship)
+
+            if resolved_scu <= 0:
+                await interaction.followup.send(
+                    "That ship does not have a usable cargo capacity in the API.",
+                    ephemeral=True
+                )
+                return
+        else:
+            if scu is None:
+                await interaction.followup.send(
+                    "Please provide either a ship name or a manual SCU value.",
+                    ephemeral=True
+                )
+                return
+
+            chosen_ship = None
+            resolved_scu = int(scu)
+
         matches = await search_commodity_uex(name)
 
         if not matches:
             await interaction.followup.send("No matching commodities found.", ephemeral=True)
             return
-
-        selected_system = system_filter.value if system_filter else None
 
         if len(matches) > 1:
             view = CommodityDropdown(
@@ -5039,24 +5276,31 @@ async def cargo_command(
                 mode="cargo",
                 auto_load_only=auto_load_only,
                 system_filter=selected_system,
-                cargo_scu=scu,
+                cargo_scu=resolved_scu,
                 buy_price_override=buy_price
             )
+            prefix = ""
+            if chosen_ship:
+                prefix = f"Using **{_ship_display_name(chosen_ship)}** (`{resolved_scu}` SCU).\n"
             await interaction.followup.send(
-                "Multiple commodities found. Please choose:",
+                prefix + "Multiple commodities found. Please choose:",
                 view=view
             )
             return
 
-        chosen = matches[0]
-
         embed = await build_cargo_embed(
-            chosen,
-            cargo_scu=scu,
+            matches[0],
+            cargo_scu=resolved_scu,
             buy_price_override=buy_price,
             auto_load_only=auto_load_only,
             system_filter=selected_system
         )
+
+        if chosen_ship:
+            embed.set_author(
+                name=f"Ship: {_ship_display_name(chosen_ship)} • {resolved_scu} SCU"
+            )
+
         await interaction.followup.send(embed=embed)
 
     except Exception as e:
