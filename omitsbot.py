@@ -5640,7 +5640,6 @@ async def commodity_command(
                 view=view,
                 delete_after=90
             )
-            await log_star_command_usage(interaction, "commodity", message=msg)
             return
 
         embed = await build_commodity_embed(
@@ -5814,7 +5813,6 @@ async def terminal_command(interaction: discord.Interaction, name: str):
                 view=view,
                 delete_after=90
             )
-            await log_star_command_usage(interaction, "terminal", message=msg)
             return
 
         terminal = matches[0]
@@ -5970,7 +5968,6 @@ async def cargo_command(
                     view=view,
                     delete_after=90
                 )
-                await log_star_command_usage(interaction, "cargo", message=msg)
                 return
 
             chosen_ship = ship_matches[0]
