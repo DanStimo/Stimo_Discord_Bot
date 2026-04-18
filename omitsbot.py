@@ -5749,14 +5749,14 @@ async def route_command(
                 cargo_scu=resolved_scu,
                 ship_name=chosen_ship_name
             )
-                msg = await send_temp_followup(
-                    interaction,
-                    content="Multiple commodities found. Please choose:",
-                    view=view,
-                    delete_after=90
-                )
-                await log_star_command_usage(interaction, "route", message=msg)
-                return
+            msg = await send_temp_followup(
+                interaction,
+                content="Multiple commodities found. Please choose:",
+                view=view,
+                delete_after=90
+            )
+            await log_star_command_usage(interaction, "route", message=msg)
+            return
 
         embed = await build_route_embed(
             matches[0],
