@@ -2382,7 +2382,7 @@ class CommodityDropdown(discord.ui.View):
 
         await interaction.response.defer()
 
-                if self.mode == "commodity":
+        if self.mode == "commodity":
             embed = await build_commodity_embed(
                 chosen,
                 auto_load_only=self.auto_load_only,
