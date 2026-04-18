@@ -1730,10 +1730,31 @@ def _ship_display_name(ship: dict) -> str:
 
 def _ship_scu(ship: dict) -> int:
     try:
-        return int(float(ship.get("cargo_capacity") or 0))
+        # common direct fields
+        for key in ("cargo_capacity", "cargo", "scu"):
+            value = ship.get(key)
+            if value not in (None, "", 0, "0"):
+                return int(float(value))
+
+        # nested cargo object
+        cargo_obj = ship.get("cargo")
+        if isinstance(cargo_obj, dict):
+            for key in ("capacity", "scu", "cargo_capacity", "value"):
+                value = cargo_obj.get(key)
+                if value not in (None, "", 0, "0"):
+                    return int(float(value))
+
+        # fallback if physical / specs style nesting exists
+        specs = ship.get("specs")
+        if isinstance(specs, dict):
+            for key in ("cargo_capacity", "cargo", "scu"):
+                value = specs.get(key)
+                if value not in (None, "", 0, "0"):
+                    return int(float(value))
+
+        return 0
     except Exception:
         return 0
-
 
 async def search_ships_scwiki(query: str) -> list[dict]:
     ships = await get_all_ships_scwiki()
@@ -1744,9 +1765,6 @@ async def search_ships_scwiki(query: str) -> list[dict]:
     q_norm = _normalize_sc_name(raw_query)
     if not q_norm:
         return []
-
-    # only ships with usable cargo
-    ships = [s for s in ships if _ship_scu(s) > 0]
 
     def ship_names(ship: dict) -> list[str]:
         return [
@@ -1770,23 +1788,19 @@ async def search_ships_scwiki(query: str) -> list[dict]:
             out.append(ship)
         return out
 
-    # 1) exact normalized match
+    # match first, filter usable SCU later
     exact = []
-    for ship in ships:
-        norm_names = [_normalize_sc_name(n) for n in ship_names(ship) if n]
-        if any(q_norm == n for n in norm_names):
-            exact.append(ship)
-
-    exact = dedupe(exact)
-    if exact:
-        return exact[:25]
-
-    # 2) token / startswith match
     token_matches = []
+    partial = []
+
     for ship in ships:
         names = ship_names(ship)
         lowered = [n.lower() for n in names if n]
         norm_names = [_normalize_sc_name(n) for n in names if n]
+
+        if any(q_norm == n for n in norm_names):
+            exact.append(ship)
+            continue
 
         if any(n.startswith(q_norm) for n in norm_names):
             token_matches.append(ship)
@@ -1800,22 +1814,22 @@ async def search_ships_scwiki(query: str) -> list[dict]:
             token_matches.append(ship)
             continue
 
-    token_matches = dedupe(token_matches)
-    if token_matches:
-        return token_matches[:25]
-
-    # 3) substring match
-    partial = []
-    for ship in ships:
-        norm_names = [_normalize_sc_name(n) for n in ship_names(ship) if n]
         if any(q_norm in n for n in norm_names):
             partial.append(ship)
 
-    partial = dedupe(partial)
+    exact = [s for s in dedupe(exact) if _ship_scu(s) > 0]
+    if exact:
+        return exact[:25]
+
+    token_matches = [s for s in dedupe(token_matches) if _ship_scu(s) > 0]
+    if token_matches:
+        return token_matches[:25]
+
+    partial = [s for s in dedupe(partial) if _ship_scu(s) > 0]
     if partial:
         return partial[:25]
 
-    # 4) fuzzy fallback (stricter)
+    # fuzzy fallback only if direct matching found nothing
     choices = []
     choice_to_ship = {}
 
@@ -1836,6 +1850,9 @@ async def search_ships_scwiki(query: str) -> list[dict]:
             continue
 
         ship = choice_to_ship[matched_name]
+        if _ship_scu(ship) <= 0:
+            continue
+
         sid = ship_id(ship)
         if sid in seen:
             continue
