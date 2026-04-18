@@ -2379,11 +2379,19 @@ async def build_route_embed(
     elif cargo_scu:
         embed.set_author(name=f"Cargo: {cargo_scu} SCU")
 
-    footer_bits = ["Star Citizen — UEX"]
+    footer_bits = [
+        "Star Citizen — UEX",
+        "✅ Auto-load",
+        "❌ No auto-load",
+        "❔ Unknown"
+    ]
+    
     if auto_load_only:
         footer_bits.append("Auto-load only")
+    
     if wanted_system:
         footer_bits.append(f"System: {system_filter}")
+    
     embed.set_footer(text=" • ".join(footer_bits))
 
     return embed
