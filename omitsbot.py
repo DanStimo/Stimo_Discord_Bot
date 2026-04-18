@@ -18,8 +18,11 @@ import math
 load_dotenv()
 
 TOKEN = os.getenv("DISCORD_TOKEN")
-CLUB_ID = os.getenv("CLUB_ID", "167054")  # fallback/default
+CLUB_ID = os.getenv("CLUB_ID", "167054")
 PLATFORM = os.getenv("PLATFORM", "gen5")
+UEX_API_KEY = os.getenv("UEX_API_KEY", "").strip()
+UEX_API_BASE = os.getenv("UEX_API_BASE", "https://api.uexcorp.space/2.0").rstrip("/")
+
 OFFSIDE_KEY = "offside.json"
 
 MATCH_TYPE_LABELS = {
@@ -1557,6 +1560,235 @@ async def rotate_presence():
             print(f"[ERROR] Failed to rotate presence: {e}")
 
         await asyncio.sleep(300)
+
+# =========================================================
+# STAR CITIZEN / UEX
+# =========================================================
+
+UEX_HEADERS = {
+    "Accept": "application/json",
+    "Authorization": f"Bearer {UEX_API_KEY}",
+}
+
+_client_uex = httpx.AsyncClient(
+    timeout=20,
+    headers=UEX_HEADERS,
+    follow_redirects=True,
+)
+
+async def _uex_get(resource: str, params: dict | None = None, retries: int = 3):
+    if not UEX_API_KEY:
+        raise RuntimeError("UEX_API_KEY is missing.")
+
+    url = f"{UEX_API_BASE}/{resource.strip('/')}/"
+
+    for attempt in range(retries):
+        try:
+            r = await _client_uex.get(url, params=params or {})
+
+            if r.status_code == 200:
+                payload = r.json()
+                if isinstance(payload, dict):
+                    return payload.get("data", payload)
+                return payload
+
+            print(f"[UEX] {r.status_code} {url} try {attempt+1}/{retries} :: {r.text[:300]}")
+
+            if r.status_code in (429, 500, 502, 503, 504):
+                await asyncio.sleep(1.2 + attempt)
+                continue
+
+        except Exception as e:
+            print(f"[UEX] exception {url} try {attempt+1}/{retries} :: {e}")
+
+        await asyncio.sleep(0.8 + attempt)
+
+    return None
+
+def _normalize_sc_name(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", (value or "").lower())
+
+async def search_commodity_uex(query: str) -> list[dict]:
+    data = await _uex_get("commodities")
+    if not isinstance(data, list):
+        return []
+
+    q = _normalize_sc_name(query)
+    if not q:
+        return []
+
+    exact = []
+    partial = []
+
+    for item in data:
+        name = str(item.get("name", ""))
+        code = str(item.get("code", ""))
+        hay = _normalize_sc_name(name)
+        hay_code = _normalize_sc_name(code)
+
+        if q == hay or q == hay_code:
+            exact.append(item)
+        elif q in hay or q in hay_code:
+            partial.append(item)
+
+    return exact + partial
+
+async def get_commodity_prices(commodity_id: str | int):
+    return await _uex_get("commodities_prices", params={"id_commodity": commodity_id})
+
+async def get_commodity_routes(commodity_id: str | int, max_rows: int = 10):
+    data = await _uex_get(
+        "commodities_routes",
+        params={
+            "id_commodity": commodity_id,
+            "limit": max_rows,
+        }
+    )
+    if not isinstance(data, list):
+        return []
+    return data
+
+async def build_commodity_embed(commodity: dict) -> discord.Embed:
+    commodity_id = commodity.get("id") or commodity.get("id_commodity")
+    commodity_name = commodity.get("name", "Unknown Commodity")
+
+    prices = await get_commodity_prices(commodity_id)
+    rows = prices if isinstance(prices, list) else []
+
+    embed = discord.Embed(
+        title=f"🚚 {commodity_name}",
+        description="Best buy/sell locations from UEX trade data.",
+        color=0x5865F2
+    )
+
+    if not rows:
+        embed.add_field(name="Prices", value="No price data found.", inline=False)
+        embed.set_footer(text="Star Citizen — UEX")
+        return embed
+
+    buy_rows = sorted(
+        [r for r in rows if r.get("price_buy") not in (None, "", 0)],
+        key=lambda x: float(x.get("price_buy", 999999999))
+    )[:5]
+
+    sell_rows = sorted(
+        [r for r in rows if r.get("price_sell") not in (None, "", 0)],
+        key=lambda x: float(x.get("price_sell", 0)),
+        reverse=True
+    )[:5]
+
+    if buy_rows:
+        lines = []
+        for r in buy_rows:
+            terminal = r.get("terminal_name") or r.get("name_terminal") or "Unknown"
+            price = r.get("price_buy", "—")
+            stock = r.get("scu_buy") or r.get("stock_buy") or "—"
+            lines.append(f"**{terminal}** — Buy: `{price}` aUEC/SCU • Stock: `{stock}`")
+        embed.add_field(name="Best Buy", value="\n".join(lines), inline=False)
+
+    if sell_rows:
+        lines = []
+        for r in sell_rows:
+            terminal = r.get("terminal_name") or r.get("name_terminal") or "Unknown"
+            price = r.get("price_sell", "—")
+            demand = r.get("scu_sell") or r.get("stock_sell") or "—"
+            lines.append(f"**{terminal}** — Sell: `{price}` aUEC/SCU • Demand: `{demand}`")
+        embed.add_field(name="Best Sell", value="\n".join(lines), inline=False)
+
+    embed.set_footer(text="Star Citizen — UEX")
+    return embed
+
+async def build_route_embed(commodity: dict) -> discord.Embed:
+    commodity_id = commodity.get("id") or commodity.get("id_commodity")
+    commodity_name = commodity.get("name", "Unknown Commodity")
+
+    routes = await get_commodity_routes(commodity_id, max_rows=10)
+
+    embed = discord.Embed(
+        title=f"📈 Best Routes — {commodity_name}",
+        description="Top trade routes by profit and margin.",
+        color=0x2ECC71
+    )
+
+    if not routes:
+        embed.add_field(name="Routes", value="No routes found.", inline=False)
+        embed.set_footer(text="Star Citizen — UEX")
+        return embed
+
+    lines = []
+    for r in routes[:10]:
+        origin = (
+            r.get("terminal_origin_name")
+            or r.get("origin_terminal_name")
+            or r.get("from_terminal_name")
+            or "Unknown Origin"
+        )
+        destination = (
+            r.get("terminal_destination_name")
+            or r.get("destination_terminal_name")
+            or r.get("to_terminal_name")
+            or "Unknown Destination"
+        )
+        margin = r.get("profit_margin") or r.get("margin") or "—"
+        profit = r.get("profit") or r.get("profit_total") or "—"
+
+        lines.append(
+            f"**{origin}** → **{destination}**\n"
+            f"Profit: `{profit}` aUEC • Margin: `{margin}`"
+        )
+
+    embed.add_field(name="Top Routes", value="\n\n".join(lines)[:1024], inline=False)
+    embed.set_footer(text="Star Citizen — UEX")
+    return embed
+
+class CommodityDropdown(discord.ui.View):
+    def __init__(self, results: list[dict], mode: str = "commodity"):
+        super().__init__(timeout=90)
+        self.results = results
+        self.mode = mode
+
+        options = []
+        for item in results[:25]:
+            label = item.get("name", "Unknown Commodity")
+            value = str(item.get("id") or item.get("id_commodity") or "")
+            if not value:
+                continue
+            options.append(discord.SelectOption(label=label[:100], value=value))
+
+        options.append(discord.SelectOption(label="None of these", value="none"))
+
+        select = discord.ui.Select(
+            placeholder="Choose a commodity…",
+            options=options,
+            min_values=1,
+            max_values=1
+        )
+        select.callback = self._on_select
+        self.add_item(select)
+
+    async def _on_select(self, interaction: discord.Interaction):
+        value = self.children[0].values[0]
+
+        if value == "none":
+            await interaction.response.edit_message(content="Selection cancelled.", view=None)
+            return
+
+        chosen = next(
+            (x for x in self.results if str(x.get("id") or x.get("id_commodity")) == value),
+            None
+        )
+        if not chosen:
+            await interaction.response.edit_message(content="Could not find that commodity.", view=None)
+            return
+
+        await interaction.response.defer()
+
+        if self.mode == "commodity":
+            embed = await build_commodity_embed(chosen)
+        else:
+            embed = await build_route_embed(chosen)
+
+        await interaction.edit_original_response(content=None, embed=embed, view=None)
 
 # Safe interaction helpers
 async def safe_interaction_edit(interaction, embed, view):
@@ -4176,6 +4408,66 @@ async def resetoffside_command(interaction: discord.Interaction):
         await interaction.followup.send(f"✅ Offside counter reset (was **{before}**, now **0**).", ephemeral=True)
     except Exception as e:
         await interaction.followup.send(f"⚠️ Failed to reset counter: {e}", ephemeral=True)
+
+@tree.command(name="commodity", description="Show Star Citizen commodity buy/sell data.")
+@app_commands.describe(name="Commodity name, e.g. Gold, Agricium, Quantanium")
+async def commodity_command(interaction: discord.Interaction, name: str):
+    await interaction.response.defer()
+
+    try:
+        matches = await search_commodity_uex(name)
+
+        if not matches:
+            await interaction.followup.send("No matching commodities found.", ephemeral=True)
+            return
+
+        if len(matches) > 1:
+            view = CommodityDropdown(matches, mode="commodity")
+            await interaction.followup.send(
+                "Multiple commodities found. Please choose:",
+                view=view
+            )
+            return
+
+        embed = await build_commodity_embed(matches[0])
+        await interaction.followup.send(embed=embed)
+
+    except Exception as e:
+        print(f"[ERROR] /commodity failed: {e}")
+        await interaction.followup.send(
+            "❌ An unexpected error occurred while fetching commodity data.",
+            ephemeral=True
+        )
+
+@tree.command(name="route", description="Show best Star Citizen trade routes for a commodity.")
+@app_commands.describe(name="Commodity name, e.g. Gold, Agricium, Quantanium")
+async def route_command(interaction: discord.Interaction, name: str):
+    await interaction.response.defer()
+
+    try:
+        matches = await search_commodity_uex(name)
+
+        if not matches:
+            await interaction.followup.send("No matching commodities found.", ephemeral=True)
+            return
+
+        if len(matches) > 1:
+            view = CommodityDropdown(matches, mode="route")
+            await interaction.followup.send(
+                "Multiple commodities found. Please choose:",
+                view=view
+            )
+            return
+
+        embed = await build_route_embed(matches[0])
+        await interaction.followup.send(embed=embed)
+
+    except Exception as e:
+        print(f"[ERROR] /route failed: {e}")
+        await interaction.followup.send(
+            "❌ An unexpected error occurred while fetching route data.",
+            ephemeral=True
+        )
 
 # ---------------------------------------------------
 # Reaction removal suppression so bot-initiated removals don't unregister users
