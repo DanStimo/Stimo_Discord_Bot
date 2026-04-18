@@ -5765,8 +5765,8 @@ async def route_command(
             cargo_scu=resolved_scu,
             ship_name=chosen_ship_name
         )
-    msg = await send_temp_followup(interaction, embed=embed)
-    await log_star_command_usage(interaction, "route", message=msg)
+        msg = await send_temp_followup(interaction, embed=embed)
+        await log_star_command_usage(interaction, "route", message=msg)
 
     except Exception as e:
         print(f"[ERROR] /route failed: {e}")
