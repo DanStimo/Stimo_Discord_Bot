@@ -2382,12 +2382,14 @@ class CommodityDropdown(discord.ui.View):
 
         await interaction.response.defer()
 
-        if self.mode == "commodity":
+                if self.mode == "commodity":
             embed = await build_commodity_embed(
                 chosen,
                 auto_load_only=self.auto_load_only,
                 system_filter=self.system_filter
             )
+            command_name = "commodity"
+
         elif self.mode == "route":
             embed = await build_route_embed(
                 chosen,
@@ -2396,6 +2398,8 @@ class CommodityDropdown(discord.ui.View):
                 cargo_scu=self.cargo_scu,
                 ship_name=self.ship_name
             )
+            command_name = "route"
+
         elif self.mode == "cargo":
             embed = await build_cargo_embed(
                 chosen,
@@ -2404,6 +2408,8 @@ class CommodityDropdown(discord.ui.View):
                 auto_load_only=self.auto_load_only,
                 system_filter=self.system_filter
             )
+            command_name = "cargo"
+
         else:
             await interaction.edit_original_response(
                 content="Unknown dropdown mode.",
@@ -2412,6 +2418,12 @@ class CommodityDropdown(discord.ui.View):
             return
 
         await interaction.edit_original_response(content=None, embed=embed, view=None)
+
+        try:
+            msg = await interaction.original_response()
+            await log_star_command_usage(interaction, command_name, message=msg)
+        except Exception as e:
+            print(f"[ERROR] Failed to log final dropdown output ({command_name}): {e}")
         
 class ShipDropdown(discord.ui.View):
     def __init__(
@@ -2524,6 +2536,7 @@ class ShipDropdown(discord.ui.View):
                 system_filter=self.system_filter
             )
             embed.set_author(name=f"Ship: {ship_name} • {ship_scu} SCU")
+            command_name = "cargo"
 
         elif self.mode == "route":
             embed = await build_route_embed(
@@ -2533,6 +2546,7 @@ class ShipDropdown(discord.ui.View):
                 cargo_scu=ship_scu,
                 ship_name=ship_name
             )
+            command_name = "route"
 
         else:
             await interaction.edit_original_response(
@@ -2542,6 +2556,12 @@ class ShipDropdown(discord.ui.View):
             return
 
         await interaction.edit_original_response(content=None, embed=embed, view=None)
+
+        try:
+            msg = await interaction.original_response()
+            await log_star_command_usage(interaction, command_name, message=msg)
+        except Exception as e:
+            print(f"[ERROR] Failed to log final ship dropdown output ({command_name}): {e}")
 
 class TerminalDropdown(discord.ui.View):
     def __init__(self, results: list[dict]):
@@ -2666,7 +2686,13 @@ class TerminalDropdown(discord.ui.View):
             lines = [f"{c.get('commodity_name', 'Unknown')} — `{c.get('price_sell', '—')}`" for c in sell[:10]]
             embed.add_field(name="Sells", value="\n".join(lines), inline=False)
 
-        await interaction.edit_original_response(content=None, embed=embed, view=None)        
+        await interaction.edit_original_response(content=None, embed=embed, view=None)
+
+        try:
+            msg = await interaction.original_response()
+            await log_star_command_usage(interaction, "terminal", message=msg)
+        except Exception as e:
+            print(f"[ERROR] Failed to log final terminal dropdown output: {e}")       
         
 async def search_terminal_uex(query: str) -> list[dict]:
     terminals = await get_all_terminals()
