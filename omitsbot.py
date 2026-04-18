@@ -4958,15 +4958,20 @@ async def besttrade_command(interaction: discord.Interaction):
     scu="Your ship cargo size in SCU",
     buy_price="Optional manual buy price per SCU",
     auto_load_only="Only use terminals that support auto loading",
-    system_filter="Optional system filter, e.g. Stanton, Pyro, Nyx"
+    system_filter="Only use terminals in this star system"
 )
+@app_commands.choices(system_filter=[
+    app_commands.Choice(name="Stanton", value="Stanton"),
+    app_commands.Choice(name="Pyro", value="Pyro"),
+    app_commands.Choice(name="Nyx", value="Nyx"),
+])
 async def cargo_command(
     interaction: discord.Interaction,
     name: str,
     scu: app_commands.Range[int, 1, 100000],
     buy_price: app_commands.Range[float, 0, 1000000] = None,
     auto_load_only: bool = False,
-    system_filter: str = None
+    system_filter: app_commands.Choice[str] = None
 ):
     await interaction.response.defer()
 
@@ -4979,12 +4984,14 @@ async def cargo_command(
 
         chosen = matches[0]
 
+        selected_system = system_filter.value if system_filter else None
+
         embed = await build_cargo_embed(
             chosen,
             cargo_scu=scu,
             buy_price_override=buy_price,
             auto_load_only=auto_load_only,
-            system_filter=system_filter
+            system_filter=selected_system
         )
         await interaction.followup.send(embed=embed)
 
