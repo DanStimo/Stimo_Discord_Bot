@@ -1684,7 +1684,7 @@ def terminal_system_name(terminal_info: dict | None) -> str:
         or "Unknown"
     )
 
-SCWIKI_VEHICLES_URL = "https://api.star-citizen.wiki/api/vehicles"
+SCWIKI_VEHICLES_URL = "https://api.star-citizen.wiki/api/shipmatrix/vehicles"
 
 _ship_cache = None
 
@@ -1702,6 +1702,7 @@ async def get_all_ships_scwiki():
             return _ship_cache
 
         payload = r.json()
+
         if isinstance(payload, dict):
             data = payload.get("data", [])
         elif isinstance(payload, list):
@@ -1709,7 +1710,17 @@ async def get_all_ships_scwiki():
         else:
             data = []
 
-        _ship_cache = data if isinstance(data, list) else []
+        if not isinstance(data, list):
+            data = []
+
+        # Keep actual ships only
+        data = [s for s in data if isinstance(s, dict)]
+
+        _ship_cache = data
+        print(f"[SCWIKI] loaded ships: {len(_ship_cache)}")
+        if _ship_cache:
+            print("[SCWIKI] sample ship keys:", list(_ship_cache[0].keys()))
+
         return _ship_cache
 
     except Exception as e:
