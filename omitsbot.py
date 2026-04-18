@@ -1695,7 +1695,7 @@ def _normalize_sc_name(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", (value or "").lower())
 
 async def get_trending_commodities(limit: int = 10) -> list[dict]:
-    data = await _uex_get("commodities_averages")
+    data = await _uex_get("commodities_ranking")
     if not isinstance(data, list):
         return []
 
@@ -1714,10 +1714,7 @@ async def get_trending_commodities(limit: int = 10) -> list[dict]:
             continue
 
     cleaned.sort(
-        key=lambda x: (
-            float(x.get("cax_score") or 0),
-            x.get("_total_scu_avg", 0)
-        ),
+        key=lambda x: float(x.get("cax_score") or 0),
         reverse=True
     )
     return cleaned[:limit]
