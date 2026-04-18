@@ -5795,13 +5795,12 @@ async def route_command(
                     auto_load_only=auto_load_only,
                     system_filter=selected_system
                 )
-                msg = await send_temp_followup(
+                await send_temp_followup(
                     interaction,
                     content="Multiple ships found. Please choose:",
                     view=view,
                     delete_after=90
                 )
-                await log_star_command_usage(interaction, "route", message=msg)
                 return
 
             chosen_ship = ship_matches[0]
@@ -5836,13 +5835,12 @@ async def route_command(
                 cargo_scu=resolved_scu,
                 ship_name=chosen_ship_name
             )
-            msg = await send_temp_followup(
+            await send_temp_followup(
                 interaction,
                 content="Multiple commodities found. Please choose:",
                 view=view,
                 delete_after=90
             )
-            await log_star_command_usage(interaction, "route", message=msg)
             return
 
         embed = await build_route_embed(
@@ -5895,7 +5893,7 @@ async def terminal_command(interaction: discord.Interaction, name: str):
 
         if len(matches) > 1:
             view = TerminalDropdown(matches)
-            msg = await send_temp_followup(
+            await send_temp_followup(
                 interaction,
                 content="Multiple terminals found. Please choose:",
                 view=view,
@@ -6050,7 +6048,7 @@ async def cargo_command(
                     auto_load_only=auto_load_only,
                     system_filter=selected_system
                 )
-                msg = await send_temp_followup(
+                await send_temp_followup(
                     interaction,
                     content="Multiple ships found. Please choose:",
                     view=view,
@@ -6104,13 +6102,12 @@ async def cargo_command(
             if chosen_ship:
                 prefix = f"Using **{_ship_display_name(chosen_ship)}** (`{resolved_scu}` SCU).\n"
 
-            msg = await send_temp_followup(
+            await send_temp_followup(
                 interaction,
                 content=prefix + "Multiple commodities found. Please choose:",
                 view=view,
                 delete_after=90
             )
-            await log_star_command_usage(interaction, "cargo", message=msg)
             return
 
         embed = await build_cargo_embed(
