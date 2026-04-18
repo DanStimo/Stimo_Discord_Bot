@@ -2678,6 +2678,52 @@ async def search_terminal_uex(query: str) -> list[dict]:
 
     return results[:25]
 
+async def terminal_autocomplete(
+    interaction: discord.Interaction,
+    current: str
+) -> list[app_commands.Choice[str]]:
+    if not current or not current.strip():
+        return []
+
+    try:
+        matches = await search_terminal_uex(current)
+    except Exception as e:
+        print(f"[ERROR] terminal_autocomplete failed: {e}")
+        return []
+
+    choices = []
+    seen = set()
+
+    for terminal in matches[:25]:
+        name = str(terminal.get("name") or "").strip()
+        if not name:
+            continue
+
+        key = name.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+
+        system_name = (
+            terminal.get("star_system_name")
+            or terminal.get("system_name")
+            or terminal.get("name_star_system")
+            or ""
+        )
+
+        label = name
+        if system_name:
+            label = f"{name} ({system_name})"
+
+        choices.append(
+            app_commands.Choice(
+                name=label[:100],
+                value=name[:100]
+            )
+        )
+
+    return choices
+
 def _to_float(value, default=0.0) -> float:
     try:
         if value is None or value == "":
@@ -5706,6 +5752,13 @@ async def terminal_command(interaction: discord.Interaction, name: str):
     except Exception as e:
         print(f"[ERROR] /terminal failed: {e}")
         await interaction.followup.send("Error fetching terminal data.", ephemeral=True)
+
+@terminal_command.autocomplete("name")
+async def terminal_name_autocomplete(
+    interaction: discord.Interaction,
+    current: str
+) -> list[app_commands.Choice[str]]:
+    return await terminal_autocomplete(interaction, current)
 
 @tree.command(name="besttrade", description="Find most profitable trade routes")
 async def besttrade_command(interaction: discord.Interaction):
