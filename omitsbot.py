@@ -1649,12 +1649,52 @@ async def get_commodity_routes(commodity_id: str | int, max_rows: int = 10):
         return []
     return data
 
-async def build_commodity_embed(commodity: dict) -> discord.Embed:
+_terminal_cache = None
+
+async def get_all_terminals():
+    global _terminal_cache
+
+    if _terminal_cache is not None:
+        return _terminal_cache
+
+    data = await _uex_get("terminals")
+    if not isinstance(data, list):
+        _terminal_cache = []
+        return _terminal_cache
+
+    _terminal_cache = data
+    return _terminal_cache
+
+def find_terminal_info(terminals: list[dict], terminal_name: str):
+    norm = _normalize_sc_name(terminal_name)
+
+    for t in terminals:
+        name = t.get("name", "")
+        if _normalize_sc_name(name) == norm:
+            return t
+
+    return None
+
+async def build_commodity_embed(commodity: dict, auto_load_only: bool = False) -> discord.Embed:
     commodity_id = commodity.get("id") or commodity.get("id_commodity")
     commodity_name = commodity.get("name", "Unknown Commodity")
 
     prices = await get_commodity_prices(commodity_id)
     rows = prices if isinstance(prices, list) else []
+
+    terminals = await get_all_terminals()
+
+    def is_terminal_auto_load(terminal_name: str) -> bool | None:
+        terminal_info = find_terminal_info(terminals, terminal_name)
+        if not terminal_info:
+            return None
+
+        val = terminal_info.get("is_auto_load")
+        if val in (1, "1", True):
+            return True
+        if val in (0, "0", False):
+            return False
+        return None
 
     embed = discord.Embed(
         title=f"🚚 {commodity_name}",
@@ -1667,31 +1707,47 @@ async def build_commodity_embed(commodity: dict) -> discord.Embed:
         embed.set_footer(text="Star Citizen — UEX")
         return embed
 
+    buy_candidates = [r for r in rows if r.get("price_buy") not in (None, "", 0)]
+    sell_candidates = [r for r in rows if r.get("price_sell") not in (None, "", 0)]
+
+    if auto_load_only:
+        buy_candidates = [
+            r for r in buy_candidates
+            if is_terminal_auto_load(r.get("terminal_name") or r.get("name_terminal") or "") is True
+        ]
+        sell_candidates = [
+            r for r in sell_candidates
+            if is_terminal_auto_load(r.get("terminal_name") or r.get("name_terminal") or "") is True
+        ]
+
     buy_rows = sorted(
-        [r for r in rows if r.get("price_buy") not in (None, "", 0)],
+        buy_candidates,
         key=lambda x: float(x.get("price_buy", 999999999))
     )[:5]
 
     sell_rows = sorted(
-        [r for r in rows if r.get("price_sell") not in (None, "", 0)],
+        sell_candidates,
         key=lambda x: float(x.get("price_sell", 0)),
         reverse=True
     )[:5]
 
     if buy_rows:
         lines = []
+        best_sell = max(
+            [float(s.get("price_sell") or 0) for s in sell_rows],
+            default=0
+        )
+
         for r in buy_rows:
             terminal = r.get("terminal_name") or r.get("name_terminal") or "Unknown"
             buy_price = float(r.get("price_buy") or 0)
-            best_sell = max(
-                [float(s.get("price_sell") or 0) for s in sell_rows],
-                default=0
-            )
             profit = int(best_sell - buy_price)
             stock = r.get("scu_buy") or r.get("stock_buy") or "—"
+
             lines.append(
                 f"**{terminal}** — Buy: `{int(buy_price)}` • Profit: `+{profit}` • Stock: `{stock}`"
             )
+
         embed.add_field(name="Best Buy", value="\n".join(lines), inline=False)
 
     if sell_rows:
@@ -1703,14 +1759,30 @@ async def build_commodity_embed(commodity: dict) -> discord.Embed:
             lines.append(f"**{terminal}** — Sell: `{price}` aUEC/SCU • Demand: `{demand}`")
         embed.add_field(name="Best Sell", value="\n".join(lines), inline=False)
 
-    embed.set_footer(text="Star Citizen — UEX")
+    if auto_load_only:
+        embed.set_footer(text="Star Citizen — UEX • Auto-load only")
+    else:
+        embed.set_footer(text="Star Citizen — UEX")
+
     return embed
 
-async def build_route_embed(commodity: dict) -> discord.Embed:
+async def build_route_embed(commodity: dict, auto_load_only: bool = False) -> discord.Embed:
     commodity_id = commodity.get("id") or commodity.get("id_commodity")
     commodity_name = commodity.get("name", "Unknown Commodity")
 
     routes = await get_commodity_routes(commodity_id, max_rows=10)
+    terminals = await get_all_terminals()
+
+    def is_terminal_auto_load(terminal_name: str) -> bool | None:
+        terminal_info = find_terminal_info(terminals, terminal_name)
+        if not terminal_info:
+            return None
+        val = terminal_info.get("is_auto_load")
+        if val in (1, "1", True):
+            return True
+        if val in (0, "0", False):
+            return False
+        return None
 
     embed = discord.Embed(
         title=f"📈 Best Routes — {commodity_name}",
@@ -1723,8 +1795,9 @@ async def build_route_embed(commodity: dict) -> discord.Embed:
         embed.set_footer(text="Star Citizen — UEX")
         return embed
 
-    lines = []
-    for r in routes[:10]:
+    filtered_routes = []
+
+    for r in routes:
         origin = (
             r.get("terminal_origin_name")
             or r.get("origin_terminal_name")
@@ -1737,23 +1810,53 @@ async def build_route_embed(commodity: dict) -> discord.Embed:
             or r.get("to_terminal_name")
             or "Unknown Destination"
         )
+
+        origin_auto = is_terminal_auto_load(origin)
+        destination_auto = is_terminal_auto_load(destination)
+
+        if auto_load_only and not (origin_auto is True and destination_auto is True):
+            continue
+
+        filtered_routes.append((r, origin, destination, origin_auto, destination_auto))
+
+    if not filtered_routes:
+        embed.add_field(name="Routes", value="No routes found matching that filter.", inline=False)
+        embed.set_footer(text="Star Citizen — UEX")
+        return embed
+
+    def auto_icon(val):
+        if val is True:
+            return "✅"
+        if val is False:
+            return "❌"
+        return "❓"
+
+    lines = []
+
+    for r, origin, destination, origin_auto, destination_auto in filtered_routes[:10]:
         margin = r.get("profit_margin") or r.get("margin") or "—"
         profit = r.get("profit") or r.get("profit_total") or "—"
 
         lines.append(
-            f"**{origin}** → **{destination}**\n"
+            f"**{origin} {auto_icon(origin_auto)} → {destination} {auto_icon(destination_auto)}**\n"
             f"Profit: `{profit}` aUEC • Margin: `{margin}`"
         )
 
     embed.add_field(name="Top Routes", value="\n\n".join(lines)[:1024], inline=False)
-    embed.set_footer(text="Star Citizen — UEX")
+
+    if auto_load_only:
+        embed.set_footer(text="Star Citizen — UEX • Auto-load only")
+    else:
+        embed.set_footer(text="Star Citizen — UEX")
+
     return embed
 
 class CommodityDropdown(discord.ui.View):
-    def __init__(self, results: list[dict], mode: str = "commodity"):
+    def __init__(self, results: list[dict], mode: str = "commodity", auto_load_only: bool = False):
         super().__init__(timeout=90)
         self.results = results
         self.mode = mode
+        self.auto_load_only = auto_load_only
 
         options = []
         for item in results[:25]:
@@ -1792,9 +1895,9 @@ class CommodityDropdown(discord.ui.View):
         await interaction.response.defer()
 
         if self.mode == "commodity":
-            embed = await build_commodity_embed(chosen)
+            embed = await build_commodity_embed(chosen, auto_load_only=self.auto_load_only)
         else:
-            embed = await build_route_embed(chosen)
+            embed = await build_route_embed(chosen, auto_load_only=self.auto_load_only)
 
         await interaction.edit_original_response(content=None, embed=embed, view=None)
 
@@ -4507,8 +4610,15 @@ async def resetoffside_command(interaction: discord.Interaction):
         await interaction.followup.send(f"⚠️ Failed to reset counter: {e}", ephemeral=True)
 
 @tree.command(name="commodity", description="Show Star Citizen commodity buy/sell data.")
-@app_commands.describe(name="Commodity name, e.g. Gold, Agricium, Quantanium")
-async def commodity_command(interaction: discord.Interaction, name: str):
+@app_commands.describe(
+    name="Commodity name, e.g. Gold, Agricium, Quantanium",
+    auto_load_only="Only show terminals that support auto loading"
+)
+async def commodity_command(
+    interaction: discord.Interaction,
+    name: str,
+    auto_load_only: bool = False
+):
     await interaction.response.defer()
 
     try:
@@ -4519,14 +4629,14 @@ async def commodity_command(interaction: discord.Interaction, name: str):
             return
 
         if len(matches) > 1:
-            view = CommodityDropdown(matches, mode="commodity")
+            view = CommodityDropdown(matches, mode="commodity", auto_load_only=auto_load_only)
             await interaction.followup.send(
                 "Multiple commodities found. Please choose:",
                 view=view
             )
             return
 
-        embed = await build_commodity_embed(matches[0])
+        embed = await build_commodity_embed(matches[0], auto_load_only=auto_load_only)
         await interaction.followup.send(embed=embed)
 
     except Exception as e:
@@ -4537,8 +4647,15 @@ async def commodity_command(interaction: discord.Interaction, name: str):
         )
 
 @tree.command(name="route", description="Show best Star Citizen trade routes for a commodity.")
-@app_commands.describe(name="Commodity name, e.g. Gold, Agricium, Quantanium")
-async def route_command(interaction: discord.Interaction, name: str):
+@app_commands.describe(
+    name="Commodity name, e.g. Gold, Agricium, Quantanium",
+    auto_load_only="Only show routes where both terminals support auto loading"
+)
+async def route_command(
+    interaction: discord.Interaction,
+    name: str,
+    auto_load_only: bool = False
+):
     await interaction.response.defer()
 
     try:
@@ -4549,14 +4666,14 @@ async def route_command(interaction: discord.Interaction, name: str):
             return
 
         if len(matches) > 1:
-            view = CommodityDropdown(matches, mode="route")
+            view = CommodityDropdown(matches, mode="route", auto_load_only=auto_load_only)
             await interaction.followup.send(
                 "Multiple commodities found. Please choose:",
                 view=view
             )
             return
 
-        embed = await build_route_embed(matches[0])
+        embed = await build_route_embed(matches[0], auto_load_only=auto_load_only)
         await interaction.followup.send(embed=embed)
 
     except Exception as e:
