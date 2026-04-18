@@ -2031,12 +2031,29 @@ def _best_sell_row(rows: list[dict]) -> dict | None:
     return max(sell_rows, key=lambda r: _to_float(r.get("price_sell")))
 
 
-async def build_cargo_embed(commodity: dict, cargo_scu: int, buy_price_override: float | None = None) -> discord.Embed:
+async def build_cargo_embed(
+    commodity: dict,
+    cargo_scu: int,
+    buy_price_override: float | None = None,
+    auto_load_only: bool = False
+) -> discord.Embed:
     commodity_id = commodity.get("id") or commodity.get("id_commodity")
     commodity_name = commodity.get("name", "Unknown Commodity")
 
     prices = await get_commodity_prices(commodity_id)
     rows = prices if isinstance(prices, list) else []
+    terminals = await get_all_terminals()
+
+    def is_terminal_auto_load(terminal_name: str) -> bool | None:
+        terminal_info = find_terminal_info(terminals, terminal_name)
+        if not terminal_info:
+            return None
+        val = terminal_info.get("is_auto_load")
+        if val in (1, "1", True):
+            return True
+        if val in (0, "0", False):
+            return False
+        return None
 
     embed = discord.Embed(
         title=f"📦 Cargo Calculator — {commodity_name}",
@@ -2048,12 +2065,21 @@ async def build_cargo_embed(commodity: dict, cargo_scu: int, buy_price_override:
         embed.set_footer(text="Star Citizen — UEX")
         return embed
 
+    if auto_load_only:
+        rows = [
+            r for r in rows
+            if is_terminal_auto_load(r.get("terminal_name") or r.get("name_terminal") or "") is True
+        ]
+
     best_sell = _best_sell_row(rows)
     buy_rows = [r for r in rows if _to_float(r.get("price_buy")) > 0]
 
     if not best_sell or not buy_rows:
         embed.description = "Not enough buy/sell data to calculate cargo profit."
-        embed.set_footer(text="Star Citizen — UEX")
+        if auto_load_only:
+            embed.set_footer(text="Star Citizen — UEX • Auto-load only")
+        else:
+            embed.set_footer(text="Star Citizen — UEX")
         return embed
 
     sell_terminal = (
@@ -2063,8 +2089,6 @@ async def build_cargo_embed(commodity: dict, cargo_scu: int, buy_price_override:
     )
     sell_price = _to_float(best_sell.get("price_sell"))
 
-    # If the user supplied a buy price, use that.
-    # Otherwise use the cheapest available buy price.
     if buy_price_override is not None:
         buy_price = float(buy_price_override)
         buy_terminal = "Manual price"
@@ -2093,7 +2117,11 @@ async def build_cargo_embed(commodity: dict, cargo_scu: int, buy_price_override:
     embed.add_field(name="Total Cost", value=f"`{total_cost:,.2f}` aUEC", inline=True)
     embed.add_field(name="Total Profit", value=f"`{total_profit:,.2f}` aUEC", inline=True)
 
-    embed.set_footer(text="Star Citizen — UEX community data")
+    if auto_load_only:
+        embed.set_footer(text="Star Citizen — UEX • Auto-load only")
+    else:
+        embed.set_footer(text="Star Citizen — UEX")
+
     return embed
 
 # Safe interaction helpers
@@ -4896,13 +4924,15 @@ async def besttrade_command(interaction: discord.Interaction):
 @app_commands.describe(
     name="Commodity name, e.g. Gold, Agricium, Quantanium",
     scu="Your ship cargo size in SCU",
-    buy_price="Optional manual buy price per SCU"
+    buy_price="Optional manual buy price per SCU",
+    auto_load_only="Only use terminals that support auto loading"
 )
 async def cargo_command(
     interaction: discord.Interaction,
     name: str,
     scu: app_commands.Range[int, 1, 100000],
-    buy_price: app_commands.Range[float, 0, 1000000] = None
+    buy_price: app_commands.Range[float, 0, 1000000] = None,
+    auto_load_only: bool = False
 ):
     await interaction.response.defer()
 
@@ -4913,13 +4943,14 @@ async def cargo_command(
             await interaction.followup.send("No matching commodities found.", ephemeral=True)
             return
 
-        if len(matches) > 1:
-            # Keep first version simple to avoid rebuilding your dropdown flow again.
-            chosen = matches[0]
-        else:
-            chosen = matches[0]
+        chosen = matches[0]
 
-        embed = await build_cargo_embed(chosen, cargo_scu=scu, buy_price_override=buy_price)
+        embed = await build_cargo_embed(
+            chosen,
+            cargo_scu=scu,
+            buy_price_override=buy_price,
+            auto_load_only=auto_load_only
+        )
         await interaction.followup.send(embed=embed)
 
     except Exception as e:
