@@ -1500,7 +1500,7 @@ async def rotate_presence():
 
     guild_id = int(os.getenv("GUILD_ID", "0"))
     role_id = int(os.getenv("WATCH_ROLE_ID", "1361661691590606929"))
-    role_name = intos.getenv("WATCH_ROLE_NAME", "Member")
+    role_name = os.getenv("WATCH_ROLE_NAME", "Member")
 
     if not guild_id:
         print("[WARN] GUILD_ID not set – cannot rotate presence by role.")
