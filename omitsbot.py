@@ -1695,28 +1695,62 @@ async def get_all_ships_scwiki():
         return _ship_cache
 
     try:
-        r = await _client_uex.get(SCWIKI_VEHICLES_URL)
-        if r.status_code != 200:
-            print(f"[SCWIKI] {r.status_code} {SCWIKI_VEHICLES_URL} :: {r.text[:300]}")
-            _ship_cache = []
-            return _ship_cache
+        all_ships = []
+        page_number = 1
+        last_page = 1
 
-        payload = r.json()
+        while page_number <= last_page:
+            r = await _client_uex.get(
+                SCWIKI_VEHICLES_URL,
+                params={"page[number]": page_number}
+            )
 
-        if isinstance(payload, dict):
-            data = payload.get("data", [])
-        elif isinstance(payload, list):
-            data = payload
-        else:
-            data = []
+            if r.status_code != 200:
+                print(f"[SCWIKI] {r.status_code} {SCWIKI_VEHICLES_URL} page {page_number} :: {r.text[:300]}")
+                break
 
-        if not isinstance(data, list):
-            data = []
+            payload = r.json()
 
-        # Keep actual ships only
-        data = [s for s in data if isinstance(s, dict)]
+            if isinstance(payload, dict):
+                page_data = payload.get("data", []) or []
+                meta = payload.get("meta", {}) or {}
+                last_page = int(meta.get("last_page", last_page) or last_page)
+            elif isinstance(payload, list):
+                page_data = payload
+                meta = {}
+                last_page = page_number
+            else:
+                page_data = []
+                meta = {}
+                last_page = page_number
 
-        _ship_cache = data
+            if not isinstance(page_data, list):
+                page_data = []
+
+            page_data = [s for s in page_data if isinstance(s, dict)]
+            all_ships.extend(page_data)
+
+            page_number += 1
+
+        # de-dupe by id/uuid/slug
+        deduped = []
+        seen = set()
+
+        for ship in all_ships:
+            sid = str(
+                ship.get("uuid")
+                or ship.get("id")
+                or ship.get("slug")
+                or ship.get("name")
+                or ""
+            )
+            if not sid or sid in seen:
+                continue
+            seen.add(sid)
+            deduped.append(ship)
+
+        _ship_cache = deduped
+
         print(f"[SCWIKI] loaded ships: {len(_ship_cache)}")
         if _ship_cache:
             print("[SCWIKI] sample ship keys:", list(_ship_cache[0].keys()))
