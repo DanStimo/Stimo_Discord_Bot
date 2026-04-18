@@ -2386,14 +2386,181 @@ class ShipDropdown(discord.ui.View):
             return
 
         await interaction.edit_original_response(content=None, embed=embed, view=None)
+
+class TerminalDropdown(discord.ui.View):
+    def __init__(self, results: list[dict]):
+        super().__init__(timeout=90)
+        self.results = results
+
+        options = []
+        for item in results[:25]:
+            label = item.get("name", "Unknown Terminal")
+            value = str(item.get("id") or "")
+            if not value:
+                continue
+
+            system_name = (
+                item.get("star_system_name")
+                or item.get("system_name")
+                or item.get("name_star_system")
+                or "Unknown"
+            )
+
+            options.append(
+                discord.SelectOption(
+                    label=label[:100],
+                    value=value,
+                    description=system_name[:100]
+                )
+            )
+
+        options.append(discord.SelectOption(label="None of these", value="none"))
+
+        select = discord.ui.Select(
+            placeholder="Choose a terminal…",
+            options=options,
+            min_values=1,
+            max_values=1
+        )
+        select.callback = self._on_select
+        self.add_item(select)
+
+    async def _on_select(self, interaction: discord.Interaction):
+        value = self.children[0].values[0]
+
+        if value == "none":
+            await interaction.response.edit_message(content="Selection cancelled.", view=None)
+            return
+
+        chosen = next((x for x in self.results if str(x.get("id")) == value), None)
+        if not chosen:
+            await interaction.response.edit_message(content="Could not find that terminal.", view=None)
+            return
+
+        await interaction.response.defer()
+
+        terminal_id = chosen.get("id")
+        data = await _uex_get("commodities_prices", params={"id_terminal": terminal_id})
+
+        if not data:
+            await interaction.edit_original_response(content="No trade data found for this terminal.", view=None)
+            return
+
+        buy = [c for c in data if c.get("price_buy")]
+        sell = [c for c in data if c.get("price_sell")]
+
+        system_name = (
+            chosen.get("star_system_name")
+            or chosen.get("system_name")
+            or chosen.get("name_star_system")
+            or "Unknown"
+        )
+
+        embed = discord.Embed(
+            title=f"🏪 {chosen.get('name', 'Unknown Terminal')}",
+            description=f"Available trading commodities • {system_name}",
+            color=0x3498DB
+        )
+
+        if buy:
+            lines = [f"{c['commodity_name']} — `{c['price_buy']}`" for c in buy[:10]]
+            embed.add_field(name="Buys", value="\n".join(lines), inline=False)
+
+        if sell:
+            lines = [f"{c['commodity_name']} — `{c['price_sell']}`" for c in sell[:10]]
+            embed.add_field(name="Sells", value="\n".join(lines), inline=False)
+
+        await interaction.edit_original_response(content=None, embed=embed, view=None)
+        
         
 async def search_terminal_uex(query: str) -> list[dict]:
-    data = await _uex_get("terminals")
-    if not isinstance(data, list):
+    terminals = await get_all_terminals()
+    if not isinstance(terminals, list):
         return []
 
-    q = _normalize_sc_name(query)
-    return [t for t in data if q in _normalize_sc_name(t.get("name", ""))]
+    raw_query = (query or "").strip()
+    q_norm = _normalize_sc_name(raw_query)
+    if not q_norm:
+        return []
+
+    exact = []
+    partial = []
+
+    for terminal in terminals:
+        name = str(terminal.get("name", "")).strip()
+        code = str(terminal.get("code", "")).strip()
+
+        system_name = (
+            terminal.get("star_system_name")
+            or terminal.get("system_name")
+            or terminal.get("name_star_system")
+            or ""
+        )
+
+        names = [name, code, system_name]
+        norm_names = [_normalize_sc_name(n) for n in names if n]
+
+        if any(q_norm == n for n in norm_names):
+            exact.append(terminal)
+        elif any(q_norm in n for n in norm_names):
+            partial.append(terminal)
+
+    def dedupe(items: list[dict]) -> list[dict]:
+        seen = set()
+        out = []
+        for t in items:
+            tid = str(t.get("id") or t.get("name") or "")
+            if tid in seen:
+                continue
+            seen.add(tid)
+            out.append(t)
+        return out
+
+    exact = dedupe(exact)
+    if exact:
+        return exact[:25]
+
+    partial = dedupe(partial)
+    if partial:
+        return partial[:25]
+
+    # fuzzy fallback
+    choices = []
+    choice_to_terminal = {}
+
+    for terminal in terminals:
+        possible_names = [
+            str(terminal.get("name", "")).strip(),
+            str(terminal.get("code", "")).strip(),
+            str(terminal.get("star_system_name", "")).strip(),
+            str(terminal.get("system_name", "")).strip(),
+            str(terminal.get("name_star_system", "")).strip(),
+        ]
+
+        for n in possible_names:
+            if not n:
+                continue
+            choices.append(n)
+            choice_to_terminal[n] = terminal
+
+    fuzzy_matches = process.extract(raw_query, choices, scorer=fuzz.token_sort_ratio, limit=25)
+
+    results = []
+    seen = set()
+
+    for matched_name, score in fuzzy_matches:
+        if score < 75:
+            continue
+
+        terminal = choice_to_terminal[matched_name]
+        tid = str(terminal.get("id") or terminal.get("name") or "")
+        if tid in seen:
+            continue
+
+        seen.add(tid)
+        results.append(terminal)
+
+    return results[:25]
 
 def _to_float(value, default=0.0) -> float:
     try:
@@ -5191,17 +5358,24 @@ async def resetoffside_command(interaction: discord.Interaction):
 @app_commands.describe(
     name="Commodity name, e.g. Gold, Agricium, Quantanium",
     auto_load_only="Only show terminals that support auto loading",
-    system_filter="Optional system filter, e.g. Stanton, Pyro, Nyx"
+    system_filter="Only use terminals in this star system"
 )
+@app_commands.choices(system_filter=[
+    app_commands.Choice(name="Stanton", value="Stanton"),
+    app_commands.Choice(name="Pyro", value="Pyro"),
+    app_commands.Choice(name="Nyx", value="Nyx"),
+])
 async def commodity_command(
     interaction: discord.Interaction,
     name: str,
     auto_load_only: bool = False,
-    system_filter: str = None
+    system_filter: app_commands.Choice[str] = None
 ):
     await interaction.response.defer()
 
     try:
+        selected_system = system_filter.value if system_filter else None
+
         matches = await search_commodity_uex(name)
 
         if not matches:
@@ -5213,7 +5387,7 @@ async def commodity_command(
                 matches,
                 mode="commodity",
                 auto_load_only=auto_load_only,
-                system_filter=system_filter
+                system_filter=selected_system
             )
             await interaction.followup.send(
                 "Multiple commodities found. Please choose:",
@@ -5224,7 +5398,7 @@ async def commodity_command(
         embed = await build_commodity_embed(
             matches[0],
             auto_load_only=auto_load_only,
-            system_filter=system_filter
+            system_filter=selected_system
         )
         await interaction.followup.send(embed=embed)
 
@@ -5234,7 +5408,7 @@ async def commodity_command(
             "❌ An unexpected error occurred while fetching commodity data.",
             ephemeral=True
         )
-
+        
 @tree.command(name="route", description="Show best Star Citizen trade routes for a commodity.")
 @app_commands.describe(
     name="Commodity name, e.g. Gold, Agricium, Quantanium",
@@ -5349,7 +5523,15 @@ async def terminal_command(interaction: discord.Interaction, name: str):
             await interaction.followup.send("No matching terminals found.", ephemeral=True)
             return
 
-        terminal = matches[0]  # keep simple for now
+        if len(matches) > 1:
+            view = TerminalDropdown(matches)
+            await interaction.followup.send(
+                "Multiple terminals found. Please choose:",
+                view=view
+            )
+            return
+
+        terminal = matches[0]
         terminal_id = terminal.get("id")
 
         data = await _uex_get("commodities_prices", params={"id_terminal": terminal_id})
@@ -5361,9 +5543,16 @@ async def terminal_command(interaction: discord.Interaction, name: str):
         buy = [c for c in data if c.get("price_buy")]
         sell = [c for c in data if c.get("price_sell")]
 
+        system_name = (
+            terminal.get("star_system_name")
+            or terminal.get("system_name")
+            or terminal.get("name_star_system")
+            or "Unknown"
+        )
+
         embed = discord.Embed(
-            title=f"🏪 {terminal.get('name')}",
-            description="Available trading commodities",
+            title=f"🏪 {terminal.get('name', 'Unknown Terminal')}",
+            description=f"Available trading commodities • {system_name}",
             color=0x3498DB
         )
 
