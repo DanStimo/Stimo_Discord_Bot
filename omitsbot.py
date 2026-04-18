@@ -327,20 +327,27 @@ async def send_temp_followup(
     Send a followup message and auto-delete it after N seconds
     (non-ephemeral only).
     """
-    msg = await interaction.followup.send(
-        content=content,
-        embed=embed,
-        view=view,
-        ephemeral=ephemeral,
-        wait=True
-    )
+    send_kwargs = {
+        "ephemeral": ephemeral,
+        "wait": True,
+    }
+
+    if content is not None:
+        send_kwargs["content"] = content
+
+    if embed is not None:
+        send_kwargs["embed"] = embed
+
+    if view is not None:
+        send_kwargs["view"] = view
+
+    msg = await interaction.followup.send(**send_kwargs)
 
     if not ephemeral:
         delay = STAR_COMMAND_DELETE_SECONDS if delete_after is None else delete_after
         asyncio.create_task(safe_delete(msg, delay))
 
     return msg
-
 
 async def log_star_command_usage(
     interaction: discord.Interaction,
