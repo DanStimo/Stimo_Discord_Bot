@@ -5634,14 +5634,14 @@ async def commodity_command(
                 auto_load_only=auto_load_only,
                 system_filter=selected_system
             )
-                msg = await send_temp_followup(
-                    interaction,
-                    content="Multiple commodities found. Please choose:",
-                    view=view,
-                    delete_after=90
-                )
-                await log_star_command_usage(interaction, "commodity", message=msg)
-                return
+            msg = await send_temp_followup(
+                interaction,
+                content="Multiple commodities found. Please choose:",
+                view=view,
+                delete_after=90
+            )
+            await log_star_command_usage(interaction, "commodity", message=msg)
+            return
 
         embed = await build_commodity_embed(
             matches[0],
@@ -5708,14 +5708,14 @@ async def route_command(
                     auto_load_only=auto_load_only,
                     system_filter=selected_system
                 )
-                    msg = await send_temp_followup(
-                        interaction,
-                        content="Multiple ships found. Please choose:",
-                        view=view,
-                        delete_after=90
-                    )
-                    await log_star_command_usage(interaction, "route", message=msg)
-                    return
+                msg = await send_temp_followup(
+                    interaction,
+                    content="Multiple ships found. Please choose:",
+                    view=view,
+                    delete_after=90
+                )
+                await log_star_command_usage(interaction, "route", message=msg)
+                return
 
             chosen_ship = ship_matches[0]
             resolved_scu = _ship_scu(chosen_ship)
