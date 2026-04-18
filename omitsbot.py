@@ -1798,26 +1798,23 @@ async def build_route_embed(commodity: dict, auto_load_only: bool = False) -> di
     filtered_routes = []
 
     for r in routes:
-        origin = (
-            r.get("terminal_origin_name")
-            or r.get("origin_terminal_name")
-            or r.get("from_terminal_name")
-            or "Unknown Origin"
-        )
-        destination = (
-            r.get("terminal_destination_name")
-            or r.get("destination_terminal_name")
-            or r.get("to_terminal_name")
-            or "Unknown Destination"
-        )
-
+        origin = ...
+        destination = ...
+    
         origin_auto = is_terminal_auto_load(origin)
         destination_auto = is_terminal_auto_load(destination)
-
+    
         if auto_load_only and not (origin_auto is True and destination_auto is True):
             continue
-
+    
         filtered_routes.append((r, origin, destination, origin_auto, destination_auto))
+    
+    # ✅ ADD THIS RIGHT HERE
+    filtered_routes = sorted(
+        filtered_routes,
+        key=lambda x: float(x[0].get("profit") or x[0].get("profit_total") or 0),
+        reverse=True
+    )
 
     if not filtered_routes:
         embed.add_field(name="Routes", value="No routes found matching that filter.", inline=False)
