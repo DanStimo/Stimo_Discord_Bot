@@ -87,6 +87,8 @@ tree = app_commands.CommandTree(client)
 FREE_STATS_CHANNEL_ID = 1362795404185305129
 # Channel where we log free-typed stats lookups
 LOG_CHANNEL_ID = 1383731281577246810
+STAR_LOG_CHANNEL_ID = int(os.getenv("STAR_LOG_CHANNEL_ID", str(LOG_CHANNEL_ID)))
+STAR_COMMAND_DELETE_SECONDS = int(os.getenv("STAR_COMMAND_DELETE_SECONDS", "90"))
 
 CREST_URL_TEMPLATE = os.getenv("CREST_URL_TEMPLATE", "").strip()
 
@@ -311,6 +313,69 @@ async def safe_delete(msg: discord.Message, delay: float | None = None):
         await msg.delete()
     except (discord.Forbidden, discord.NotFound, discord.HTTPException):
         pass
+
+async def send_temp_followup(
+    interaction: discord.Interaction,
+    *,
+    content: str | None = None,
+    embed: discord.Embed | None = None,
+    view: discord.ui.View | None = None,
+    ephemeral: bool = False,
+    delete_after: int | None = None
+):
+    """
+    Send a followup message and auto-delete it after N seconds
+    (non-ephemeral only).
+    """
+    msg = await interaction.followup.send(
+        content=content,
+        embed=embed,
+        view=view,
+        ephemeral=ephemeral,
+        wait=True
+    )
+
+    if not ephemeral:
+        delay = STAR_COMMAND_DELETE_SECONDS if delete_after is None else delete_after
+        asyncio.create_task(safe_delete(msg, delay))
+
+    return msg
+
+
+async def log_star_command_usage(
+    interaction: discord.Interaction,
+    command_name: str,
+    details: str
+):
+    """
+    Log Star Citizen slash command usage to the configured log channel.
+    """
+    if not interaction.guild:
+        return
+
+    log_ch = (
+        interaction.guild.get_channel(STAR_LOG_CHANNEL_ID)
+        or client.get_channel(STAR_LOG_CHANNEL_ID)
+    )
+    if not log_ch:
+        print(f"[WARN] Star log channel {STAR_LOG_CHANNEL_ID} not found")
+        return
+
+    try:
+        user_name = interaction.user.display_name if isinstance(interaction.user, discord.Member) else interaction.user.name
+        channel_mention = interaction.channel.mention if interaction.channel else "#unknown"
+
+        embed = discord.Embed(
+            title=f"📦 /{command_name}",
+            description=details,
+            color=0x5865F2,
+            timestamp=datetime.now(timezone.utc)
+        )
+        embed.set_footer(text=f"Used by {user_name} in {channel_mention}")
+
+        await log_ch.send(embed=embed)
+    except Exception as e:
+        print(f"[ERROR] Failed to log Star Citizen command /{command_name}: {e}")
 
 async def log_stats_embed_for_request(
     *, guild: discord.Guild, author: discord.abc.User, origin_channel: discord.TextChannel, embed: discord.Embed
@@ -5538,10 +5603,20 @@ async def commodity_command(
     try:
         selected_system = system_filter.value if system_filter else None
 
+        await log_star_command_usage(
+            interaction,
+            "commodity",
+            f"Commodity: `{name}`\nAuto-load only: `{auto_load_only}`\nSystem: `{selected_system or 'Any'}`"
+        )
+
         matches = await search_commodity_uex(name)
 
         if not matches:
-            await interaction.followup.send("No matching commodities found.", ephemeral=True)
+            await send_temp_followup(
+                interaction,
+                content="No matching commodities found.",
+                ephemeral=True
+            )
             return
 
         if len(matches) > 1:
@@ -5551,9 +5626,11 @@ async def commodity_command(
                 auto_load_only=auto_load_only,
                 system_filter=selected_system
             )
-            await interaction.followup.send(
-                "Multiple commodities found. Please choose:",
-                view=view
+            await send_temp_followup(
+                interaction,
+                content="Multiple commodities found. Please choose:",
+                view=view,
+                delete_after=90
             )
             return
 
@@ -5562,12 +5639,13 @@ async def commodity_command(
             auto_load_only=auto_load_only,
             system_filter=selected_system
         )
-        await interaction.followup.send(embed=embed)
+        await send_temp_followup(interaction, embed=embed)
 
     except Exception as e:
         print(f"[ERROR] /commodity failed: {e}")
-        await interaction.followup.send(
-            "❌ An unexpected error occurred while fetching commodity data.",
+        await send_temp_followup(
+            interaction,
+            content="❌ An unexpected error occurred while fetching commodity data.",
             ephemeral=True
         )
 
@@ -5604,15 +5682,20 @@ async def route_command(
     try:
         selected_system = system_filter.value if system_filter else None
 
+        await log_star_command_usage(
+            interaction,
+            "route",
+            f"Commodity: `{name}`\nShip: `{ship or 'None'}`\nSCU: `{scu or 'Auto/None'}`\nAuto-load only: `{auto_load_only}`\nSystem: `{selected_system or 'Any'}`"
+        )
+
         if ship:
             ship_matches = await search_ships_scwiki(ship)
 
             if not ship_matches:
-                await interaction.followup.send("No matching ships found.", ephemeral=True)
+                await send_temp_followup(interaction, content="No matching ships found.", ephemeral=True)
                 return
 
             if len(ship_matches) > 1:
-                # choose ship first, then commodity
                 view = ShipDropdown(
                     ship_matches,
                     commodity_query=name,
@@ -5621,9 +5704,11 @@ async def route_command(
                     auto_load_only=auto_load_only,
                     system_filter=selected_system
                 )
-                await interaction.followup.send(
-                    "Multiple ships found. Please choose:",
-                    view=view
+                await send_temp_followup(
+                    interaction,
+                    content="Multiple ships found. Please choose:",
+                    view=view,
+                    delete_after=90
                 )
                 return
 
@@ -5631,8 +5716,9 @@ async def route_command(
             resolved_scu = _ship_scu(chosen_ship)
 
             if resolved_scu <= 0:
-                await interaction.followup.send(
-                    "That ship does not have a usable cargo capacity in the API.",
+                await send_temp_followup(
+                    interaction,
+                    content="That ship does not have a usable cargo capacity in the API.",
                     ephemeral=True
                 )
                 return
@@ -5646,7 +5732,7 @@ async def route_command(
         matches = await search_commodity_uex(name)
 
         if not matches:
-            await interaction.followup.send("No matching commodities found.", ephemeral=True)
+            await send_temp_followup(interaction, content="No matching commodities found.", ephemeral=True)
             return
 
         if len(matches) > 1:
@@ -5658,9 +5744,11 @@ async def route_command(
                 cargo_scu=resolved_scu,
                 ship_name=chosen_ship_name
             )
-            await interaction.followup.send(
-                "Multiple commodities found. Please choose:",
-                view=view
+            await send_temp_followup(
+                interaction,
+                content="Multiple commodities found. Please choose:",
+                view=view,
+                delete_after=90
             )
             return
 
@@ -5671,12 +5759,13 @@ async def route_command(
             cargo_scu=resolved_scu,
             ship_name=chosen_ship_name
         )
-        await interaction.followup.send(embed=embed)
+        await send_temp_followup(interaction, embed=embed)
 
     except Exception as e:
         print(f"[ERROR] /route failed: {e}")
-        await interaction.followup.send(
-            "❌ An unexpected error occurred while fetching route data.",
+        await send_temp_followup(
+            interaction,
+            content="❌ An unexpected error occurred while fetching route data.",
             ephemeral=True
         )
 
@@ -5700,17 +5789,29 @@ async def terminal_command(interaction: discord.Interaction, name: str):
     await interaction.response.defer()
 
     try:
+        await log_star_command_usage(
+            interaction,
+            "terminal",
+            f"Terminal query: `{name}`"
+        )
+
         matches = await search_terminal_uex(name)
 
         if not matches:
-            await interaction.followup.send("No matching terminals found.", ephemeral=True)
+            await send_temp_followup(
+                interaction,
+                content="No matching terminals found.",
+                ephemeral=True
+            )
             return
 
         if len(matches) > 1:
             view = TerminalDropdown(matches)
-            await interaction.followup.send(
-                "Multiple terminals found. Please choose:",
-                view=view
+            await send_temp_followup(
+                interaction,
+                content="Multiple terminals found. Please choose:",
+                view=view,
+                delete_after=90
             )
             return
 
@@ -5720,7 +5821,10 @@ async def terminal_command(interaction: discord.Interaction, name: str):
         data = await _uex_get("commodities_prices", params={"id_terminal": terminal_id})
 
         if not data:
-            await interaction.followup.send("No trade data found for this terminal.")
+            await send_temp_followup(
+                interaction,
+                content="No trade data found for this terminal."
+            )
             return
 
         buy = [c for c in data if c.get("price_buy")]
@@ -5747,11 +5851,15 @@ async def terminal_command(interaction: discord.Interaction, name: str):
             lines = [f"{c['commodity_name']} — `{c['price_sell']}`" for c in sell[:10]]
             embed.add_field(name="Sells", value="\n".join(lines), inline=False)
 
-        await interaction.followup.send(embed=embed)
+        await send_temp_followup(interaction, embed=embed)
 
     except Exception as e:
         print(f"[ERROR] /terminal failed: {e}")
-        await interaction.followup.send("Error fetching terminal data.", ephemeral=True)
+        await send_temp_followup(
+            interaction,
+            content="Error fetching terminal data.",
+            ephemeral=True
+        )
 
 @terminal_command.autocomplete("name")
 async def terminal_name_autocomplete(
@@ -5765,10 +5873,19 @@ async def besttrade_command(interaction: discord.Interaction):
     await interaction.response.defer()
 
     try:
+        await log_star_command_usage(
+            interaction,
+            "besttrade",
+            "Requested top profitable trade routes"
+        )
+
         routes = await _uex_get("commodities_routes", params={"limit": 20})
 
         if not routes:
-            await interaction.followup.send("No trade routes found.")
+            await send_temp_followup(
+                interaction,
+                content="No trade routes found."
+            )
             return
 
         # Sort by profit
@@ -5791,11 +5908,15 @@ async def besttrade_command(interaction: discord.Interaction):
 
         embed.add_field(name="Top Routes", value="\n\n".join(lines), inline=False)
 
-        await interaction.followup.send(embed=embed)
+        await send_temp_followup(interaction, embed=embed)
 
     except Exception as e:
         print(f"[ERROR] /besttrade failed: {e}")
-        await interaction.followup.send("Error fetching trade routes.", ephemeral=True)
+        await send_temp_followup(
+            interaction,
+            content="Error fetching trade routes.",
+            ephemeral=True
+        )
 
 @tree.command(name="cargo", description="Calculate cargo run profit for a Star Citizen commodity.")
 @app_commands.describe(
@@ -5825,25 +5946,38 @@ async def cargo_command(
     try:
         selected_system = system_filter.value if system_filter else None
 
+        await log_star_command_usage(
+            interaction,
+            "cargo",
+            f"Commodity: `{name}`\nShip: `{ship or 'None'}`\nSCU: `{scu or 'Auto/None'}`\nBuy price: `{buy_price or 'Market'}`\nAuto-load only: `{auto_load_only}`\nSystem: `{selected_system or 'Any'}`"
+        )
+
         # Ship mode takes priority over manual SCU
         if ship:
             ship_matches = await search_ships_scwiki(ship)
 
             if not ship_matches:
-                await interaction.followup.send("No matching ships found.", ephemeral=True)
+                await send_temp_followup(
+                    interaction,
+                    content="No matching ships found.",
+                    ephemeral=True
+                )
                 return
 
             if len(ship_matches) > 1:
                 view = ShipDropdown(
                     ship_matches,
                     commodity_query=name,
+                    mode="cargo",
                     buy_price_override=buy_price,
                     auto_load_only=auto_load_only,
                     system_filter=selected_system
                 )
-                await interaction.followup.send(
-                    "Multiple ships found. Please choose:",
-                    view=view
+                await send_temp_followup(
+                    interaction,
+                    content="Multiple ships found. Please choose:",
+                    view=view,
+                    delete_after=90
                 )
                 return
 
@@ -5851,15 +5985,17 @@ async def cargo_command(
             resolved_scu = _ship_scu(chosen_ship)
 
             if resolved_scu <= 0:
-                await interaction.followup.send(
-                    "That ship does not have a usable cargo capacity in the API.",
+                await send_temp_followup(
+                    interaction,
+                    content="That ship does not have a usable cargo capacity in the API.",
                     ephemeral=True
                 )
                 return
         else:
             if scu is None:
-                await interaction.followup.send(
-                    "Please provide either a ship name or a manual SCU value.",
+                await send_temp_followup(
+                    interaction,
+                    content="Please provide either a ship name or a manual SCU value.",
                     ephemeral=True
                 )
                 return
@@ -5870,7 +6006,11 @@ async def cargo_command(
         matches = await search_commodity_uex(name)
 
         if not matches:
-            await interaction.followup.send("No matching commodities found.", ephemeral=True)
+            await send_temp_followup(
+                interaction,
+                content="No matching commodities found.",
+                ephemeral=True
+            )
             return
 
         if len(matches) > 1:
@@ -5880,14 +6020,17 @@ async def cargo_command(
                 auto_load_only=auto_load_only,
                 system_filter=selected_system,
                 cargo_scu=resolved_scu,
-                buy_price_override=buy_price
+                buy_price_override=buy_price,
+                ship_name=_ship_display_name(chosen_ship) if chosen_ship else None
             )
             prefix = ""
             if chosen_ship:
                 prefix = f"Using **{_ship_display_name(chosen_ship)}** (`{resolved_scu}` SCU).\n"
-            await interaction.followup.send(
-                prefix + "Multiple commodities found. Please choose:",
-                view=view
+            await send_temp_followup(
+                interaction,
+                content=prefix + "Multiple commodities found. Please choose:",
+                view=view,
+                delete_after=90
             )
             return
 
@@ -5904,12 +6047,13 @@ async def cargo_command(
                 name=f"Ship: {_ship_display_name(chosen_ship)} • {resolved_scu} SCU"
             )
 
-        await interaction.followup.send(embed=embed)
+        await send_temp_followup(interaction, embed=embed)
 
     except Exception as e:
         print(f"[ERROR] /cargo failed: {e}")
-        await interaction.followup.send(
-            "❌ An unexpected error occurred while calculating cargo profit.",
+        await send_temp_followup(
+            interaction,
+            content="❌ An unexpected error occurred while calculating cargo profit.",
             ephemeral=True
         )
 
