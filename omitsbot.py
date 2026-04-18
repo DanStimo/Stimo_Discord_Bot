@@ -2394,9 +2394,17 @@ class TerminalDropdown(discord.ui.View):
 
         options = []
         for item in results[:25]:
-            label = item.get("name", "Unknown Terminal")
-            value = str(item.get("id") or "")
-            if not value:
+            label = str(item.get("name") or "Unknown Terminal").strip()
+
+            # fall back to other stable identifiers if id is missing
+            option_value = str(
+                item.get("id")
+                or item.get("slug")
+                or item.get("code")
+                or label
+            ).strip()
+
+            if not label or not option_value:
                 continue
 
             system_name = (
@@ -2409,16 +2417,25 @@ class TerminalDropdown(discord.ui.View):
             options.append(
                 discord.SelectOption(
                     label=label[:100],
-                    value=value,
+                    value=option_value[:100],
                     description=system_name[:100]
                 )
             )
 
-        options.append(discord.SelectOption(label="None of these", value="none"))
+        # Discord select must have 1-25 options
+        if not options:
+            options.append(
+                discord.SelectOption(
+                    label="No valid terminal options found",
+                    value="none"
+                )
+            )
+        else:
+            options.append(discord.SelectOption(label="None of these", value="none"))
 
         select = discord.ui.Select(
             placeholder="Choose a terminal…",
-            options=options,
+            options=options[:25],
             min_values=1,
             max_values=1
         )
@@ -2432,7 +2449,20 @@ class TerminalDropdown(discord.ui.View):
             await interaction.response.edit_message(content="Selection cancelled.", view=None)
             return
 
-        chosen = next((x for x in self.results if str(x.get("id")) == value), None)
+        chosen = next(
+            (
+                x for x in self.results
+                if str(
+                    x.get("id")
+                    or x.get("slug")
+                    or x.get("code")
+                    or x.get("name")
+                    or ""
+                ).strip() == value
+            ),
+            None
+        )
+
         if not chosen:
             await interaction.response.edit_message(content="Could not find that terminal.", view=None)
             return
@@ -2440,10 +2470,20 @@ class TerminalDropdown(discord.ui.View):
         await interaction.response.defer()
 
         terminal_id = chosen.get("id")
+        if not terminal_id:
+            await interaction.edit_original_response(
+                content="That terminal does not expose a usable terminal ID in the API.",
+                view=None
+            )
+            return
+
         data = await _uex_get("commodities_prices", params={"id_terminal": terminal_id})
 
         if not data:
-            await interaction.edit_original_response(content="No trade data found for this terminal.", view=None)
+            await interaction.edit_original_response(
+                content="No trade data found for this terminal.",
+                view=None
+            )
             return
 
         buy = [c for c in data if c.get("price_buy")]
@@ -2463,15 +2503,14 @@ class TerminalDropdown(discord.ui.View):
         )
 
         if buy:
-            lines = [f"{c['commodity_name']} — `{c['price_buy']}`" for c in buy[:10]]
+            lines = [f"{c.get('commodity_name', 'Unknown')} — `{c.get('price_buy', '—')}`" for c in buy[:10]]
             embed.add_field(name="Buys", value="\n".join(lines), inline=False)
 
         if sell:
-            lines = [f"{c['commodity_name']} — `{c['price_sell']}`" for c in sell[:10]]
+            lines = [f"{c.get('commodity_name', 'Unknown')} — `{c.get('price_sell', '—')}`" for c in sell[:10]]
             embed.add_field(name="Sells", value="\n".join(lines), inline=False)
 
-        await interaction.edit_original_response(content=None, embed=embed, view=None)
-        
+        await interaction.edit_original_response(content=None, embed=embed, view=None)        
         
 async def search_terminal_uex(query: str) -> list[dict]:
     terminals = await get_all_terminals()
