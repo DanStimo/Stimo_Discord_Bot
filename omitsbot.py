@@ -2035,7 +2035,8 @@ async def build_cargo_embed(
     commodity: dict,
     cargo_scu: int,
     buy_price_override: float | None = None,
-    auto_load_only: bool = False
+    auto_load_only: bool = False,
+    system_filter: str | None = None
 ) -> discord.Embed:
     commodity_id = commodity.get("id") or commodity.get("id_commodity")
     commodity_name = commodity.get("name", "Unknown Commodity")
@@ -2043,6 +2044,7 @@ async def build_cargo_embed(
     prices = await get_commodity_prices(commodity_id)
     rows = prices if isinstance(prices, list) else []
     terminals = await get_all_terminals()
+    wanted_system = (system_filter or "").strip().lower()
 
     def is_terminal_auto_load(terminal_name: str) -> bool | None:
         terminal_info = find_terminal_info(terminals, terminal_name)
@@ -2054,6 +2056,13 @@ async def build_cargo_embed(
         if val in (0, "0", False):
             return False
         return None
+
+    def terminal_matches_system(terminal_name: str) -> bool:
+        if not wanted_system:
+            return True
+        terminal_info = find_terminal_info(terminals, terminal_name)
+        system_name = terminal_system_name(terminal_info).lower()
+        return system_name == wanted_system
 
     embed = discord.Embed(
         title=f"📦 Cargo Calculator — {commodity_name}",
@@ -2071,15 +2080,23 @@ async def build_cargo_embed(
             if is_terminal_auto_load(r.get("terminal_name") or r.get("name_terminal") or "") is True
         ]
 
+    if wanted_system:
+        rows = [
+            r for r in rows
+            if terminal_matches_system(r.get("terminal_name") or r.get("name_terminal") or "")
+        ]
+
     best_sell = _best_sell_row(rows)
     buy_rows = [r for r in rows if _to_float(r.get("price_buy")) > 0]
 
     if not best_sell or not buy_rows:
         embed.description = "Not enough buy/sell data to calculate cargo profit."
+        footer_bits = ["Star Citizen — UEX"]
         if auto_load_only:
-            embed.set_footer(text="Star Citizen — UEX • Auto-load only")
-        else:
-            embed.set_footer(text="Star Citizen — UEX")
+            footer_bits.append("Auto-load only")
+        if wanted_system:
+            footer_bits.append(f"System: {system_filter}")
+        embed.set_footer(text=" • ".join(footer_bits))
         return embed
 
     sell_terminal = (
@@ -2087,14 +2104,14 @@ async def build_cargo_embed(
         or best_sell.get("name_terminal")
         or "Unknown"
     )
-    
     sell_info = find_terminal_info(terminals, sell_terminal)
     sell_system = terminal_system_name(sell_info)
     sell_price = _to_float(best_sell.get("price_sell"))
 
     if buy_price_override is not None:
+        buy_price = float(buy_price_override)
         buy_terminal = "Manual price"
-        buy_system = "N/A"
+        buy_system = system_filter if system_filter else "N/A"
     else:
         best_buy = min(buy_rows, key=lambda r: _to_float(r.get("price_buy"), 999999999))
         buy_terminal = (
@@ -2102,7 +2119,6 @@ async def build_cargo_embed(
             or best_buy.get("name_terminal")
             or "Unknown"
         )
-    
         buy_info = find_terminal_info(terminals, buy_terminal)
         buy_system = terminal_system_name(buy_info)
         buy_price = _to_float(best_buy.get("price_buy"))
@@ -2115,25 +2131,28 @@ async def build_cargo_embed(
     embed.add_field(name="Cargo Size", value=f"`{cargo_scu}` SCU", inline=True)
     embed.add_field(name="Buy Price", value=f"`{buy_price:,.2f}` aUEC/SCU", inline=True)
     embed.add_field(name="Sell Price", value=f"`{sell_price:,.2f}` aUEC/SCU", inline=True)
+
     embed.add_field(
         name="Buy Location",
         value=f"[{buy_system}] {buy_terminal}",
         inline=False
     )
-    
     embed.add_field(
         name="Best Sell Location",
         value=f"[{sell_system}] {sell_terminal}",
         inline=False
     )
+
     embed.add_field(name="Profit / SCU", value=f"`{profit_per_scu:,.2f}` aUEC", inline=True)
     embed.add_field(name="Total Cost", value=f"`{total_cost:,.2f}` aUEC", inline=True)
     embed.add_field(name="Total Profit", value=f"`{total_profit:,.2f}` aUEC", inline=True)
 
+    footer_bits = ["Star Citizen — UEX"]
     if auto_load_only:
-        embed.set_footer(text="Star Citizen — UEX • Auto-load only")
-    else:
-        embed.set_footer(text="Star Citizen — UEX")
+        footer_bits.append("Auto-load only")
+    if wanted_system:
+        footer_bits.append(f"System: {system_filter}")
+    embed.set_footer(text=" • ".join(footer_bits))
 
     return embed
 
@@ -4938,14 +4957,16 @@ async def besttrade_command(interaction: discord.Interaction):
     name="Commodity name, e.g. Gold, Agricium, Quantanium",
     scu="Your ship cargo size in SCU",
     buy_price="Optional manual buy price per SCU",
-    auto_load_only="Only use terminals that support auto loading"
+    auto_load_only="Only use terminals that support auto loading",
+    system_filter="Optional system filter, e.g. Stanton, Pyro, Nyx"
 )
 async def cargo_command(
     interaction: discord.Interaction,
     name: str,
     scu: app_commands.Range[int, 1, 100000],
     buy_price: app_commands.Range[float, 0, 1000000] = None,
-    auto_load_only: bool = False
+    auto_load_only: bool = False,
+    system_filter: str = None
 ):
     await interaction.response.defer()
 
@@ -4962,7 +4983,8 @@ async def cargo_command(
             chosen,
             cargo_scu=scu,
             buy_price_override=buy_price,
-            auto_load_only=auto_load_only
+            auto_load_only=auto_load_only,
+            system_filter=system_filter
         )
         await interaction.followup.send(embed=embed)
 
