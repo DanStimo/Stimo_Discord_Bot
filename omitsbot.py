@@ -1741,84 +1741,109 @@ async def search_ships_scwiki(query: str) -> list[dict]:
         return []
 
     raw_query = (query or "").strip()
-    q = _normalize_sc_name(raw_query)
-    if not q:
+    q_norm = _normalize_sc_name(raw_query)
+    if not q_norm:
         return []
 
-    # keep only ships with usable cargo values
+    # only ships with usable cargo
     ships = [s for s in ships if _ship_scu(s) > 0]
 
-    exact = []
-    partial = []
-
-    for ship in ships:
-        names = [
-            str(ship.get("name", "")),
-            str(ship.get("game_name", "")),
-            str(ship.get("slug", "")),
-            str(ship.get("shipmatrix_name", "")),
+    def ship_names(ship: dict) -> list[str]:
+        return [
+            str(ship.get("name", "")).strip(),
+            str(ship.get("game_name", "")).strip(),
+            str(ship.get("slug", "")).strip(),
+            str(ship.get("shipmatrix_name", "")).strip(),
         ]
 
+    def ship_id(ship: dict) -> str:
+        return str(ship.get("uuid") or ship.get("id") or ship.get("slug") or _ship_display_name(ship))
+
+    def dedupe(ship_list: list[dict]) -> list[dict]:
+        seen = set()
+        out = []
+        for ship in ship_list:
+            sid = ship_id(ship)
+            if sid in seen:
+                continue
+            seen.add(sid)
+            out.append(ship)
+        return out
+
+    # 1) exact normalized match
+    exact = []
+    for ship in ships:
+        norm_names = [_normalize_sc_name(n) for n in ship_names(ship) if n]
+        if any(q_norm == n for n in norm_names):
+            exact.append(ship)
+
+    exact = dedupe(exact)
+    if exact:
+        return exact[:25]
+
+    # 2) token / startswith match
+    token_matches = []
+    for ship in ships:
+        names = ship_names(ship)
+        lowered = [n.lower() for n in names if n]
         norm_names = [_normalize_sc_name(n) for n in names if n]
 
-        if any(q == n for n in norm_names):
-            exact.append(ship)
-        elif any(q in n for n in norm_names):
+        if any(n.startswith(q_norm) for n in norm_names):
+            token_matches.append(ship)
+            continue
+
+        if any(raw_query.lower() in n.split() for n in lowered):
+            token_matches.append(ship)
+            continue
+
+        if any(part.startswith(raw_query.lower()) for n in lowered for part in re.split(r"[\s\-_\/]+", n) if part):
+            token_matches.append(ship)
+            continue
+
+    token_matches = dedupe(token_matches)
+    if token_matches:
+        return token_matches[:25]
+
+    # 3) substring match
+    partial = []
+    for ship in ships:
+        norm_names = [_normalize_sc_name(n) for n in ship_names(ship) if n]
+        if any(q_norm in n for n in norm_names):
             partial.append(ship)
 
-    if exact:
-        return exact
-
+    partial = dedupe(partial)
     if partial:
-        # de-dupe partial matches
-        seen = set()
-        results = []
-        for ship in partial:
-            ship_id = str(ship.get("uuid") or ship.get("id") or ship.get("slug") or _ship_display_name(ship))
-            if ship_id in seen:
-                continue
-            seen.add(ship_id)
-            results.append(ship)
-        return results[:25]
+        return partial[:25]
 
-    # fuzzy fallback
-    lookup = {}
+    # 4) fuzzy fallback (stricter)
     choices = []
+    choice_to_ship = {}
 
     for ship in ships:
-        possible_names = [
-            str(ship.get("name", "")),
-            str(ship.get("game_name", "")),
-            str(ship.get("slug", "")),
-            str(ship.get("shipmatrix_name", "")),
-        ]
-
-        for n in possible_names:
-            n = n.strip()
-            if not n:
+        for name in ship_names(ship):
+            if not name:
                 continue
-            lookup.setdefault(n, ship)
-            choices.append(n)
+            choices.append(name)
+            choice_to_ship[name] = ship
 
-    fuzzy_matches = process.extract(raw_query, choices, scorer=fuzz.WRatio, limit=25)
+    fuzzy = process.extract(raw_query, choices, scorer=fuzz.token_sort_ratio, limit=25)
 
     results = []
     seen = set()
 
-    for matched_name, score in fuzzy_matches:
-        if score < 60:
+    for matched_name, score in fuzzy:
+        if score < 78:
             continue
 
-        ship = lookup[matched_name]
-        ship_id = str(ship.get("uuid") or ship.get("id") or ship.get("slug") or _ship_display_name(ship))
-
-        if ship_id in seen:
+        ship = choice_to_ship[matched_name]
+        sid = ship_id(ship)
+        if sid in seen:
             continue
 
-        seen.add(ship_id)
+        seen.add(sid)
         results.append(ship)
 
-    return results
+    return results[:25]
 
 async def build_commodity_embed(
     commodity: dict,
