@@ -694,6 +694,13 @@ async def warm_ea_session():
         print("[EA] Warm session complete.")
     except Exception as e:
         print(f"[EA] Warm session failed: {e}")
+
+async def warm_scwiki_ship_cache():
+    try:
+        await get_all_ships_scwiki()
+        print("[SCWIKI] ship cache warmed")
+    except Exception as e:
+        print(f"[SCWIKI] failed to warm cache: {e}")
         
 async def get_club_stats(club_id):
     data = await _ea_get_json(
@@ -2033,14 +2040,69 @@ async def ship_autocomplete(
     if not current or not current.strip():
         return []
 
-    try:
-        matches = await search_ships_scwiki(current)
-    except Exception as e:
-        print(f"[ERROR] ship_autocomplete failed: {e}")
+    # IMPORTANT:
+    # Never do slow API loading inside autocomplete.
+    # Only use already-cached ship data.
+    global _ship_cache
+    ships = _ship_cache or []
+
+    if not ships:
         return []
 
+    raw_query = current.strip()
+    q_norm = _normalize_sc_name(raw_query)
+
+    def ship_names(ship: dict) -> list[str]:
+        return [
+            str(ship.get("name", "")).strip(),
+            str(ship.get("game_name", "")).strip(),
+            str(ship.get("slug", "")).strip(),
+            str(ship.get("shipmatrix_name", "")).strip(),
+        ]
+
+    matches = []
+
+    for ship in ships:
+        if _ship_scu(ship) <= 0:
+            continue
+
+        names = ship_names(ship)
+        norm_names = [_normalize_sc_name(n) for n in names if n]
+
+        if any(q_norm == n for n in norm_names) or any(q_norm in n for n in norm_names):
+            matches.append(ship)
+
+    if not matches:
+        # light fuzzy fallback, but only against cached data
+        choices_pool = []
+        choice_to_ship = {}
+
+        for ship in ships:
+            if _ship_scu(ship) <= 0:
+                continue
+
+            for n in ship_names(ship):
+                if not n:
+                    continue
+                choices_pool.append(n)
+                choice_to_ship[n] = ship
+
+        fuzzy_matches = process.extract(raw_query, choices_pool, scorer=fuzz.token_sort_ratio, limit=25)
+
+        seen = set()
+        for matched_name, score in fuzzy_matches:
+            if score < 78:
+                continue
+
+            ship = choice_to_ship[matched_name]
+            sid = str(ship.get("uuid") or ship.get("id") or ship.get("slug") or _ship_display_name(ship))
+            if sid in seen:
+                continue
+            seen.add(sid)
+            matches.append(ship)
+
     choices = []
-    seen = set()
+    seen_names = set()
 
     for ship in matches[:25]:
         ship_name = _ship_display_name(ship)
@@ -2050,9 +2112,9 @@ async def ship_autocomplete(
             continue
 
         key = ship_name.lower().strip()
-        if key in seen:
+        if key in seen_names:
             continue
-        seen.add(key)
+        seen_names.add(key)
 
         choices.append(
             app_commands.Choice(
@@ -6615,6 +6677,7 @@ async def on_ready():
 
     print(f"Bot is ready as {client.user}")
     await warm_ea_session()
+    asyncio.create_task(warm_scwiki_ship_cache())
     
     # Run background tasks once (avoid duplicates on reconnect)
     if not getattr(client, "background_started", False):
