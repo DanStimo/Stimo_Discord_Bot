@@ -1588,6 +1588,7 @@ async def _uex_get(resource: str, params: dict | None = None, retries: int = 3):
 
             if r.status_code == 200:
                 payload = r.json()
+                print("[UEX PAYLOAD]", payload)
                 if isinstance(payload, dict):
                     return payload.get("data", payload)
                 return payload
