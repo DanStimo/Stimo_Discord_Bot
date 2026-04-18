@@ -2087,11 +2087,14 @@ async def build_cargo_embed(
         or best_sell.get("name_terminal")
         or "Unknown"
     )
+    
+    sell_info = find_terminal_info(terminals, sell_terminal)
+    sell_system = terminal_system_name(sell_info)
     sell_price = _to_float(best_sell.get("price_sell"))
 
     if buy_price_override is not None:
-        buy_price = float(buy_price_override)
         buy_terminal = "Manual price"
+        buy_system = "N/A"
     else:
         best_buy = min(buy_rows, key=lambda r: _to_float(r.get("price_buy"), 999999999))
         buy_terminal = (
@@ -2099,6 +2102,9 @@ async def build_cargo_embed(
             or best_buy.get("name_terminal")
             or "Unknown"
         )
+    
+        buy_info = find_terminal_info(terminals, buy_terminal)
+        buy_system = terminal_system_name(buy_info)
         buy_price = _to_float(best_buy.get("price_buy"))
 
     profit_per_scu = sell_price - buy_price
@@ -2109,10 +2115,17 @@ async def build_cargo_embed(
     embed.add_field(name="Cargo Size", value=f"`{cargo_scu}` SCU", inline=True)
     embed.add_field(name="Buy Price", value=f"`{buy_price:,.2f}` aUEC/SCU", inline=True)
     embed.add_field(name="Sell Price", value=f"`{sell_price:,.2f}` aUEC/SCU", inline=True)
-
-    embed.add_field(name="Buy Location", value=buy_terminal, inline=False)
-    embed.add_field(name="Best Sell Location", value=sell_terminal, inline=False)
-
+    embed.add_field(
+        name="Buy Location",
+        value=f"[{buy_system}] {buy_terminal}",
+        inline=False
+    )
+    
+    embed.add_field(
+        name="Best Sell Location",
+        value=f"[{sell_system}] {sell_terminal}",
+        inline=False
+    )
     embed.add_field(name="Profit / SCU", value=f"`{profit_per_scu:,.2f}` aUEC", inline=True)
     embed.add_field(name="Total Cost", value=f"`{total_cost:,.2f}` aUEC", inline=True)
     embed.add_field(name="Total Profit", value=f"`{total_profit:,.2f}` aUEC", inline=True)
