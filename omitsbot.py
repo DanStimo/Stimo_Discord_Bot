@@ -5796,7 +5796,6 @@ async def terminal_command(interaction: discord.Interaction, name: str):
     await interaction.response.defer()
 
     try:
-        
         matches = await search_terminal_uex(name)
 
         if not matches:
@@ -5854,8 +5853,8 @@ async def terminal_command(interaction: discord.Interaction, name: str):
             lines = [f"{c['commodity_name']} — `{c['price_sell']}`" for c in sell[:10]]
             embed.add_field(name="Sells", value="\n".join(lines), inline=False)
 
-                msg = await send_temp_followup(interaction, embed=embed)
-                await log_star_command_usage(interaction, "terminal", message=msg)
+        msg = await send_temp_followup(interaction, embed=embed)
+        await log_star_command_usage(interaction, "terminal", message=msg)
 
     except Exception as e:
         print(f"[ERROR] /terminal failed: {e}")
@@ -5877,7 +5876,6 @@ async def besttrade_command(interaction: discord.Interaction):
     await interaction.response.defer()
 
     try:
-
         routes = await _uex_get("commodities_routes", params={"limit": 20})
 
         if not routes:
@@ -5888,7 +5886,6 @@ async def besttrade_command(interaction: discord.Interaction):
             await log_star_command_usage(interaction, "besttrade", message=msg)
             return
 
-        # Sort by profit
         routes = sorted(routes, key=lambda x: float(x.get("profit", 0)), reverse=True)
 
         embed = discord.Embed(
@@ -5908,8 +5905,8 @@ async def besttrade_command(interaction: discord.Interaction):
 
         embed.add_field(name="Top Routes", value="\n\n".join(lines), inline=False)
 
-                msg = await send_temp_followup(interaction, embed=embed)
-                await log_star_command_usage(interaction, "besttrade", message=msg)
+        msg = await send_temp_followup(interaction, embed=embed)
+        await log_star_command_usage(interaction, "besttrade", message=msg)
 
     except Exception as e:
         print(f"[ERROR] /besttrade failed: {e}")
@@ -5947,7 +5944,6 @@ async def cargo_command(
     try:
         selected_system = system_filter.value if system_filter else None
 
-        # Ship mode takes priority over manual SCU
         if ship:
             ship_matches = await search_ships_scwiki(ship)
 
@@ -6022,14 +6018,15 @@ async def cargo_command(
             prefix = ""
             if chosen_ship:
                 prefix = f"Using **{_ship_display_name(chosen_ship)}** (`{resolved_scu}` SCU).\n"
-                msg = await send_temp_followup(
-                    interaction,
-                    content=prefix + "Multiple commodities found. Please choose:",
-                    view=view,
-                    delete_after=90
-                )
-                await log_star_command_usage(interaction, "cargo", message=msg)
-                return
+
+            msg = await send_temp_followup(
+                interaction,
+                content=prefix + "Multiple commodities found. Please choose:",
+                view=view,
+                delete_after=90
+            )
+            await log_star_command_usage(interaction, "cargo", message=msg)
+            return
 
         embed = await build_cargo_embed(
             matches[0],
@@ -6044,8 +6041,8 @@ async def cargo_command(
                 name=f"Ship: {_ship_display_name(chosen_ship)} • {resolved_scu} SCU"
             )
 
-                msg = await send_temp_followup(interaction, embed=embed)
-                await log_star_command_usage(interaction, "cargo", message=msg)
+        msg = await send_temp_followup(interaction, embed=embed)
+        await log_star_command_usage(interaction, "cargo", message=msg)
 
     except Exception as e:
         print(f"[ERROR] /cargo failed: {e}")
