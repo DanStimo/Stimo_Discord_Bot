@@ -1633,6 +1633,46 @@ async def search_commodity_uex(query: str) -> list[dict]:
 
     return exact + partial
 
+async def commodity_autocomplete(
+    interaction: discord.Interaction,
+    current: str
+) -> list[app_commands.Choice[str]]:
+    if not current or not current.strip():
+        return []
+
+    try:
+        matches = await search_commodity_uex(current)
+    except Exception as e:
+        print(f"[ERROR] commodity_autocomplete failed: {e}")
+        return []
+
+    choices = []
+    seen = set()
+
+    for item in matches[:25]:
+        commodity_name = str(item.get("name") or "").strip()
+        if not commodity_name:
+            continue
+
+        key = commodity_name.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+
+        code = str(item.get("code") or "").strip()
+        label = commodity_name
+        if code:
+            label = f"{commodity_name} ({code})"
+
+        choices.append(
+            app_commands.Choice(
+                name=label[:100],
+                value=commodity_name[:100]
+            )
+        )
+
+    return choices
+
 async def get_commodity_prices(commodity_id: str | int):
     return await _uex_get("commodities_prices", params={"id_commodity": commodity_id})
 
@@ -5484,6 +5524,13 @@ async def commodity_command(
             "❌ An unexpected error occurred while fetching commodity data.",
             ephemeral=True
         )
+
+@commodity_command.autocomplete("name")
+async def commodity_name_autocomplete(
+    interaction: discord.Interaction,
+    current: str
+) -> list[app_commands.Choice[str]]:
+    return await commodity_autocomplete(interaction, current)
         
 @tree.command(name="route", description="Show best Star Citizen trade routes for a commodity.")
 @app_commands.describe(
@@ -5586,6 +5633,13 @@ async def route_command(
             "❌ An unexpected error occurred while fetching route data.",
             ephemeral=True
         )
+
+@route_command.autocomplete("name")
+async def route_name_autocomplete(
+    interaction: discord.Interaction,
+    current: str
+) -> list[app_commands.Choice[str]]:
+    return await commodity_autocomplete(interaction, current)
 
 @route_command.autocomplete("ship")
 async def route_ship_autocomplete(
@@ -5805,6 +5859,13 @@ async def cargo_command(
             "❌ An unexpected error occurred while calculating cargo profit.",
             ephemeral=True
         )
+
+@cargo_command.autocomplete("name")
+async def cargo_name_autocomplete(
+    interaction: discord.Interaction,
+    current: str
+) -> list[app_commands.Choice[str]]:
+    return await commodity_autocomplete(interaction, current)
 
 @cargo_command.autocomplete("ship")
 async def cargo_ship_autocomplete(
