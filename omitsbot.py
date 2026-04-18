@@ -1740,9 +1740,13 @@ async def search_ships_scwiki(query: str) -> list[dict]:
     if not isinstance(ships, list):
         return []
 
-    q = _normalize_sc_name(query)
+    raw_query = (query or "").strip()
+    q = _normalize_sc_name(raw_query)
     if not q:
         return []
+
+    # keep only ships with usable cargo values
+    ships = [s for s in ships if _ship_scu(s) > 0]
 
     exact = []
     partial = []
@@ -1762,11 +1766,59 @@ async def search_ships_scwiki(query: str) -> list[dict]:
         elif any(q in n for n in norm_names):
             partial.append(ship)
 
-    # keep only ships with usable cargo values
-    exact = [s for s in exact if _ship_scu(s) > 0]
-    partial = [s for s in partial if _ship_scu(s) > 0]
+    if exact:
+        return exact
 
-    return exact + partial
+    if partial:
+        # de-dupe partial matches
+        seen = set()
+        results = []
+        for ship in partial:
+            ship_id = str(ship.get("uuid") or ship.get("id") or ship.get("slug") or _ship_display_name(ship))
+            if ship_id in seen:
+                continue
+            seen.add(ship_id)
+            results.append(ship)
+        return results[:25]
+
+    # fuzzy fallback
+    lookup = {}
+    choices = []
+
+    for ship in ships:
+        possible_names = [
+            str(ship.get("name", "")),
+            str(ship.get("game_name", "")),
+            str(ship.get("slug", "")),
+            str(ship.get("shipmatrix_name", "")),
+        ]
+
+        for n in possible_names:
+            n = n.strip()
+            if not n:
+                continue
+            lookup.setdefault(n, ship)
+            choices.append(n)
+
+    fuzzy_matches = process.extract(raw_query, choices, scorer=fuzz.WRatio, limit=25)
+
+    results = []
+    seen = set()
+
+    for matched_name, score in fuzzy_matches:
+        if score < 60:
+            continue
+
+        ship = lookup[matched_name]
+        ship_id = str(ship.get("uuid") or ship.get("id") or ship.get("slug") or _ship_display_name(ship))
+
+        if ship_id in seen:
+            continue
+
+        seen.add(ship_id)
+        results.append(ship)
+
+    return results
 
 async def build_commodity_embed(
     commodity: dict,
