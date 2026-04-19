@@ -1742,7 +1742,10 @@ async def search_commodity_uex(query: str) -> list[dict]:
         elif q in hay or q in hay_code:
             partial.append(item)
 
-    return exact + partial
+    if exact:
+        return exact
+
+    return partial
 
 async def commodity_autocomplete(
     interaction: discord.Interaction,
