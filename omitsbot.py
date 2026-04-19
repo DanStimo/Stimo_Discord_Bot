@@ -2233,53 +2233,53 @@ async def build_commodity_embed(
         )
     )[:5]
 
-        if buy_rows:
-            lines = []
-            best_sell = max(
-                [float(s.get("price_sell") or 0) for s in sell_rows],
-                default=0
+    if buy_rows:
+        lines = []
+        best_sell = max(
+            [float(s.get("price_sell") or 0) for s in sell_rows],
+            default=0
+        )
+
+        for r in buy_rows:
+            terminal = r.get("terminal_name") or r.get("name_terminal") or "Unknown"
+            terminal_info = find_terminal_info(terminals, terminal)
+            system_name = terminal_system_name(terminal_info)
+            buy_price = float(r.get("price_buy") or 0)
+            profit = int(best_sell - buy_price)
+            stock = r.get("scu_buy") or r.get("stock_buy") or "—"
+
+            lines.append(
+                f"**[{system_name}] {terminal}** — Buy: `{int(buy_price)}` aUEC/SCU • Profit: `+{profit}` • Stock: `{stock}`"
             )
-    
-            for r in buy_rows:
-                terminal = r.get("terminal_name") or r.get("name_terminal") or "Unknown"
-                terminal_info = find_terminal_info(terminals, terminal)
-                system_name = terminal_system_name(terminal_info)
-                buy_price = float(r.get("price_buy") or 0)
-                profit = int(best_sell - buy_price)
-                stock = r.get("scu_buy") or r.get("stock_buy") or "—"
-    
-                lines.append(
-                    f"**[{system_name}] {terminal}** — Buy: `{int(buy_price)}` aUEC/SCU • Profit: `+{profit}` • Stock: `{stock}`"
-                )
-    
-            embed.add_field(name="Best Buy", value="\n".join(lines), inline=False)
-        else:
-            embed.add_field(
-                name="Best Buy",
-                value="No buy locations matched your current filters.",
-                inline=False
+
+        embed.add_field(name="Best Buy", value="\n".join(lines), inline=False)
+    else:
+        embed.add_field(
+            name="Best Buy",
+            value="No buy locations matched your current filters.",
+            inline=False
+        )
+
+    if sell_rows:
+        lines = []
+        for r in sell_rows:
+            terminal = r.get("terminal_name") or r.get("name_terminal") or "Unknown"
+            terminal_info = find_terminal_info(terminals, terminal)
+            system_name = terminal_system_name(terminal_info)
+            price = r.get("price_sell", "—")
+            demand = r.get("scu_sell") or r.get("stock_sell") or "—"
+
+            lines.append(
+                f"**[{system_name}] {terminal}** — Sell: `{price}` aUEC/SCU • Demand: `{demand}`"
             )
-    
-        if sell_rows:
-            lines = []
-            for r in sell_rows:
-                terminal = r.get("terminal_name") or r.get("name_terminal") or "Unknown"
-                terminal_info = find_terminal_info(terminals, terminal)
-                system_name = terminal_system_name(terminal_info)
-                price = r.get("price_sell", "—")
-                demand = r.get("scu_sell") or r.get("stock_sell") or "—"
-    
-                lines.append(
-                    f"**[{system_name}] {terminal}** — Sell: `{price}` aUEC/SCU • Demand: `{demand}`"
-                )
-    
-            embed.add_field(name="Best Sell", value="\n".join(lines), inline=False)
-        else:
-            embed.add_field(
-                name="Best Sell",
-                value="No sell locations matched your current filters.",
-                inline=False
-            )
+
+        embed.add_field(name="Best Sell", value="\n".join(lines), inline=False)
+    else:
+        embed.add_field(
+            name="Best Sell",
+            value="No sell locations matched your current filters.",
+            inline=False
+        )
 
     footer_bits = ["Star Citizen — UEX"]
     if auto_load_only:
