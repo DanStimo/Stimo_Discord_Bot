@@ -2821,16 +2821,14 @@ async def build_bestnow_embed(
     cargo_scu: int | None = None,
     ship_name: str | None = None
 ) -> discord.Embed:
-    routes = await _uex_get("commodities_routes", params={"limit": 100})
+    ranked = await _uex_get("commodities_ranking")
     terminals = await get_all_terminals()
-
     wanted_system = (system_filter or "").strip().lower()
 
     def is_terminal_auto_load(terminal_name: str) -> bool | None:
         terminal_info = find_terminal_info(terminals, terminal_name)
         if not terminal_info:
             return None
-
         val = terminal_info.get("is_auto_load")
         if val in (1, "1", True):
             return True
@@ -2845,73 +2843,90 @@ async def build_bestnow_embed(
             return "❌"
         return "❔"
 
-    if not isinstance(routes, list) or not routes:
-        embed = discord.Embed(
-            title="💰 Best Trade Right Now",
-            description="No trade route data found.",
-            color=0xE67E22
-        )
-        embed.set_footer(text="Star Citizen — UEX")
-        return embed
-
-    valid_routes = []
-
-    for r in routes:
-        origin = (
-            r.get("terminal_origin_name")
-            or r.get("origin_terminal_name")
-            or r.get("from_terminal_name")
-            or "Unknown Origin"
-        )
-        destination = (
-            r.get("terminal_destination_name")
-            or r.get("destination_terminal_name")
-            or r.get("to_terminal_name")
-            or "Unknown Destination"
-        )
-
-        origin_info = find_terminal_info(terminals, origin)
-        destination_info = find_terminal_info(terminals, destination)
-
-        origin_system = terminal_system_name(origin_info)
-        destination_system = terminal_system_name(destination_info)
-
-        origin_auto = is_terminal_auto_load(origin)
-        destination_auto = is_terminal_auto_load(destination)
-
-        if auto_load_only and not (origin_auto is True and destination_auto is True):
-            continue
-
-        # System filter: both buy and sell locations must be in selected system
-        if wanted_system and not (
-            origin_system.lower() == wanted_system
-            and destination_system.lower() == wanted_system
-        ):
-            continue
-
-        profit = float(r.get("profit") or r.get("profit_total") or 0)
-        if profit <= 0:
-            continue
-
-        valid_routes.append({
-            "route": r,
-            "origin": origin,
-            "destination": destination,
-            "origin_system": origin_system,
-            "destination_system": destination_system,
-            "origin_auto": origin_auto,
-            "destination_auto": destination_auto,
-            "profit": profit,
-        })
-
-    valid_routes.sort(key=lambda x: x["profit"], reverse=True)
-
     embed = discord.Embed(
         title="💰 Best Trade Right Now",
         color=0x2ECC71
     )
 
-    if not valid_routes:
+    if not isinstance(ranked, list) or not ranked:
+        embed.description = "No commodity ranking data found."
+        embed.set_footer(text="Star Citizen — UEX")
+        return embed
+
+    # Try top ranked commodities first, then find their best route.
+    ranked = sorted(
+        ranked,
+        key=lambda x: float(x.get("cax_score") or 0),
+        reverse=True
+    )[:40]
+
+    best = None
+
+    for commodity in ranked:
+        commodity_id = commodity.get("id") or commodity.get("id_commodity")
+        if not commodity_id:
+            continue
+
+        routes = await get_commodity_routes(commodity_id, max_rows=10)
+        if not routes:
+            continue
+
+        for r in routes:
+            origin = (
+                r.get("terminal_origin_name")
+                or r.get("origin_terminal_name")
+                or r.get("from_terminal_name")
+                or "Unknown Origin"
+            )
+            destination = (
+                r.get("terminal_destination_name")
+                or r.get("destination_terminal_name")
+                or r.get("to_terminal_name")
+                or "Unknown Destination"
+            )
+
+            origin_info = find_terminal_info(terminals, origin)
+            destination_info = find_terminal_info(terminals, destination)
+
+            origin_system = terminal_system_name(origin_info)
+            destination_system = terminal_system_name(destination_info)
+
+            origin_auto = is_terminal_auto_load(origin)
+            destination_auto = is_terminal_auto_load(destination)
+
+            if auto_load_only and not (origin_auto is True and destination_auto is True):
+                continue
+
+            if wanted_system and not (
+                origin_system.lower() == wanted_system
+                and destination_system.lower() == wanted_system
+            ):
+                continue
+
+            profit = float(r.get("profit") or r.get("profit_total") or 0)
+            if profit <= 0:
+                continue
+
+            candidate = {
+                "commodity": (
+                    commodity.get("name")
+                    or r.get("commodity_name")
+                    or r.get("name_commodity")
+                    or "Unknown Commodity"
+                ),
+                "origin": origin,
+                "destination": destination,
+                "origin_system": origin_system,
+                "destination_system": destination_system,
+                "origin_auto": origin_auto,
+                "destination_auto": destination_auto,
+                "profit": profit,
+            }
+
+            if best is None or candidate["profit"] > best["profit"]:
+                best = candidate
+
+    if not best:
         embed.description = "No profitable trade found matching your filters."
         footer_bits = ["Star Citizen — UEX", "✅ Auto-load", "❌ No auto-load", "❔ Unknown"]
         if auto_load_only:
@@ -2921,26 +2936,14 @@ async def build_bestnow_embed(
         embed.set_footer(text=" • ".join(footer_bits))
         return embed
 
-    best = valid_routes[0]
-    r = best["route"]
-
-    commodity = (
-        r.get("commodity_name")
-        or r.get("name_commodity")
-        or r.get("name")
-        or "Unknown Commodity"
-    )
-
-    profit_per_scu = best["profit"]
-
     line = (
-        f"**{commodity}** — Buy at **[{best['origin_system']}] {best['origin']} {auto_icon(best['origin_auto'])}** "
+        f"**{best['commodity']}** — Buy at **[{best['origin_system']}] {best['origin']} {auto_icon(best['origin_auto'])}** "
         f"→ Sell at **[{best['destination_system']}] {best['destination']} {auto_icon(best['destination_auto'])}** "
-        f"for **{int(profit_per_scu):,} aUEC/SCU profit**"
+        f"for **{int(best['profit']):,} aUEC/SCU profit**"
     )
 
     if cargo_scu:
-        full_profit = int(profit_per_scu * int(cargo_scu))
+        full_profit = int(best["profit"] * int(cargo_scu))
         line += f" • **Full load:** `{full_profit:,}` aUEC"
 
     embed.description = line
