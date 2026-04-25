@@ -2813,7 +2813,151 @@ class TerminalDropdown(discord.ui.View):
             msg = await interaction.original_response()
             await log_star_command_usage(interaction, "terminal", message=msg)
         except Exception as e:
-            print(f"[ERROR] Failed to log final terminal dropdown output: {e}")       
+            print(f"[ERROR] Failed to log final terminal dropdown output: {e}")
+
+async def build_bestnow_embed(
+    auto_load_only: bool = False,
+    system_filter: str | None = None,
+    cargo_scu: int | None = None,
+    ship_name: str | None = None
+) -> discord.Embed:
+    routes = await _uex_get("commodities_routes", params={"limit": 100})
+    terminals = await get_all_terminals()
+
+    wanted_system = (system_filter or "").strip().lower()
+
+    def is_terminal_auto_load(terminal_name: str) -> bool | None:
+        terminal_info = find_terminal_info(terminals, terminal_name)
+        if not terminal_info:
+            return None
+
+        val = terminal_info.get("is_auto_load")
+        if val in (1, "1", True):
+            return True
+        if val in (0, "0", False):
+            return False
+        return None
+
+    def auto_icon(value):
+        if value is True:
+            return "✅"
+        if value is False:
+            return "❌"
+        return "❔"
+
+    if not isinstance(routes, list) or not routes:
+        embed = discord.Embed(
+            title="💰 Best Trade Right Now",
+            description="No trade route data found.",
+            color=0xE67E22
+        )
+        embed.set_footer(text="Star Citizen — UEX")
+        return embed
+
+    valid_routes = []
+
+    for r in routes:
+        origin = (
+            r.get("terminal_origin_name")
+            or r.get("origin_terminal_name")
+            or r.get("from_terminal_name")
+            or "Unknown Origin"
+        )
+        destination = (
+            r.get("terminal_destination_name")
+            or r.get("destination_terminal_name")
+            or r.get("to_terminal_name")
+            or "Unknown Destination"
+        )
+
+        origin_info = find_terminal_info(terminals, origin)
+        destination_info = find_terminal_info(terminals, destination)
+
+        origin_system = terminal_system_name(origin_info)
+        destination_system = terminal_system_name(destination_info)
+
+        origin_auto = is_terminal_auto_load(origin)
+        destination_auto = is_terminal_auto_load(destination)
+
+        if auto_load_only and not (origin_auto is True and destination_auto is True):
+            continue
+
+        # System filter: both buy and sell locations must be in selected system
+        if wanted_system and not (
+            origin_system.lower() == wanted_system
+            and destination_system.lower() == wanted_system
+        ):
+            continue
+
+        profit = float(r.get("profit") or r.get("profit_total") or 0)
+        if profit <= 0:
+            continue
+
+        valid_routes.append({
+            "route": r,
+            "origin": origin,
+            "destination": destination,
+            "origin_system": origin_system,
+            "destination_system": destination_system,
+            "origin_auto": origin_auto,
+            "destination_auto": destination_auto,
+            "profit": profit,
+        })
+
+    valid_routes.sort(key=lambda x: x["profit"], reverse=True)
+
+    embed = discord.Embed(
+        title="💰 Best Trade Right Now",
+        color=0x2ECC71
+    )
+
+    if not valid_routes:
+        embed.description = "No profitable trade found matching your filters."
+        footer_bits = ["Star Citizen — UEX", "✅ Auto-load", "❌ No auto-load", "❔ Unknown"]
+        if auto_load_only:
+            footer_bits.append("Auto-load only")
+        if system_filter:
+            footer_bits.append(f"System: {system_filter}")
+        embed.set_footer(text=" • ".join(footer_bits))
+        return embed
+
+    best = valid_routes[0]
+    r = best["route"]
+
+    commodity = (
+        r.get("commodity_name")
+        or r.get("name_commodity")
+        or r.get("name")
+        or "Unknown Commodity"
+    )
+
+    profit_per_scu = best["profit"]
+
+    line = (
+        f"**{commodity}** — Buy at **[{best['origin_system']}] {best['origin']} {auto_icon(best['origin_auto'])}** "
+        f"→ Sell at **[{best['destination_system']}] {best['destination']} {auto_icon(best['destination_auto'])}** "
+        f"for **{int(profit_per_scu):,} aUEC/SCU profit**"
+    )
+
+    if cargo_scu:
+        full_profit = int(profit_per_scu * int(cargo_scu))
+        line += f" • **Full load:** `{full_profit:,}` aUEC"
+
+    embed.description = line
+
+    if cargo_scu and ship_name:
+        embed.set_author(name=f"Ship: {ship_name} • {cargo_scu} SCU")
+    elif cargo_scu:
+        embed.set_author(name=f"Cargo: {cargo_scu} SCU")
+
+    footer_bits = ["Star Citizen — UEX", "✅ Auto-load", "❌ No auto-load", "❔ Unknown"]
+    if auto_load_only:
+        footer_bits.append("Auto-load only")
+    if system_filter:
+        footer_bits.append(f"System: {system_filter}")
+
+    embed.set_footer(text=" • ".join(footer_bits))
+    return embed
         
 async def search_terminal_uex(query: str) -> list[dict]:
     terminals = await get_all_terminals()
@@ -6269,6 +6413,88 @@ async def trending_command(
             content="❌ An unexpected error occurred while fetching trending commodity data.",
             ephemeral=True
         )
+
+@tree.command(name="bestnow", description="Show the single best Star Citizen trade right now.")
+@app_commands.describe(
+    ship="Optional ship name to calculate full-load profit",
+    scu="Manual cargo size in SCU if no ship is provided",
+    auto_load_only="Only show a trade where both terminals support auto loading",
+    system_filter="Only show a trade where both terminals are in this star system"
+)
+@app_commands.choices(system_filter=[
+    app_commands.Choice(name="Stanton", value="Stanton"),
+    app_commands.Choice(name="Pyro", value="Pyro"),
+    app_commands.Choice(name="Nyx", value="Nyx"),
+])
+async def bestnow_command(
+    interaction: discord.Interaction,
+    ship: str = None,
+    scu: app_commands.Range[int, 1, 100000] = None,
+    auto_load_only: bool = False,
+    system_filter: app_commands.Choice[str] = None
+):
+    await interaction.response.defer()
+
+    try:
+        selected_system = system_filter.value if system_filter else None
+        chosen_ship_name = None
+        resolved_scu = int(scu) if scu is not None else None
+
+        if ship:
+            ship_matches = await search_ships_scwiki(ship)
+
+            if not ship_matches:
+                await send_temp_followup(
+                    interaction,
+                    content="No matching ships found.",
+                    ephemeral=True
+                )
+                return
+
+            if len(ship_matches) > 1:
+                await send_temp_followup(
+                    interaction,
+                    content="Multiple ships found. Please choose the exact ship from autocomplete or type a more specific name.",
+                    ephemeral=True
+                )
+                return
+
+            chosen_ship = ship_matches[0]
+            resolved_scu = _ship_scu(chosen_ship)
+            chosen_ship_name = _ship_display_name(chosen_ship)
+
+            if resolved_scu <= 0:
+                await send_temp_followup(
+                    interaction,
+                    content="That ship does not have a usable cargo capacity in the API.",
+                    ephemeral=True
+                )
+                return
+
+        embed = await build_bestnow_embed(
+            auto_load_only=auto_load_only,
+            system_filter=selected_system,
+            cargo_scu=resolved_scu,
+            ship_name=chosen_ship_name
+        )
+
+        msg = await send_temp_followup(interaction, embed=embed)
+        await log_star_command_usage(interaction, "bestnow", message=msg)
+
+    except Exception as e:
+        print(f"[ERROR] /bestnow failed: {e}")
+        await send_temp_followup(
+            interaction,
+            content="❌ An unexpected error occurred while fetching the best trade.",
+            ephemeral=True
+        )
+
+@bestnow_command.autocomplete("ship")
+async def bestnow_ship_autocomplete(
+    interaction: discord.Interaction,
+    current: str
+) -> list[app_commands.Choice[str]]:
+    return await ship_autocomplete(interaction, current)
 # ---------------------------------------------------
 # Reaction removal suppression so bot-initiated removals don't unregister users
 # ---------------------------------------------------
