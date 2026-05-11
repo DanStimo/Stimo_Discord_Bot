@@ -234,9 +234,29 @@ async def on_member_join(member: discord.Member):
     print(f"[JOIN] on_member_join fired for {member} (id={member.id})")
 
     # --- Hardcoded config ---
-    WELCOME_CHANNEL_ID = 1361690632392933527        # 👈 replace with your welcome channel ID
-    WELCOME_COLOR = 0x3498DB                       # 👈 green color, hex without '#'
-    MEMBER_ROLE_ID = 1361661691590606929            # 👈 replace with your Member role ID
+    WELCOME_CONFIG = {
+        1360645256961589428: {
+            "welcome_channel_id": 1361690632392933527,
+            "member_role_id": 1361661691590606929,
+            "rules_channel_id": 1362311374293958856,
+            "roles_channel_id": 1361921570104283186,
+        },
+        1373595733403631677: {
+            "welcome_channel_id": 1373595735265771591,
+            "member_role_id": 1373595733403631684,
+            "rules_channel_id": 1373595735051997299,
+            "roles_channel_id": 1376174726258360471,
+        },
+    }
+    
+    config = WELCOME_CONFIG.get(member.guild.id)
+    if not config:
+        print(f"[WARN] No welcome config for guild {member.guild.id}")
+        return
+    
+    WELCOME_CHANNEL_ID = config["welcome_channel_id"]
+    WELCOME_COLOR = 0x3498DB
+    MEMBER_ROLE_ID = config["member_role_id"]
 
     # --- Resolve channel ---
     channel = member.guild.get_channel(WELCOME_CHANNEL_ID)
@@ -262,9 +282,9 @@ async def on_member_join(member: discord.Member):
         title="Welcome aboard! 👋",
         description=(
             f"{member.mention}, you've reached **Stimo's** Discord server!\n\n"
-            "• **Read the rules:** <#1362311374293958856>\n"
-            "• **Grab roles:** <#1361921570104283186>\n"
-            "• **Say hi!:** <#1361690632392933527> 👋"
+            f"• **Read the rules:** <#{config['rules_channel_id']}>\n"
+            f"• **Grab roles:** <#{config['roles_channel_id']}>\n"
+            f"• **Say hi!:** <#{config['welcome_channel_id']}> 👋"
         ),
         color=WELCOME_COLOR,
         timestamp=datetime.now(timezone.utc)
@@ -7047,19 +7067,27 @@ async def on_ready():
     
         client.background_started = True
 
-    channel_id = int(os.getenv("ANNOUNCE_CHANNEL_ID", "0"))
-    channel = client.get_channel(channel_id)
+    announce_channel_ids = [
+        int(x.strip())
+        for x in os.getenv("ANNOUNCE_CHANNEL_IDS", "").split(",")
+        if x.strip()
+    ]
     
-    if channel:
-        message = await channel.send("✅ - omitS Bot (<:discord:1363127822209646612>) is now online and ready for commands!")
-        async def delete_after_announcement():
-            await asyncio.sleep(60)
-            try:
-                await message.delete()
-            except Exception as e:
-                print(f"[ERROR] Failed to auto-delete announcement message: {e}")
-        asyncio.create_task(delete_after_announcement())
-    else:
-        print(f"[WARN] Could not find channel with ID {channel_id}")
+    for channel_id in announce_channel_ids:
+        channel = client.get_channel(channel_id)
+    
+        if channel:
+            message = await channel.send("✅ - omitS Bot is now online and ready for commands!")
+    
+            async def delete_after_announcement(msg):
+                await asyncio.sleep(60)
+                try:
+                    await msg.delete()
+                except Exception as e:
+                    print(f"[ERROR] Failed to auto-delete announcement message: {e}")
+    
+            asyncio.create_task(delete_after_announcement(message))
+        else:
+            print(f"[WARN] Could not find announce channel with ID {channel_id}")
 
 client.run(TOKEN)
