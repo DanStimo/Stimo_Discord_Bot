@@ -6996,42 +6996,36 @@ async def on_ready():
         print(f"[ERROR] Postgres init/load failed: {e}")
         # (Optional) raise here if persistence is required
         # raise
-    # --- command sync for multiple guilds ---
+        # --- command sync for multiple guilds ---
     try:
         guild_ids = [
             int(x.strip())
             for x in os.getenv("GUILD_IDS", "").split(",")
             if x.strip()
         ]
-        
+
         if not guild_ids:
             print("[WARN] GUILD_IDS not set or empty")
         else:
             for gid in guild_ids:
                 try:
                     guild = client.get_guild(gid) or await client.fetch_guild(gid)
-        
-                    # 1) Start clean: remove any existing guild-scoped registrations
+
                     tree.clear_commands(guild=guild)
-        
-                    # 2) Copy your global command definitions into this guild scope
                     tree.copy_global_to(guild=guild)
-        
-                    # 3) Publish guild-only commands
+
                     cmds = await tree.sync(guild=guild)
-        
                     print(f"✅ Synced {len(cmds)} commands to guild {gid}")
-        
+
                 except Exception as e:
                     print(f"[ERROR] Failed to sync commands to guild {gid}: {e}")
 
-        # 4) Remove GLOBAL registrations so you don't see duplicates
-        tree.clear_commands(guild=None)
-        await tree.sync()
-        print("🧹 Cleared global commands")
+            tree.clear_commands(guild=None)
+            await tree.sync()
+            print("🧹 Cleared global commands")
 
-except Exception as e:
-    print(f"[ERROR] Command sync failed: {e}")
+    except Exception as e:
+        print(f"[ERROR] Command sync failed: {e}")
 
     print(f"Bot is ready as {client.user}")
     await warm_ea_session()
