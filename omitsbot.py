@@ -7032,9 +7032,6 @@ try:
 
 except Exception as e:
     print(f"[ERROR] Command sync failed: {e}")
-    
-    except Exception as e:
-        print(f"[ERROR] Command sync failed: {e}")
 
     print(f"Bot is ready as {client.user}")
     await warm_ea_session()
