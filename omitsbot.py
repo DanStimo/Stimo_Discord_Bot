@@ -1621,64 +1621,56 @@ async def rotate_presence():
         if x.strip()
     ]
 
-    role_ids = [
+    watch_role_ids = [
         int(x.strip())
         for x in os.getenv("WATCH_ROLE_IDS", "").split(",")
         if x.strip()
     ]
 
-    role_name = os.getenv("WATCH_ROLE_NAME", "Member")
-
     if not guild_ids:
-        print("[WARN] GUILD_IDS not set – cannot rotate presence by role.")
+        print("[WARN] GUILD_IDS not set – cannot rotate presence.")
         return
 
-    async def get_candidates() -> list[discord.Member]:
-        members = []
-
-        for guild_id in guild_ids:
-            guild = client.get_guild(guild_id)
-
-            if guild is None:
-                try:
-                    guild = await client.fetch_guild(guild_id)
-                except Exception as e:
-                    print(f"[ERROR] Could not fetch guild {guild_id}: {e}")
-                    continue
-
-            try:
-                async for _ in guild.fetch_members(limit=None):
-                    pass
-            except Exception as e:
-                print(f"[WARN] Could not fully fetch members for guild {guild_id}: {e}")
-
-            role = None
-
-            for role_id in role_ids:
-                role = guild.get_role(role_id)
-                if role:
-                    break
-
-            if role is None and role_name:
-                role = discord.utils.get(guild.roles, name=role_name)
-
-            if role is None:
-                print(f"[WARN] Target role not found in guild {guild_id}; skipping.")
-                continue
-
-            members.extend([m for m in role.members if not m.bot])
-
-        return members
+    if len(guild_ids) != len(watch_role_ids):
+        print("[WARN] GUILD_IDS and WATCH_ROLE_IDS count does not match.")
+        return
 
     while not client.is_closed():
         try:
-            candidates = await get_candidates()
+            all_candidates = []
 
-            if candidates:
-                pick = random.choice(candidates)
+            for guild_id, role_id in zip(guild_ids, watch_role_ids):
+                guild = client.get_guild(guild_id)
+
+                if guild is None:
+                    try:
+                        guild = await client.fetch_guild(guild_id)
+                    except Exception as e:
+                        print(f"[ERROR] Could not fetch guild {guild_id}: {e}")
+                        continue
+
+                try:
+                    async for _ in guild.fetch_members(limit=None):
+                        pass
+                except Exception as e:
+                    print(f"[WARN] Could not fully fetch members for guild {guild_id}: {e}")
+
+                role = guild.get_role(role_id)
+
+                if role is None:
+                    print(f"[WARN] Role {role_id} not found in guild {guild_id}")
+                    continue
+
+                members = [m for m in role.members if not m.bot]
+
+                for member in members:
+                    all_candidates.append(member)
+
+            if all_candidates:
+                pick = random.choice(all_candidates)
                 watching_text = f"{pick.display_name} 👀"
             else:
-                watching_text = "the club 👀"
+                watching_text = "the servers 👀"
 
             await client.change_presence(
                 activity=discord.Activity(
