@@ -247,12 +247,14 @@ async def on_member_join(member: discord.Member):
     # --- Hardcoded config ---
     WELCOME_CONFIG = {
         1360645256961589428: {
+            "server_name": "Stimo's",
             "welcome_channel_id": 1361690632392933527,
             "member_role_id": 1361661691590606929,
             "rules_channel_id": 1362311374293958856,
             "roles_channel_id": 1361921570104283186,
         },
         1373595733403631677: {
+            "server_name": "Phonics",
             "welcome_channel_id": 1373595735265771591,
             "member_role_id": 1373595733403631684,
             "rules_channel_id": 1373595735051997299,
@@ -314,7 +316,7 @@ async def on_member_join(member: discord.Member):
         embed.set_thumbnail(url=member.display_avatar.url)
 
     # Footer
-    embed.set_footer(text="omitS Bot", icon_url="https://i.imgur.com/Uy3fdb1.png")
+    embed.set_footer(text="Phonics Bot", icon_url="https://i.imgur.com/Uy3fdb1.png")
 
     # --- Send and react ---
     try:
@@ -5124,7 +5126,7 @@ def make_event_embed(ev: dict) -> discord.Embed:
     except Exception:
         pass
 
-    embed.set_footer(text=f"omitS Bot • Event ID: {ev.get('id')}", icon_url=footer_icon)
+    embed.set_footer(text=f"Phonics Bot • Event ID: {ev.get('id')}", icon_url=footer_icon)
     return embed
 
 def user_can_create_events(member: discord.Member) -> bool:
@@ -5241,7 +5243,7 @@ class AttendLaterTimeView(discord.ui.View):
 def make_lineup_embed(lp: dict) -> discord.Embed:
     """
     Build an embed for a lineup. Single column: `Lineup` with all positions.
-    Footer is standardized to 'omitS Bot' with the server icon.
+    Footer is standardized to 'Phonics Bot' with the server icon.
     """
     color = discord.Color(int(EVENT_EMBED_COLOR_HEX.strip().lstrip("#"), 16))
     ch = client.get_channel(lp.get("channel_id"))
@@ -5289,7 +5291,7 @@ def make_lineup_embed(lp: dict) -> discord.Embed:
         pass
 
     footer_icon = guild.icon.url if (guild and guild.icon) else None
-    embed.set_footer(text=f"omitS Bot • Lineup ID: {lp.get('id')}", icon_url=footer_icon)
+    embed.set_footer(text=f"Phonics Bot • Lineup ID: {lp.get('id')}", icon_url=footer_icon)
     return embed
 
 # -------------------------
@@ -5350,7 +5352,7 @@ def make_twitch_live_embed(stream: dict, game_box_url: str | None) -> discord.Em
         cache_bust = int(datetime.now(timezone.utc).timestamp())
         embed.set_image(url=f"{preview}?v={cache_bust}")
 
-    embed.set_footer(text="omitS Bot • Twitch Live")
+    embed.set_footer(text="Phonics Bot • Twitch Live")
     return embed
 
 class WatchButtonView(discord.ui.View):
@@ -5751,7 +5753,7 @@ async def closeevent_command(interaction: discord.Interaction, event_id: int):
         embed = make_event_embed(ev)
         embed.color = discord.Color.dark_grey()
         
-        ft = (embed.footer.text or f"omitS Bot • Event ID: {ev.get('id')}") + " • CLOSED"
+        ft = (embed.footer.text or f"Phonics Bot • Event ID: {ev.get('id')}") + " • CLOSED"
         embed.set_footer(text=ft, icon_url=embed.footer.icon_url)
         
         await msg.edit(embed=embed)
@@ -7124,7 +7126,7 @@ async def on_ready():
         channel = client.get_channel(channel_id)
     
         if channel:
-            message = await channel.send("✅ - omitS Bot is now online and ready for commands!")
+            message = await channel.send("✅ - Phonics Bot is now online and ready for commands!")
     
             async def delete_after_announcement(msg):
                 await asyncio.sleep(60)
