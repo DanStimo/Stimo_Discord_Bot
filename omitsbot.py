@@ -56,8 +56,19 @@ _client_ea = httpx.AsyncClient(
 TWITCH_CLIENT_ID = os.getenv("TWITCH_CLIENT_ID")
 TWITCH_CLIENT_SECRET = os.getenv("TWITCH_CLIENT_SECRET")
 TWITCH_CHANNEL_LOGIN = (os.getenv("TWITCH_CHANNEL_LOGIN") or "").lower().strip()
-TWITCH_ANNOUNCE_CHANNEL_ID = int(os.getenv("TWITCH_ANNOUNCE_CHANNEL_ID", "0"))
-TWITCH_LIVE_ROLE_ID = int(os.getenv("TWITCH_LIVE_ROLE_ID", "0"))
+TWITCH_ANNOUNCE_CHANNEL_IDS = [
+    int(x.strip())
+    for x in os.getenv("TWITCH_ANNOUNCE_CHANNEL_IDS", "").split(",")
+    if x.strip()
+]
+TWITCH_LIVE_ROLE_IDS = {
+    int(k): int(v)
+    for k, v in (
+        pair.split(":")
+        for pair in os.getenv("TWITCH_LIVE_ROLE_IDS", "").split(",")
+        if ":" in pair
+    )
+}
 TWITCH_POLL_INTERVAL = int(os.getenv("TWITCH_POLL_INTERVAL", "60"))
 
 # In-memory state (we'll also persist if your DB helpers exist)
@@ -6889,109 +6900,139 @@ async def db_incr_offside() -> int:
 # -------------------------
 async def monitor_twitch_live():
     """
-    Announce when OFFLINE -> LIVE; update embed while LIVE; delete when LIVE -> OFFLINE.
-    Persists minimal state (message_id/channel_id) if db_* helpers exist; otherwise falls back to memory.
+    Announce Twitch live status in multiple Discord channels.
     """
-    # Load persisted state if available
-    state = {"live_stream_id": None, "message_id": None, "channel_id": None}
+
+    state = {
+        "live_stream_id": None,
+        "messages": {}
+    }
+
     try:
-        state = await db_load_json(TWITCH_STATE_KEY, state)  # type: ignore[name-defined]
+        state = await db_load_json(TWITCH_STATE_KEY, state)
+        if "messages" not in state:
+            state["messages"] = {}
     except Exception:
-        pass  # no DB? that's fine — we keep it in memory
+        pass
 
     def _twitch_url() -> str:
         return f"https://twitch.tv/{TWITCH_CHANNEL_LOGIN}"
 
+    async def save_state():
+        try:
+            await db_save_json(TWITCH_STATE_KEY, state)
+        except Exception:
+            pass
+
+    async def send_live_message(channel_id: int, stream: dict):
+        try:
+            channel = client.get_channel(channel_id) or await client.fetch_channel(channel_id)
+
+            game_box = await twitch_get_game_box_art_url(stream.get("game_id"))
+            embed = make_twitch_live_embed(stream, game_box)
+
+            role_id = TWITCH_LIVE_ROLE_IDS.get(channel_id)
+
+            content = f"||<@&{role_id}>||" if role_id else None
+            allowed = (
+                discord.AllowedMentions(roles=[discord.Object(id=role_id)])
+                if role_id
+                else None
+            )
+
+            msg = await channel.send(
+                content=content,
+                embed=embed,
+                view=WatchButtonView(_twitch_url()),
+                allowed_mentions=allowed
+            )
+
+            state["messages"][str(channel_id)] = {
+                "channel_id": channel.id,
+                "message_id": msg.id
+            }
+
+            print(f"[TWITCH] Posted live message in channel {channel_id}")
+
+        except Exception as e:
+            print(f"[ERROR] Could not send Twitch live message to channel {channel_id}: {e}")
+
+    async def delete_live_messages():
+        for channel_id, saved in list(state.get("messages", {}).items()):
+            try:
+                ch_id = int(saved.get("channel_id"))
+                msg_id = int(saved.get("message_id"))
+
+                channel = client.get_channel(ch_id) or await client.fetch_channel(ch_id)
+                msg = await channel.fetch_message(msg_id)
+                await msg.delete()
+
+                print(f"[TWITCH] Deleted live message in channel {ch_id}")
+
+            except Exception as e:
+                print(f"[WARN] Could not delete Twitch live message for channel {channel_id}: {e}")
+
+        state["messages"] = {}
+
+    async def update_live_messages(stream: dict):
+        for channel_id in TWITCH_ANNOUNCE_CHANNEL_IDS:
+            saved = state.get("messages", {}).get(str(channel_id))
+
+            if not saved:
+                await send_live_message(channel_id, stream)
+                continue
+
+            try:
+                ch_id = int(saved.get("channel_id"))
+                msg_id = int(saved.get("message_id"))
+
+                channel = client.get_channel(ch_id) or await client.fetch_channel(ch_id)
+                msg = await channel.fetch_message(msg_id)
+
+                game_box = await twitch_get_game_box_art_url(stream.get("game_id"))
+                embed = make_twitch_live_embed(stream, game_box)
+
+                await msg.edit(
+                    embed=embed,
+                    view=WatchButtonView(_twitch_url())
+                )
+
+            except Exception as e:
+                print(f"[WARN] Could not update Twitch live message in channel {channel_id}: {e}")
+                await send_live_message(channel_id, stream)
+
     while not client.is_closed():
         try:
-            # Ensure required config exists
-            if not (TWITCH_CLIENT_ID and TWITCH_CLIENT_SECRET and TWITCH_CHANNEL_LOGIN and TWITCH_ANNOUNCE_CHANNEL_ID):
+            if not (
+                TWITCH_CLIENT_ID
+                and TWITCH_CLIENT_SECRET
+                and TWITCH_CHANNEL_LOGIN
+                and TWITCH_ANNOUNCE_CHANNEL_IDS
+            ):
                 await asyncio.sleep(max(TWITCH_POLL_INTERVAL, 30))
                 continue
 
-            # Query Twitch
             stream = await twitch_get_stream_by_login(TWITCH_CHANNEL_LOGIN)
             is_live_now = stream is not None
             was_live = bool(state.get("live_stream_id"))
 
-            # ------------------------------------------------------------------
-            # Transition: OFFLINE -> LIVE  (post + save state)
-            # ------------------------------------------------------------------
             if is_live_now and not was_live:
-                game_box = await twitch_get_game_box_art_url(stream.get("game_id"))
-                embed = make_twitch_live_embed(stream, game_box)
+                for channel_id in TWITCH_ANNOUNCE_CHANNEL_IDS:
+                    await send_live_message(channel_id, stream)
 
-                channel = client.get_channel(TWITCH_ANNOUNCE_CHANNEL_ID) or await client.fetch_channel(TWITCH_ANNOUNCE_CHANNEL_ID)
-                content = f"||<@&{TWITCH_LIVE_ROLE_ID}>||" if TWITCH_LIVE_ROLE_ID else None
-                allowed = discord.AllowedMentions(roles=[discord.Object(id=TWITCH_LIVE_ROLE_ID)]) if TWITCH_LIVE_ROLE_ID else None
+                state["live_stream_id"] = stream.get("id")
+                await save_state()
 
-                msg = await channel.send(content=content, embed=embed, view=WatchButtonView(_twitch_url()), allowed_mentions=allowed)
-
-                state.update({"live_stream_id": stream.get("id"), "message_id": msg.id, "channel_id": channel.id})
-                try:
-                    await db_save_json(TWITCH_STATE_KEY, state)  # type: ignore[name-defined]
-                except Exception:
-                    pass
-
-            # ------------------------------------------------------------------
-            # Transition: LIVE -> OFFLINE  (delete + clear state)
-            # ------------------------------------------------------------------
             elif not is_live_now and was_live:
-                ch_id = state.get("channel_id")
-                msg_id = state.get("message_id")
-                if ch_id and msg_id:
-                    try:
-                        ch = client.get_channel(ch_id) or await client.fetch_channel(ch_id)
-                        m = await ch.fetch_message(msg_id)
-                        await m.delete()
-                    except Exception as e:
-                        print(f"[WARN] Could not delete Twitch live message: {e}")
+                await delete_live_messages()
 
-                state.update({"live_stream_id": None, "message_id": None, "channel_id": None})
-                try:
-                    await db_save_json(TWITCH_STATE_KEY, state)  # type: ignore[name-defined]
-                except Exception:
-                    pass
+                state["live_stream_id"] = None
+                await save_state()
 
-            # ------------------------------------------------------------------
-            # Still LIVE: update (uptime/viewers/title/preview), with self-heal
-            # ------------------------------------------------------------------
             elif is_live_now:
-                ch_id = state.get("channel_id")
-                msg_id = state.get("message_id")
-                channel = None
-                message = None
-
-                # Resolve channel/message if we have ids
-                if ch_id:
-                    try:
-                        channel = client.get_channel(ch_id) or await client.fetch_channel(ch_id)
-                        if msg_id:
-                            message = await channel.fetch_message(msg_id)
-                    except Exception:
-                        message = None
-
-                # If message vanished (restart/manual delete), re-post once
-                if not message:
-                    game_box = await twitch_get_game_box_art_url(stream.get("game_id"))
-                    embed = make_twitch_live_embed(stream, game_box)
-                    if not channel:
-                        channel = client.get_channel(TWITCH_ANNOUNCE_CHANNEL_ID) or await client.fetch_channel(TWITCH_ANNOUNCE_CHANNEL_ID)
-                    msg = await channel.send(embed=embed, view=WatchButtonView(_twitch_url()))
-                    state.update({"live_stream_id": stream.get("id"), "message_id": msg.id, "channel_id": channel.id})
-                    try:
-                        await db_save_json(TWITCH_STATE_KEY, state)  # type: ignore[name-defined]
-                    except Exception:
-                        pass
-                else:
-                    # Refresh embed every poll so uptime/viewers/preview update
-                    try:
-                        game_box = await twitch_get_game_box_art_url(stream.get("game_id"))
-                        await message.edit(embed=make_twitch_live_embed(stream, game_box), view=WatchButtonView(_twitch_url()))
-                    except Exception as e:
-                        print(f"[WARN] Could not update live embed: {e}")
-
-            # else: still OFFLINE — do nothing
+                await update_live_messages(stream)
+                state["live_stream_id"] = stream.get("id")
+                await save_state()
 
         except Exception as e:
             print(f"[ERROR] monitor_twitch_live tick failed: {e}")
