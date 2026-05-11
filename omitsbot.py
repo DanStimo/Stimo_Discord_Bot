@@ -1615,51 +1615,64 @@ def format_columns(names: list[str], cols: int = 2) -> str:
 async def rotate_presence():
     await client.wait_until_ready()
 
-    guild_id = int(os.getenv("GUILD_ID", "0"))
-    role_id = int(os.getenv("WATCH_ROLE_ID", "1361661691590606929"))
+    guild_ids = [
+        int(x.strip())
+        for x in os.getenv("GUILD_IDS", "").split(",")
+        if x.strip()
+    ]
+
+    role_ids = [
+        int(x.strip())
+        for x in os.getenv("WATCH_ROLE_IDS", "").split(",")
+        if x.strip()
+    ]
+
     role_name = os.getenv("WATCH_ROLE_NAME", "Member")
 
-    if not guild_id:
-        print("[WARN] GUILD_ID not set – cannot rotate presence by role.")
+    if not guild_ids:
+        print("[WARN] GUILD_IDS not set – cannot rotate presence by role.")
         return
 
-    guild = client.get_guild(guild_id)
-    if guild is None:
-        try:
-            guild = await client.fetch_guild(guild_id)
-        except Exception as e:
-            print(f"[ERROR] Could not fetch guild {guild_id}: {e}")
-            return
+    async def get_candidates() -> list[discord.Member]:
+        members = []
 
-    try:
-        # attempt to populate members cache
-        await guild.fetch_members(limit=None).flatten()
-    except AttributeError:
-        try:
-            async for _ in guild.fetch_members(limit=None):
-                pass
-        except Exception as e:
-            print(f"[WARN] Could not fully fetch members: {e}")
-    except Exception as e:
-        print(f"[WARN] Could not fully fetch members: {e}")
+        for guild_id in guild_ids:
+            guild = client.get_guild(guild_id)
 
-    def get_candidates() -> list[discord.Member]:
-        role = None
-        if role_id:
-            role = guild.get_role(role_id)
-        if role is None and role_name:
-            role = discord.utils.get(guild.roles, name=role_name)
+            if guild is None:
+                try:
+                    guild = await client.fetch_guild(guild_id)
+                except Exception as e:
+                    print(f"[ERROR] Could not fetch guild {guild_id}: {e}")
+                    continue
 
-        if role is None:
-            print("[WARN] Target role not found; presence rotation will skip.")
-            return []
+            try:
+                async for _ in guild.fetch_members(limit=None):
+                    pass
+            except Exception as e:
+                print(f"[WARN] Could not fully fetch members for guild {guild_id}: {e}")
 
-        members = [m for m in role.members if not m.bot]
+            role = None
+
+            for role_id in role_ids:
+                role = guild.get_role(role_id)
+                if role:
+                    break
+
+            if role is None and role_name:
+                role = discord.utils.get(guild.roles, name=role_name)
+
+            if role is None:
+                print(f"[WARN] Target role not found in guild {guild_id}; skipping.")
+                continue
+
+            members.extend([m for m in role.members if not m.bot])
+
         return members
 
     while not client.is_closed():
         try:
-            candidates = get_candidates()
+            candidates = await get_candidates()
 
             if candidates:
                 pick = random.choice(candidates)
@@ -1667,11 +1680,12 @@ async def rotate_presence():
             else:
                 watching_text = "the club 👀"
 
-            activity = discord.Activity(
-                type=discord.ActivityType.watching,
-                name=watching_text
+            await client.change_presence(
+                activity=discord.Activity(
+                    type=discord.ActivityType.watching,
+                    name=watching_text
+                )
             )
-            await client.change_presence(activity=activity)
 
         except Exception as e:
             print(f"[ERROR] Failed to rotate presence: {e}")
