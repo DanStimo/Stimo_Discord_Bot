@@ -254,7 +254,7 @@ async def on_member_join(member: discord.Member):
             "roles_channel_id": 1361921570104283186,
         },
         1373595733403631677: {
-            "server_name": "Phonics",
+            "server_name": "Phonics'",
             "welcome_channel_id": 1373595735265771591,
             "member_role_id": 1373595733403631684,
             "rules_channel_id": 1373595735051997299,
@@ -294,7 +294,7 @@ async def on_member_join(member: discord.Member):
     embed = discord.Embed(
         title="Welcome aboard! 👋",
         description=(
-            f"{member.mention}, you've reached **Stimo's** Discord server!\n\n"
+            f"{member.mention}, you've reached **{config['server_name']}** Discord server!\n\n"
             f"• **Read the rules:** <#{config['rules_channel_id']}>\n"
             f"• **Grab roles:** <#{config['roles_channel_id']}>\n"
             f"• **Say hi!:** <#{config['welcome_channel_id']}> 👋"
