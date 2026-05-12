@@ -96,6 +96,23 @@ tree = app_commands.CommandTree(client)
 
 # Channel where typing a club name without a command should trigger stats
 FREE_STATS_CHANNEL_ID = 1362795404185305129
+
+# =========================================================
+# PHONICS SELF-SELECT ROLES
+# =========================================================
+
+SELF_ROLE_CHANNEL_ID = 1376174726258360471
+SELF_ROLE_MESSAGE_ID = 1376183419280818286
+
+SELF_SELECT_ROLES = {
+    "👮": 1375523553742553118,  # Security
+    "💗": 1375523406144864357,  # Medical
+    "👷": 1375523774195175444,  # Industry
+    "🌐": 1375523125290336306,  # Logistics
+    "🌍": 1375523873671479406,  # Exploration
+    "📷": 1375523226133987329,  # Media
+}
+
 # Channel where we log free-typed stats lookups
 LOG_CHANNEL_ID = 1383731281577246810
 STAR_LOG_CHANNEL_ID = int(os.getenv("STAR_LOG_CHANNEL_ID", str(LOG_CHANNEL_ID)))
@@ -6630,6 +6647,49 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     if payload.user_id == client.user.id:
         return
 
+    # =========================================================
+    # SELF-SELECT ROLES (PHONICS)
+    # =========================================================
+    if payload.channel_id == SELF_ROLE_CHANNEL_ID and payload.message_id == SELF_ROLE_MESSAGE_ID:
+        emoji = str(payload.emoji)
+        role_id = SELF_SELECT_ROLES.get(emoji)
+
+        if not role_id:
+            return
+
+        guild = client.get_guild(payload.guild_id)
+        if guild is None:
+            return
+
+        member = guild.get_member(payload.user_id)
+        if member is None:
+            member = await guild.fetch_member(payload.user_id)
+
+        role = guild.get_role(role_id)
+        if role is None:
+            return
+
+        try:
+            if role in member.roles:
+                await member.remove_roles(role, reason="Self-role toggle off")
+                print(f"[SELF ROLES] Removed {role.name} from {member.display_name}")
+            else:
+                await member.add_roles(role, reason="Self-role toggle on")
+                print(f"[SELF ROLES] Added {role.name} to {member.display_name}")
+
+            channel = client.get_channel(payload.channel_id)
+            if channel is None:
+                channel = await client.fetch_channel(payload.channel_id)
+
+            message = await channel.fetch_message(payload.message_id)
+
+            await message.remove_reaction(payload.emoji, member)
+
+        except Exception as e:
+            print(f"[SELF ROLE ERROR] {e}")
+
+        return
+
     ev = None
     for eid, e in events_store.get("events", {}).items():
         if e.get("message_id") == payload.message_id:
@@ -7138,5 +7198,25 @@ async def on_ready():
             asyncio.create_task(delete_after_announcement(message))
         else:
             print(f"[WARN] Could not find announce channel with ID {channel_id}")
+
+    # =========================================================
+    # ADD SELF-ROLE REACTIONS
+    # =========================================================
+
+    try:
+        channel = client.get_channel(SELF_ROLE_CHANNEL_ID)
+
+        if channel is None:
+            channel = await client.fetch_channel(SELF_ROLE_CHANNEL_ID)
+
+        message = await channel.fetch_message(SELF_ROLE_MESSAGE_ID)
+
+        for emoji in SELF_SELECT_ROLES.keys():
+            await message.add_reaction(emoji)
+
+        print("[SELF ROLES] Reactions added successfully.")
+
+    except Exception as e:
+        print(f"[SELF ROLES] Failed to add reactions: {e}")
 
 client.run(TOKEN)
