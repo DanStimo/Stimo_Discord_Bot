@@ -1670,9 +1670,9 @@ async def rotate_presence():
 
             if all_candidates:
                 pick = random.choice(all_candidates)
-                watching_text = f"is watching {pick.display_name} 👀"
+                watching_text = f"{pick.display_name} 👀"
             else:
-                watching_text = "the servers 👀"
+                watching_text = "2 servers 👀"
 
             await client.change_presence(
                 activity=discord.Activity(
