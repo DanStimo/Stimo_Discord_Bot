@@ -7717,16 +7717,21 @@ async def monitor_twitch_live():
 @client.event
 async def on_ready():
     # --- DB bootstrap + load persistent state ---
-    try:
-        await init_db()
-        # Pull latest snapshots for each store from Postgres
-        global events_store, templates_store, lineups_store
-        events_store   = await db_load_json(EVENTS_FILE,   {"next_id": 1, "events": {}})
-        templates_store = await db_load_json(TEMPLATES_FILE, {})
-        lineups_store  = await db_load_json(LINEUPS_FILE,  {"next_id": 1, "lineups": {}})
-        print("🗄️ Loaded stores from Postgres.")
-    except Exception as e:
-        print(f"[ERROR] Postgres init/load failed: {e}")
+    global events_store, templates_store, lineups_store
+
+    await init_db()
+
+    if DB_POOL:
+        try:
+            # Pull latest snapshots for each store from Postgres
+            events_store = await db_load_json(EVENTS_FILE, {"next_id": 1, "events": {}})
+            templates_store = await db_load_json(TEMPLATES_FILE, {})
+            lineups_store = await db_load_json(LINEUPS_FILE, {"next_id": 1, "lineups": {}})
+            print("🗄️ Loaded stores from Postgres.")
+        except Exception as e:
+            print(f"[ERROR] Postgres load failed: {e}")
+    else:
+        print("🗄️ Postgres skipped — using local JSON storage only.")
         # (Optional) raise here if persistence is required
         # raise
         # --- command sync for multiple guilds ---
