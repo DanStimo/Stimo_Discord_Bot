@@ -2666,58 +2666,58 @@ def build_members_embed(org_sid: str, members: list[dict], org_info: dict | None
         embed.set_footer(text="Star Citizen — Organisation Members")
         return embed
 
-   groups = {
-        "👑 Leadership": [],
-        "🛡️ Staff": [],
-        "👥 Members": [],
-        "📦 Other": [],
-    }
-    
-    for member in members:
-        display = str(member.get("display") or member.get("handle") or "Unknown").strip()
-        handle = str(member.get("handle") or "").strip()
-        rank = str(member.get("rank") or "—").strip()
-    
-        roles = member.get("roles") or []
-        cleaned_roles = [
-            str(r).strip()
-            for r in roles
-            if str(r).strip()
-        ] if isinstance(roles, list) else []
-    
-        roles_text = ", ".join(cleaned_roles)
-    
-        handle_part = ""
-        if handle and handle.lower() != display.lower():
-            handle_part = f" `@{handle}`"
-    
-        details = rank
-        if roles_text:
-            details += f" • {roles_text}"
-    
-        line = f"**{display}**{handle_part}\n*{details}*"
-    
-        rank_l = rank.lower()
-        roles_l = roles_text.lower()
-    
-        if "founder" in roles_l or "master" in rank_l:
-            groups["👑 Leadership"].append(line)
-        elif "officer" in roles_l or "recruitment" in roles_l or "branding" in roles_l:
-            groups["🛡️ Staff"].append(line)
-        elif "regular" in rank_l or "member" in rank_l:
-            groups["👥 Members"].append(line)
-        else:
-            groups["📦 Other"].append(line)
-    
-    for group_name, group_members in groups.items():
-        if not group_members:
-            continue
-    
-        embed.add_field(
-            name=f"{group_name} · {len(group_members)}",
-            value="\n\n".join(group_members[:15]),
-            inline=False
-        )
+       groups = {
+            "👑 Leadership": [],
+            "🛡️ Staff": [],
+            "👥 Members": [],
+            "📦 Other": [],
+        }
+        
+        for member in members:
+            display = str(member.get("display") or member.get("handle") or "Unknown").strip()
+            handle = str(member.get("handle") or "").strip()
+            rank = str(member.get("rank") or "—").strip()
+        
+            roles = member.get("roles") or []
+            cleaned_roles = [
+                str(r).strip()
+                for r in roles
+                if str(r).strip()
+            ] if isinstance(roles, list) else []
+        
+            roles_text = ", ".join(cleaned_roles)
+        
+            handle_part = ""
+            if handle and handle.lower() != display.lower():
+                handle_part = f" `@{handle}`"
+        
+            details = rank
+            if roles_text:
+                details += f" • {roles_text}"
+        
+            line = f"**{display}**{handle_part}\n*{details}*"
+        
+            rank_l = rank.lower()
+            roles_l = roles_text.lower()
+        
+            if "founder" in roles_l or "master" in rank_l:
+                groups["👑 Leadership"].append(line)
+            elif "officer" in roles_l or "recruitment" in roles_l or "branding" in roles_l:
+                groups["🛡️ Staff"].append(line)
+            elif "regular" in rank_l or "member" in rank_l:
+                groups["👥 Members"].append(line)
+            else:
+                groups["📦 Other"].append(line)
+        
+        for group_name, group_members in groups.items():
+            if not group_members:
+                continue
+        
+            embed.add_field(
+                name=f"{group_name} · {len(group_members)}",
+                value="\n\n".join(group_members[:15]),
+                inline=False
+            )
 
     embed.set_footer(text="Star Citizen — Organisation Members")
     return embed
