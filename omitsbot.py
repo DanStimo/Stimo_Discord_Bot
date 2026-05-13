@@ -2319,17 +2319,45 @@ async def fetch_ship_from_scapi(ship_name: str) -> dict | None:
             print(f"[SCAPI] ship search '{name}' -> {r.status_code}")
 
             if r.status_code != 200:
-                print(f"[SCAPI] body: {r.text[:300]}")
+                print(f"[SCAPI] body: {r.text[:500]}")
                 continue
 
             payload = r.json()
-            data = payload.get("data") if isinstance(payload, dict) else None
 
+            print("[SCAPI] payload keys:", list(payload.keys()) if isinstance(payload, dict) else type(payload))
+
+            data = payload.get("data") if isinstance(payload, dict) else payload
+
+            # Shape 1: data is directly a list
             if isinstance(data, list) and data:
+                print(f"[SCAPI] found list result for {name}")
                 return data[0]
 
+            # Shape 2: data is a dict containing ships
             if isinstance(data, dict):
-                return data
+                print("[SCAPI] data keys:", list(data.keys()))
+
+                for key in ("ships", "results", "items", "data"):
+                    nested = data.get(key)
+                    if isinstance(nested, list) and nested:
+                        print(f"[SCAPI] found nested list result in data['{key}']")
+                        return nested[0]
+
+                # Shape 3: data itself is the ship
+                if data.get("name") or data.get("id") or data.get("description"):
+                    print(f"[SCAPI] found direct dict result for {name}")
+                    return data
+
+            # Shape 4: whole payload contains ships/results/items
+            if isinstance(payload, dict):
+                for key in ("ships", "results", "items"):
+                    nested = payload.get(key)
+                    if isinstance(nested, list) and nested:
+                        print(f"[SCAPI] found payload['{key}'] result for {name}")
+                        return nested[0]
+
+            print(f"[SCAPI] no usable ship data found for '{name}'")
+            print(f"[SCAPI] body preview: {r.text[:700]}")
 
         except Exception as e:
             print(f"[SCAPI] fetch_ship_from_scapi failed for {name}: {e}")
