@@ -2582,12 +2582,62 @@ async def fetch_org_members_scapi(org_sid: str, max_pages: int = 10) -> list[dic
 
     return members
 
+RANK_ORDER = {
+    "founder": 1,
+    "director": 2,
+    "leader": 3,
+    "officer": 4,
+    "recruitment": 5,
+    "member": 6,
+    "regular": 7,
+    "affiliate": 8,
+    "recruit": 9,
+}
+
+def member_rank_priority(member: dict):
+    rank = str(member.get("rank") or "").lower()
+
+    roles = member.get("roles") or []
+    roles_text = " ".join(str(r).lower() for r in roles)
+
+    best = 999
+
+    for key, value in RANK_ORDER.items():
+        if key in rank:
+            best = min(best, value)
+
+        if key in roles_text:
+            best = min(best, value)
+
+    display = str(member.get("display") or member.get("handle") or "").lower()
+
+    return (best, display)
+
 def build_members_embed(org_sid: str, members: list[dict]) -> discord.Embed:
     embed = discord.Embed(
         title=f"👥 {org_sid.upper()} Members",
         description=f"Current organisation members found: **{len(members)}**",
         color=0x5865F2
     )
+
+    org_logo = None
+
+    for member in members:
+        logo = (
+            member.get("organization_image")
+            or member.get("org_logo")
+            or member.get("organization_logo")
+        )
+    
+        if logo:
+            org_logo = str(logo)
+            break
+    
+    if org_logo:
+        if org_logo.startswith("/"):
+            org_logo = "https://robertsspaceindustries.com" + org_logo
+    
+        embed.set_thumbnail(url=org_logo)
 
     if not members:
         embed.add_field(name="Members", value="No members found.", inline=False)
@@ -2596,7 +2646,7 @@ def build_members_embed(org_sid: str, members: list[dict]) -> discord.Embed:
 
     sorted_members = sorted(
         members,
-        key=lambda m: str(m.get("handle") or m.get("display") or "").lower()
+        key=member_rank_priority
     )
 
     lines = []
@@ -2629,14 +2679,6 @@ def build_members_embed(org_sid: str, members: list[dict]) -> discord.Embed:
             value=f"Showing first 25 of {len(members)} members.",
             inline=False
         )
-
-    first_image = next(
-        (m.get("image") for m in sorted_members if m.get("image")),
-        None
-    )
-
-    if first_image:
-        embed.set_thumbnail(url=first_image)
 
     embed.set_footer(text="Star Citizen — Organisation Members")
     return embed
