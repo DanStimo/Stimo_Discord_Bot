@@ -2421,9 +2421,6 @@ def build_ship_embed(ship: dict) -> discord.Embed:
         "Unknown Ship"
     )
 
-    print(f"[SHIP DEBUG] {ship_name} keys:")
-    print(list(ship.keys()))
-
     description = ship_text(
         ship.get("description")
         or ship.get("short_description")
@@ -2461,47 +2458,46 @@ def build_ship_embed(ship: dict) -> discord.Embed:
         or _ship_scu(ship)
     )
 
-    crew_min = ship_text(
-    ship.get("min_crew")
-    or ship.get("crew_min")
-    or ship.get("crew")
-    or ship.get("minCrew")
-    )
+    crew_data = ship.get("crew") or {}
+
+    if isinstance(crew_data, dict):
+        crew_min = ship_text(crew_data.get("min"))
+        crew_max = ship_text(crew_data.get("max"))
+    else:
+        crew_min = ship_text(crew_data)
+        crew_max = ship_text(crew_data)
     
-    crew_max = ship_text(
-        ship.get("max_crew")
-        or ship.get("crew_max")
-        or ship.get("crew")
-        or ship.get("maxCrew")
-    )
-
     crew = crew_min if crew_min == crew_max else f"{crew_min} - {crew_max}"
-
+    
+    foci = ship.get("foci") or []
+    
+    if isinstance(foci, list) and foci:
+        focus = ", ".join(ship_text(f) for f in foci)
+    else:
+        focus = ship_text(ship.get("focus") or ship.get("role"))
+    
     embed.add_field(name="Manufacturer", value=manufacturer, inline=True)
-    embed.add_field(name="Focus", value=ship_text(ship.get("focus") or ship.get("role")), inline=True)
+    embed.add_field(name="Focus", value=focus, inline=True)
     embed.add_field(name="Type", value=ship_text(ship.get("type")), inline=True)
-
+    
     embed.add_field(name="Size", value=ship_text(ship.get("size")).title(), inline=True)
     embed.add_field(name="Crew", value=crew, inline=True)
     embed.add_field(name="Cargo", value=f"{cargo} SCU" if cargo not in (None, "", "—") else "—", inline=True)
-
-    length = (
-    ship.get("length")
-    or ship.get("lengths")
-    or ship.get("size_length")
-    or ship.get("vehicle_length")
-    )
+    
+    dimension = ship.get("dimension") or {}
+    
+    if isinstance(dimension, dict):
+        length = dimension.get("length")
+    else:
+        length = ship.get("length")
     
     embed.add_field(
         name="Length",
         value=f"{ship_text(length)} m",
         inline=True
     )
-    mass = (
-    ship.get("mass")
-    or ship.get("vehicle_mass")
-    or ship.get("weight")
-    )
+    
+    mass = ship.get("mass")
     
     embed.add_field(
         name="Mass",
