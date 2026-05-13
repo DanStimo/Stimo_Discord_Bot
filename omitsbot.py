@@ -2704,15 +2704,15 @@ def build_members_embed(org_sid: str, members: list[dict], org_info: dict | None
     "Officers / Recruitment": "🛡️ Officers / Recruitment",
     "Regular Members": "👥 Regular Members",
     "Other": "📦 Other",
-}
-
-for group_name, group_members in groups.items():
-    if group_members:
-        embed.add_field(
-            name=SECTION_STYLES.get(group_name, group_name),
-            value="\n\n".join(group_members[:15]),
-            inline=False
-        )
+    }
+    
+    for group_name, group_members in groups.items():
+        if group_members:
+            embed.add_field(
+                name=SECTION_STYLES.get(group_name, group_name),
+                value="\n\n".join(group_members[:15]),
+                inline=False
+            )
 
     embed.set_footer(text="Star Citizen — Organisation Members")
     return embed
