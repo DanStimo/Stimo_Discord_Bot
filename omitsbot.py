@@ -7724,6 +7724,7 @@ async def on_ready():
         lineups_store  = await db_load_json(LINEUPS_FILE,  {"next_id": 1, "lineups": {}})
         print("🗄️ Loaded stores from Postgres.")
     except Exception as e:
+        print(f"[ERROR] Postgres init/load failed: {e}")
         # (Optional) raise here if persistence is required
         # raise
         # --- command sync for multiple guilds ---
