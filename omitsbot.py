@@ -2024,7 +2024,7 @@ def _ship_scu(ship: dict) -> int:
     except Exception:
         return 0
 
-async def search_ships_scwiki(query: str) -> list[dict]:
+async def search_ships_scwiki(query: str, cargo_only: bool = False) -> list[dict]:
     ships = await get_all_ships_scwiki()
     if not isinstance(ships, list):
         return []
@@ -2045,10 +2045,15 @@ async def search_ships_scwiki(query: str) -> list[dict]:
     def ship_id(ship: dict) -> str:
         return str(ship.get("uuid") or ship.get("id") or ship.get("slug") or _ship_display_name(ship))
 
+    def usable(ship: dict) -> bool:
+        return True if not cargo_only else _ship_scu(ship) > 0
+
     def dedupe(ship_list: list[dict]) -> list[dict]:
         seen = set()
         out = []
         for ship in ship_list:
+            if not usable(ship):
+                continue
             sid = ship_id(ship)
             if sid in seen:
                 continue
@@ -2056,7 +2061,6 @@ async def search_ships_scwiki(query: str) -> list[dict]:
             out.append(ship)
         return out
 
-    # match first, filter usable SCU later
     exact = []
     token_matches = []
     partial = []
@@ -2085,23 +2089,25 @@ async def search_ships_scwiki(query: str) -> list[dict]:
         if any(q_norm in n for n in norm_names):
             partial.append(ship)
 
-    exact = [s for s in dedupe(exact) if _ship_scu(s) > 0]
+    exact = dedupe(exact)
     if exact:
         return exact[:25]
 
-    token_matches = [s for s in dedupe(token_matches) if _ship_scu(s) > 0]
+    token_matches = dedupe(token_matches)
     if token_matches:
         return token_matches[:25]
 
-    partial = [s for s in dedupe(partial) if _ship_scu(s) > 0]
+    partial = dedupe(partial)
     if partial:
         return partial[:25]
 
-    # fuzzy fallback only if direct matching found nothing
     choices = []
     choice_to_ship = {}
 
     for ship in ships:
+        if not usable(ship):
+            continue
+
         for name in ship_names(ship):
             if not name:
                 continue
@@ -2118,10 +2124,8 @@ async def search_ships_scwiki(query: str) -> list[dict]:
             continue
 
         ship = choice_to_ship[matched_name]
-        if _ship_scu(ship) <= 0:
-            continue
-
         sid = ship_id(ship)
+
         if sid in seen:
             continue
 
@@ -2129,7 +2133,6 @@ async def search_ships_scwiki(query: str) -> list[dict]:
         results.append(ship)
 
     return results[:25]
-
 async def ship_autocomplete(
     interaction: discord.Interaction,
     current: str
@@ -2137,9 +2140,6 @@ async def ship_autocomplete(
     if not current or not current.strip():
         return []
 
-    # IMPORTANT:
-    # Never do slow API loading inside autocomplete.
-    # Only use already-cached ship data.
     global _ship_cache
     ships = _ship_cache or []
 
@@ -2160,9 +2160,6 @@ async def ship_autocomplete(
     matches = []
 
     for ship in ships:
-        if _ship_scu(ship) <= 0:
-            continue
-
         names = ship_names(ship)
         norm_names = [_normalize_sc_name(n) for n in names if n]
 
@@ -2170,14 +2167,10 @@ async def ship_autocomplete(
             matches.append(ship)
 
     if not matches:
-        # light fuzzy fallback, but only against cached data
         choices_pool = []
         choice_to_ship = {}
 
         for ship in ships:
-            if _ship_scu(ship) <= 0:
-                continue
-
             for n in ship_names(ship):
                 if not n:
                     continue
@@ -2193,8 +2186,10 @@ async def ship_autocomplete(
 
             ship = choice_to_ship[matched_name]
             sid = str(ship.get("uuid") or ship.get("id") or ship.get("slug") or _ship_display_name(ship))
+
             if sid in seen:
                 continue
+
             seen.add(sid)
             matches.append(ship)
 
@@ -2211,11 +2206,14 @@ async def ship_autocomplete(
         key = ship_name.lower().strip()
         if key in seen_names:
             continue
+
         seen_names.add(key)
+
+        label = f"{ship_name} ({ship_scu} SCU)" if ship_scu > 0 else ship_name
 
         choices.append(
             app_commands.Choice(
-                name=f"{ship_name} ({ship_scu} SCU)"[:100],
+                name=label[:100],
                 value=ship_name[:100]
             )
         )
@@ -2282,44 +2280,62 @@ def _manufacturer_name(ship: dict) -> str:
 
 
 async def fetch_ship_from_scapi(ship_name: str) -> dict | None:
-    """
-    Fetch one ship from StarCitizen-API by name.
-    """
     if not STARCITIZEN_API_KEY:
         raise RuntimeError("STARCITIZEN_API_KEY is missing from .env")
 
     url = f"{SCAPI_BASE}/{STARCITIZEN_API_KEY}/v1/{SCAPI_MODE}/ships"
 
-    try:
-        r = await _client_scapi.get(
-            url,
-            params={
-                "name": ship_name,
-                "page_max": 1,
-            }
-        )
+    search_names = [
+        ship_name,
+        ship_name.replace("RSI ", ""),
+        ship_name.replace("Aegis ", ""),
+        ship_name.replace("Crusader ", ""),
+        ship_name.replace("Drake ", ""),
+        ship_name.replace("Anvil ", ""),
+        ship_name.replace("Origin ", ""),
+        ship_name.replace("MISC ", ""),
+        ship_name.replace("Argo ", ""),
+        ship_name.replace("ARGO ", ""),
+    ]
 
-        if r.status_code != 200:
-            print(f"[SCAPI] {r.status_code} {url} :: {r.text[:300]}")
-            return None
+    seen = set()
 
-        payload = r.json()
+    for name in search_names:
+        name = name.strip()
+        if not name or name.lower() in seen:
+            continue
 
-        data = payload.get("data") if isinstance(payload, dict) else None
+        seen.add(name.lower())
 
-        if isinstance(data, list) and data:
-            return data[0]
+        try:
+            r = await _client_scapi.get(
+                url,
+                params={
+                    "name": name,
+                    "page_max": 1,
+                }
+            )
 
-        if isinstance(data, dict):
-            return data
+            print(f"[SCAPI] ship search '{name}' -> {r.status_code}")
 
-        return None
+            if r.status_code != 200:
+                print(f"[SCAPI] body: {r.text[:300]}")
+                continue
 
-    except Exception as e:
-        print(f"[SCAPI] fetch_ship_from_scapi failed for {ship_name}: {e}")
-        return None
+            payload = r.json()
+            data = payload.get("data") if isinstance(payload, dict) else None
 
+            if isinstance(data, list) and data:
+                return data[0]
 
+            if isinstance(data, dict):
+                return data
+
+        except Exception as e:
+            print(f"[SCAPI] fetch_ship_from_scapi failed for {name}: {e}")
+
+    return None
+    
 def build_ship_embed(ship: dict) -> discord.Embed:
     ship_name = _safe_ship_value(ship.get("name"), "Unknown Ship")
     description = _safe_ship_value(ship.get("description"), "No description available.")
@@ -6256,7 +6272,7 @@ async def route_command(
         selected_system = system_filter.value if system_filter else None
 
         if ship:
-            ship_matches = await search_ships_scwiki(ship)
+            ship_matches = await search_ships_scwiki(ship, cargo_only=True)
 
             if not ship_matches:
                 await send_temp_followup(interaction, content="No matching ships found.", ephemeral=True)
@@ -6572,7 +6588,7 @@ async def cargo_command(
         selected_system = system_filter.value if system_filter else None
 
         if ship:
-            ship_matches = await search_ships_scwiki(ship)
+            ship_matches = await search_ships_scwiki(ship, cargo_only=True)
 
             if not ship_matches:
                 await send_temp_followup(
@@ -6739,7 +6755,7 @@ async def bestnow_command(
         resolved_scu = int(scu) if scu is not None else None
 
         if ship:
-            ship_matches = await search_ships_scwiki(ship)
+            ship_matches = await search_ships_scwiki(ship, cargo_only=True)
 
             if not ship_matches:
                 await send_temp_followup(
