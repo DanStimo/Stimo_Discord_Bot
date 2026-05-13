@@ -7768,7 +7768,6 @@ async def on_ready():
     print(f"Bot is ready as {client.user}")
     await warm_ea_session()
     asyncio.create_task(warm_scwiki_ship_cache())
-    asyncio.create_task(get_all_scapi_ships())
     
     # Run background tasks once (avoid duplicates on reconnect)
     if not getattr(client, "background_started", False):
