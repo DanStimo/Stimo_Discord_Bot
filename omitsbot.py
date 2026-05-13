@@ -2071,6 +2071,20 @@ def _ship_scu(ship: dict) -> int:
     except Exception:
         return 0
 
+def ship_text(value, default="—"):
+    if value in (None, "", [], {}):
+        return default
+
+    if isinstance(value, dict):
+        return (
+            value.get("en_EN")
+            or value.get("en")
+            or value.get("en_US")
+            or next((v for v in value.values() if isinstance(v, str) and v.strip()), default)
+        )
+
+    return str(value)
+
 async def search_ships_scwiki(query: str, cargo_only: bool = False) -> list[dict]:
     ships = await get_all_ships_scwiki()
     if not isinstance(ships, list):
@@ -2399,27 +2413,27 @@ async def fetch_ship_from_scapi(ship_name: str) -> dict | None:
     return None
     
 def build_ship_embed(ship: dict) -> discord.Embed:
-    ship_name = (
+    ship_name = ship_text(
         ship.get("name")
         or ship.get("game_name")
         or ship.get("shipmatrix_name")
-        or ship.get("slug")
-        or "Unknown Ship"
+        or ship.get("slug"),
+        "Unknown Ship"
     )
 
-    description = (
+    description = ship_text(
         ship.get("description")
         or ship.get("short_description")
-        or ship.get("excerpt")
-        or "No description available."
+        or ship.get("excerpt"),
+        "No description available."
     )
 
-    if len(str(description)) > 350:
-        description = str(description)[:347] + "..."
+    if len(description) > 350:
+        description = description[:347] + "..."
 
     embed = discord.Embed(
         title=f"🚀 {ship_name}",
-        description=str(description),
+        description=description,
         color=0x5865F2
     )
 
@@ -2427,15 +2441,15 @@ def build_ship_embed(ship: dict) -> discord.Embed:
     if image_url:
         embed.set_thumbnail(url=image_url)
 
-    manufacturer = (
-        ship.get("manufacturer_name")
-        or ship.get("manufacturer")
-        or ship.get("manufacturer_code")
-        or "—"
-    )
-
+    manufacturer = ship.get("manufacturer")
     if isinstance(manufacturer, dict):
-        manufacturer = manufacturer.get("name") or manufacturer.get("code") or "—"
+        manufacturer = ship_text(manufacturer.get("name") or manufacturer)
+    else:
+        manufacturer = ship_text(
+            ship.get("manufacturer_name")
+            or ship.get("manufacturer")
+            or ship.get("manufacturer_code")
+        )
 
     cargo = (
         ship.get("cargocapacity")
@@ -2444,25 +2458,22 @@ def build_ship_embed(ship: dict) -> discord.Embed:
         or _ship_scu(ship)
     )
 
-    crew_min = ship.get("min_crew") or ship.get("crew_min") or "—"
-    crew_max = ship.get("max_crew") or ship.get("crew_max") or "—"
+    crew_min = ship_text(ship.get("min_crew") or ship.get("crew_min"))
+    crew_max = ship_text(ship.get("max_crew") or ship.get("crew_max"))
 
-    if crew_min == crew_max:
-        crew = str(crew_min)
-    else:
-        crew = f"{crew_min} - {crew_max}"
+    crew = crew_min if crew_min == crew_max else f"{crew_min} - {crew_max}"
 
-    embed.add_field(name="Manufacturer", value=str(manufacturer), inline=True)
-    embed.add_field(name="Focus", value=str(ship.get("focus") or ship.get("role") or "—"), inline=True)
-    embed.add_field(name="Type", value=str(ship.get("type") or "—"), inline=True)
+    embed.add_field(name="Manufacturer", value=manufacturer, inline=True)
+    embed.add_field(name="Focus", value=ship_text(ship.get("focus") or ship.get("role")), inline=True)
+    embed.add_field(name="Type", value=ship_text(ship.get("type")), inline=True)
 
-    embed.add_field(name="Size", value=str(ship.get("size") or "—").title(), inline=True)
+    embed.add_field(name="Size", value=ship_text(ship.get("size")).title(), inline=True)
     embed.add_field(name="Crew", value=crew, inline=True)
     embed.add_field(name="Cargo", value=f"{cargo} SCU" if cargo not in (None, "", "—") else "—", inline=True)
 
-    embed.add_field(name="Length", value=f"{ship.get('length') or '—'} m", inline=True)
-    embed.add_field(name="Mass", value=f"{ship.get('mass') or '—'} kg", inline=True)
-    embed.add_field(name="Status", value=str(ship.get("production_status") or ship.get("status") or "—").title(), inline=True)
+    embed.add_field(name="Length", value=f"{ship_text(ship.get('length'))} m", inline=True)
+    embed.add_field(name="Mass", value=f"{ship_text(ship.get('mass'))} kg", inline=True)
+    embed.add_field(name="Status", value=ship_text(ship.get("production_status") or ship.get("status")).title(), inline=True)
 
     embed.set_footer(text="Star Citizen — Ship Data")
     return embed
