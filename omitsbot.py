@@ -2414,14 +2414,17 @@ async def fetch_ship_from_scapi(ship_name: str) -> dict | None:
     
 def build_ship_embed(ship: dict) -> discord.Embed:
     ship_name = ship_text(
-        print(f"[SHIP DEBUG] {ship_name} keys:")
-        print(list(ship.keys()))
         ship.get("name")
         or ship.get("game_name")
         or ship.get("shipmatrix_name")
         or ship.get("slug"),
         "Unknown Ship"
     )
+
+    print(f"[SHIP DEBUG] {ship_name} keys:")
+    print(list(ship.keys()))
+
+    description = ship_text(
 
     description = ship_text(
         ship.get("description")
