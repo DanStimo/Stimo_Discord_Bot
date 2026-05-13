@@ -2399,15 +2399,27 @@ async def fetch_ship_from_scapi(ship_name: str) -> dict | None:
     return None
     
 def build_ship_embed(ship: dict) -> discord.Embed:
-    ship_name = _safe_ship_value(ship.get("name"), "Unknown Ship")
-    description = _safe_ship_value(ship.get("description"), "No description available.")
+    ship_name = (
+        ship.get("name")
+        or ship.get("game_name")
+        or ship.get("shipmatrix_name")
+        or ship.get("slug")
+        or "Unknown Ship"
+    )
 
-    if len(description) > 350:
-        description = description[:347] + "..."
+    description = (
+        ship.get("description")
+        or ship.get("short_description")
+        or ship.get("excerpt")
+        or "No description available."
+    )
+
+    if len(str(description)) > 350:
+        description = str(description)[:347] + "..."
 
     embed = discord.Embed(
         title=f"🚀 {ship_name}",
-        description=description,
+        description=str(description),
         color=0x5865F2
     )
 
@@ -2415,48 +2427,44 @@ def build_ship_embed(ship: dict) -> discord.Embed:
     if image_url:
         embed.set_thumbnail(url=image_url)
 
-    manufacturer = _manufacturer_name(ship)
+    manufacturer = (
+        ship.get("manufacturer_name")
+        or ship.get("manufacturer")
+        or ship.get("manufacturer_code")
+        or "—"
+    )
 
-    crew_min = _safe_ship_value(ship.get("min_crew"))
-    crew_max = _safe_ship_value(ship.get("max_crew"))
-    crew = crew_min if crew_min == crew_max else f"{crew_min} - {crew_max}"
+    if isinstance(manufacturer, dict):
+        manufacturer = manufacturer.get("name") or manufacturer.get("code") or "—"
 
-    cargo = _safe_ship_value(
+    cargo = (
         ship.get("cargocapacity")
         or ship.get("cargo_capacity")
         or ship.get("scu")
+        or _ship_scu(ship)
     )
 
-    price = ship.get("price")
-    if price not in (None, "", "—"):
-        price = f"${price}m"
+    crew_min = ship.get("min_crew") or ship.get("crew_min") or "—"
+    crew_max = ship.get("max_crew") or ship.get("crew_max") or "—"
+
+    if crew_min == crew_max:
+        crew = str(crew_min)
     else:
-        price = "—"
+        crew = f"{crew_min} - {crew_max}"
 
-    embed.add_field(name="Manufacturer", value=manufacturer, inline=True)
-    embed.add_field(name="Focus", value=_safe_ship_value(ship.get("focus")), inline=True)
-    embed.add_field(name="Type", value=_safe_ship_value(ship.get("type")), inline=True)
+    embed.add_field(name="Manufacturer", value=str(manufacturer), inline=True)
+    embed.add_field(name="Focus", value=str(ship.get("focus") or ship.get("role") or "—"), inline=True)
+    embed.add_field(name="Type", value=str(ship.get("type") or "—"), inline=True)
 
-    embed.add_field(name="Size", value=_safe_ship_value(ship.get("size")).title(), inline=True)
+    embed.add_field(name="Size", value=str(ship.get("size") or "—").title(), inline=True)
     embed.add_field(name="Crew", value=crew, inline=True)
-    embed.add_field(name="Cargo", value=f"{cargo} SCU" if cargo != "—" else "—", inline=True)
+    embed.add_field(name="Cargo", value=f"{cargo} SCU" if cargo not in (None, "", "—") else "—", inline=True)
 
-    embed.add_field(name="Length", value=f"{_safe_ship_value(ship.get('length'))} m", inline=True)
-    embed.add_field(name="Mass", value=f"{_safe_ship_value(ship.get('mass'))} kg", inline=True)
-    embed.add_field(name="Pledge Price", value=price, inline=True)
+    embed.add_field(name="Length", value=f"{ship.get('length') or '—'} m", inline=True)
+    embed.add_field(name="Mass", value=f"{ship.get('mass') or '—'} kg", inline=True)
+    embed.add_field(name="Status", value=str(ship.get("production_status") or ship.get("status") or "—").title(), inline=True)
 
-    embed.add_field(name="SCM Speed", value=_safe_ship_value(ship.get("scm_speed")), inline=True)
-    embed.add_field(name="Afterburner", value=_safe_ship_value(ship.get("afterburner_speed")), inline=True)
-    embed.add_field(name="Status", value=_safe_ship_value(ship.get("production_status")).title(), inline=True)
-
-    ship_url = ship.get("url")
-    if ship_url:
-        ship_url = str(ship_url)
-        if ship_url.startswith("/"):
-            ship_url = "https://robertsspaceindustries.com" + ship_url
-        embed.add_field(name="RSI Page", value=f"[Open ship page]({ship_url})", inline=False)
-
-    embed.set_footer(text="Star Citizen — StarCitizen-API")
+    embed.set_footer(text="Star Citizen — Ship Data")
     return embed
 
 async def build_commodity_embed(
@@ -6556,7 +6564,7 @@ async def besttrade_command(interaction: discord.Interaction):
 
 @tree.command(name="ship", description="Show Star Citizen ship information.")
 @app_commands.describe(
-    name="Ship name, e.g. C2 Hercules, Vulture, Prospector"
+    name="Ship name, e.g. C2 Hercules, Vulture, Prospector, Perseus"
 )
 async def ship_command(
     interaction: discord.Interaction,
@@ -6565,7 +6573,6 @@ async def ship_command(
     await interaction.response.defer()
 
     try:
-        # Reuse your existing ship search/autocomplete source
         ship_matches = await search_ships_scwiki(name)
 
         if not ship_matches:
@@ -6579,31 +6586,18 @@ async def ship_command(
         chosen_ship = ship_matches[0]
         resolved_name = _ship_display_name(chosen_ship)
 
+        # Try StarCitizen-API first
         ship_data = await fetch_ship_from_scapi(resolved_name)
 
-        # Fallback: try the user's typed name if the resolved autocomplete name fails
+        # If StarCitizen-API returns nothing, use your existing SCWiki ship data
         if not ship_data:
-            ship_data = await fetch_ship_from_scapi(name)
-
-        if not ship_data:
-            await send_temp_followup(
-                interaction,
-                content=f"Could not fetch ship data for **{resolved_name}**.",
-                ephemeral=True
-            )
-            return
+            print(f"[SHIP] SCAPI had no data for {resolved_name}; using SCWIKI fallback")
+            ship_data = chosen_ship
 
         embed = build_ship_embed(ship_data)
 
         msg = await send_temp_followup(interaction, embed=embed)
         await log_star_command_usage(interaction, "ship", message=msg)
-
-    except RuntimeError as e:
-        await send_temp_followup(
-            interaction,
-            content=f"❌ {e}",
-            ephemeral=True
-        )
 
     except Exception as e:
         print(f"[ERROR] /ship failed: {e}")
