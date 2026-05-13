@@ -1718,6 +1718,19 @@ _client_uex = httpx.AsyncClient(
     follow_redirects=True,
 )
 
+STARCITIZEN_API_KEY = os.getenv("STARCITIZEN_API_KEY", "").strip()
+SCAPI_MODE = os.getenv("SCAPI_MODE", "cache").strip() or "cache"
+SCAPI_BASE = "https://api.starcitizen-api.com"
+
+_client_scapi = httpx.AsyncClient(
+    timeout=25,
+    follow_redirects=True,
+    headers={
+        "Accept": "application/json",
+        "User-Agent": "Phonics Discord Bot"
+    }
+)
+
 async def _uex_get(resource: str, params: dict | None = None, retries: int = 3):
     if not UEX_API_KEY:
         raise RuntimeError("UEX_API_KEY is missing.")
@@ -2208,6 +2221,165 @@ async def ship_autocomplete(
         )
 
     return choices
+
+def _safe_ship_value(value, default="—"):
+    if value in (None, "", [], {}):
+        return default
+    return str(value)
+
+
+def _first_ship_image(ship: dict) -> str | None:
+    """
+    Try to find a usable ship image from StarCitizen-API's media field.
+    """
+    media = ship.get("media") or []
+
+    if isinstance(media, list):
+        for item in media:
+            if not isinstance(item, dict):
+                continue
+
+            # Common possible shapes
+            url = (
+                item.get("source")
+                or item.get("large")
+                or item.get("thumbnail")
+                or item.get("url")
+            )
+
+            # Sometimes URLs are nested
+            urls = item.get("urls")
+            if not url and isinstance(urls, dict):
+                url = (
+                    urls.get("source")
+                    or urls.get("large")
+                    or urls.get("rect")
+                    or urls.get("square")
+                )
+
+            if url:
+                url = str(url)
+                if url.startswith("//"):
+                    return "https:" + url
+                if url.startswith("/"):
+                    return "https://robertsspaceindustries.com" + url
+                return url
+
+    return None
+
+
+def _manufacturer_name(ship: dict) -> str:
+    manufacturer = ship.get("manufacturer")
+
+    if isinstance(manufacturer, dict):
+        return (
+            manufacturer.get("name")
+            or manufacturer.get("code")
+            or str(ship.get("manufacturer_id") or "—")
+        )
+
+    return str(manufacturer or ship.get("manufacturer_id") or "—")
+
+
+async def fetch_ship_from_scapi(ship_name: str) -> dict | None:
+    """
+    Fetch one ship from StarCitizen-API by name.
+    """
+    if not STARCITIZEN_API_KEY:
+        raise RuntimeError("STARCITIZEN_API_KEY is missing from .env")
+
+    url = f"{SCAPI_BASE}/{STARCITIZEN_API_KEY}/v1/{SCAPI_MODE}/ships"
+
+    try:
+        r = await _client_scapi.get(
+            url,
+            params={
+                "name": ship_name,
+                "page_max": 1,
+            }
+        )
+
+        if r.status_code != 200:
+            print(f"[SCAPI] {r.status_code} {url} :: {r.text[:300]}")
+            return None
+
+        payload = r.json()
+
+        data = payload.get("data") if isinstance(payload, dict) else None
+
+        if isinstance(data, list) and data:
+            return data[0]
+
+        if isinstance(data, dict):
+            return data
+
+        return None
+
+    except Exception as e:
+        print(f"[SCAPI] fetch_ship_from_scapi failed for {ship_name}: {e}")
+        return None
+
+
+def build_ship_embed(ship: dict) -> discord.Embed:
+    ship_name = _safe_ship_value(ship.get("name"), "Unknown Ship")
+    description = _safe_ship_value(ship.get("description"), "No description available.")
+
+    if len(description) > 350:
+        description = description[:347] + "..."
+
+    embed = discord.Embed(
+        title=f"🚀 {ship_name}",
+        description=description,
+        color=0x5865F2
+    )
+
+    image_url = _first_ship_image(ship)
+    if image_url:
+        embed.set_thumbnail(url=image_url)
+
+    manufacturer = _manufacturer_name(ship)
+
+    crew_min = _safe_ship_value(ship.get("min_crew"))
+    crew_max = _safe_ship_value(ship.get("max_crew"))
+    crew = crew_min if crew_min == crew_max else f"{crew_min} - {crew_max}"
+
+    cargo = _safe_ship_value(
+        ship.get("cargocapacity")
+        or ship.get("cargo_capacity")
+        or ship.get("scu")
+    )
+
+    price = ship.get("price")
+    if price not in (None, "", "—"):
+        price = f"${price}m"
+    else:
+        price = "—"
+
+    embed.add_field(name="Manufacturer", value=manufacturer, inline=True)
+    embed.add_field(name="Focus", value=_safe_ship_value(ship.get("focus")), inline=True)
+    embed.add_field(name="Type", value=_safe_ship_value(ship.get("type")), inline=True)
+
+    embed.add_field(name="Size", value=_safe_ship_value(ship.get("size")).title(), inline=True)
+    embed.add_field(name="Crew", value=crew, inline=True)
+    embed.add_field(name="Cargo", value=f"{cargo} SCU" if cargo != "—" else "—", inline=True)
+
+    embed.add_field(name="Length", value=f"{_safe_ship_value(ship.get('length'))} m", inline=True)
+    embed.add_field(name="Mass", value=f"{_safe_ship_value(ship.get('mass'))} kg", inline=True)
+    embed.add_field(name="Pledge Price", value=price, inline=True)
+
+    embed.add_field(name="SCM Speed", value=_safe_ship_value(ship.get("scm_speed")), inline=True)
+    embed.add_field(name="Afterburner", value=_safe_ship_value(ship.get("afterburner_speed")), inline=True)
+    embed.add_field(name="Status", value=_safe_ship_value(ship.get("production_status")).title(), inline=True)
+
+    ship_url = ship.get("url")
+    if ship_url:
+        ship_url = str(ship_url)
+        if ship_url.startswith("/"):
+            ship_url = "https://robertsspaceindustries.com" + ship_url
+        embed.add_field(name="RSI Page", value=f"[Open ship page]({ship_url})", inline=False)
+
+    embed.set_footer(text="Star Citizen — StarCitizen-API")
+    return embed
 
 async def build_commodity_embed(
     commodity: dict,
@@ -6303,6 +6475,73 @@ async def besttrade_command(interaction: discord.Interaction):
             content="Error fetching trade routes.",
             ephemeral=True
         )
+
+@tree.command(name="ship", description="Show Star Citizen ship information.")
+@app_commands.describe(
+    name="Ship name, e.g. C2 Hercules, Vulture, Prospector"
+)
+async def ship_command(
+    interaction: discord.Interaction,
+    name: str
+):
+    await interaction.response.defer()
+
+    try:
+        # Reuse your existing ship search/autocomplete source
+        ship_matches = await search_ships_scwiki(name)
+
+        if not ship_matches:
+            await send_temp_followup(
+                interaction,
+                content="No matching ships found.",
+                ephemeral=True
+            )
+            return
+
+        chosen_ship = ship_matches[0]
+        resolved_name = _ship_display_name(chosen_ship)
+
+        ship_data = await fetch_ship_from_scapi(resolved_name)
+
+        # Fallback: try the user's typed name if the resolved autocomplete name fails
+        if not ship_data:
+            ship_data = await fetch_ship_from_scapi(name)
+
+        if not ship_data:
+            await send_temp_followup(
+                interaction,
+                content=f"Could not fetch ship data for **{resolved_name}**.",
+                ephemeral=True
+            )
+            return
+
+        embed = build_ship_embed(ship_data)
+
+        msg = await send_temp_followup(interaction, embed=embed)
+        await log_star_command_usage(interaction, "ship", message=msg)
+
+    except RuntimeError as e:
+        await send_temp_followup(
+            interaction,
+            content=f"❌ {e}",
+            ephemeral=True
+        )
+
+    except Exception as e:
+        print(f"[ERROR] /ship failed: {e}")
+        await send_temp_followup(
+            interaction,
+            content="❌ An unexpected error occurred while fetching ship data.",
+            ephemeral=True
+        )
+
+
+@ship_command.autocomplete("name")
+async def ship_name_autocomplete(
+    interaction: discord.Interaction,
+    current: str
+) -> list[app_commands.Choice[str]]:
+    return await ship_autocomplete(interaction, current)
 
 @tree.command(name="cargo", description="Calculate cargo run profit for a Star Citizen commodity.")
 @app_commands.describe(
