@@ -7472,14 +7472,16 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 async def init_db():
     """Create pool + table, and migrate data column to JSONB if needed."""
     global DB_POOL
+
     if DB_POOL:
         return
-        if not DATABASE_URL:
-            print("[INFO] DATABASE_URL not set — using local JSON storage only.")
-        else:
-            # existing Postgres init code here
+
+    if not DATABASE_URL:
+        print("[INFO] DATABASE_URL not set — using local JSON storage only.")
+        return
 
     DB_POOL = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=5)
+
     async with DB_POOL.acquire() as con:
         # 1) Ensure table exists
         await con.execute("""
@@ -7500,9 +7502,6 @@ async def init_db():
         """)
 
         if (col_type or "").lower() != "jsonb":
-            # Attempt safe conversion:
-            # - If it looks like JSON already, cast it
-            # - Otherwise wrap the old text as a JSON string
             await con.execute("""
             ALTER TABLE app_store
             ALTER COLUMN data TYPE JSONB USING
@@ -7512,6 +7511,7 @@ async def init_db():
                 ELSE to_jsonb(data)
               END;
             """)
+
             logging.info("Migrated app_store.data to JSONB")
 
 async def db_load_json(name: str, default_obj):
