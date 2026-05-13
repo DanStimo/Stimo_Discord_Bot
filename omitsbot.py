@@ -2679,13 +2679,32 @@ def build_members_embed(org_sid: str, members: list[dict], org_info: dict | None
         rank = member.get("rank") or "—"
 
         roles = member.get("roles") or []
-        roles_text = ", ".join(str(r) for r in roles) if isinstance(roles, list) and roles else "—"
 
-        clean_line = (
-        f"**{display}**\n"
-        f"└ `{handle}` • {rank}\n"
-        f"└ {roles_text}"
-    )
+        if isinstance(roles, list):
+            cleaned_roles = [
+                str(r).strip()
+                for r in roles
+                if str(r).strip()
+            ]
+        else:
+            cleaned_roles = []
+        
+        roles_text = ", ".join(cleaned_roles)
+
+        display_clean = str(display).strip()
+        handle_clean = str(handle).strip()
+        
+        same_name = display_clean.lower() == handle_clean.lower()
+        
+        if same_name:
+            identity_line = f"└ {rank}"
+        else:
+            identity_line = f"└ `{handle_clean}` • {rank}"
+        
+        clean_line = f"**{display_clean}**\n{identity_line}"
+
+        if roles_text:
+            clean_line += f"\n└ {roles_text}"
 
         rank_l = str(rank).lower()
         roles_l = roles_text.lower()
