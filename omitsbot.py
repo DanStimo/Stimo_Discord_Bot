@@ -1751,6 +1751,7 @@ _client_uex = httpx.AsyncClient(
 STARCITIZEN_API_KEY = os.getenv("STARCITIZEN_API_KEY", "").strip()
 SCAPI_MODE = os.getenv("SCAPI_MODE", "cache").strip() or "cache"
 SCAPI_BASE = "https://api.starcitizen-api.com"
+SC_ORG_SID = os.getenv("SC_ORG_SID", "").strip()
 
 _client_scapi = httpx.AsyncClient(
     timeout=25,
@@ -2537,6 +2538,105 @@ def build_ship_embed(ship: dict) -> discord.Embed:
     embed.add_field(name="Status", value=ship_text(ship.get("production_status") or ship.get("status")).title(), inline=True)
 
     embed.set_footer(text="Star Citizen — Ship Data")
+    return embed
+
+async def fetch_org_members_scapi(org_sid: str, max_pages: int = 10) -> list[dict]:
+    if not STARCITIZEN_API_KEY:
+        raise RuntimeError("STARCITIZEN_API_KEY is missing from .env")
+
+    if not org_sid:
+        raise RuntimeError("SC_ORG_SID is missing from .env")
+
+    members = []
+
+    for page in range(1, max_pages + 1):
+        url = f"{SCAPI_BASE}/{STARCITIZEN_API_KEY}/v1/{SCAPI_MODE}/organization_members/{org_sid}"
+
+        try:
+            r = await _client_scapi.get(url, params={"page": page})
+
+            print(f"[SCAPI] org members {org_sid} page {page} -> {r.status_code}")
+
+            if r.status_code != 200:
+                print(f"[SCAPI] body: {r.text[:500]}")
+                break
+
+            payload = r.json()
+            data = payload.get("data") if isinstance(payload, dict) else None
+
+            if not isinstance(data, list) or not data:
+                break
+
+            members.extend(data)
+
+            # API pages are 32 members. If fewer than 32, we reached the end.
+            if len(data) < 32:
+                break
+
+        except Exception as e:
+            print(f"[SCAPI] fetch_org_members_scapi failed: {e}")
+            break
+
+    return members
+
+
+def build_members_embed(org_sid: str, members: list[dict]) -> discord.Embed:
+    embed = discord.Embed(
+        title=f"👥 {org_sid.upper()} Members",
+        description=f"Current organisation members found: **{len(members)}**",
+        color=0x5865F2
+    )
+
+    if not members:
+        embed.add_field(name="Members", value="No members found.", inline=False)
+        embed.set_footer(text="Star Citizen — Organisation Members")
+        return embed
+
+    sorted_members = sorted(
+        members,
+        key=lambda m: str(m.get("handle") or m.get("display") or "").lower()
+    )
+
+    lines = []
+
+    for member in sorted_members[:25]:
+        display = member.get("display") or member.get("handle") or "Unknown"
+        handle = member.get("handle") or "—"
+        rank = member.get("rank") or "—"
+
+        roles = member.get("roles") or []
+        if isinstance(roles, list) and roles:
+            roles_text = ", ".join(str(r) for r in roles[:3])
+        else:
+            roles_text = "—"
+
+        lines.append(
+            f"**{display}**\n"
+            f"`{handle}` • {rank} • {roles_text}"
+        )
+
+    embed.add_field(
+        name="Members",
+        value="\n\n".join(lines),
+        inline=False
+    )
+
+    if len(members) > 25:
+        embed.add_field(
+            name="Note",
+            value=f"Showing first 25 of {len(members)} members.",
+            inline=False
+        )
+
+    first_image = next(
+        (m.get("image") for m in sorted_members if m.get("image")),
+        None
+    )
+
+    if first_image:
+        embed.set_thumbnail(url=first_image)
+
+    embed.set_footer(text="Star Citizen — Organisation Members")
     return embed
 
 async def build_commodity_embed(
@@ -6937,6 +7037,41 @@ async def bestnow_ship_autocomplete(
     current: str
 ) -> list[app_commands.Choice[str]]:
     return await ship_autocomplete(interaction, current)
+
+@tree.command(name="members", description="Show current Star Citizen organisation members.")
+async def members_command(interaction: discord.Interaction):
+    await interaction.response.defer()
+
+    try:
+        members = await fetch_org_members_scapi(SC_ORG_SID)
+
+        if not members:
+            msg = await send_temp_followup(
+                interaction,
+                content=f"No organisation members found for `{SC_ORG_SID}`."
+            )
+            await log_star_command_usage(interaction, "members", message=msg)
+            return
+
+        embed = build_members_embed(SC_ORG_SID, members)
+
+        msg = await send_temp_followup(interaction, embed=embed)
+        await log_star_command_usage(interaction, "members", message=msg)
+
+    except RuntimeError as e:
+        await send_temp_followup(
+            interaction,
+            content=f"❌ {e}",
+            ephemeral=True
+        )
+
+    except Exception as e:
+        print(f"[ERROR] /members failed: {e}")
+        await send_temp_followup(
+            interaction,
+            content="❌ An unexpected error occurred while fetching organisation members.",
+            ephemeral=True
+        )
 # ---------------------------------------------------
 # Reaction removal suppression so bot-initiated removals don't unregister users
 # ---------------------------------------------------
