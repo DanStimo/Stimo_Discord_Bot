@@ -2620,63 +2620,57 @@ def build_members_embed(org_sid: str, members: list[dict]) -> discord.Embed:
         color=0x5865F2
     )
 
-    org_logo = None
-
-    for member in members:
-        logo = (
-            member.get("organization_image")
-            or member.get("org_logo")
-            or member.get("organization_logo")
-        )
-    
-        if logo:
-            org_logo = str(logo)
-            break
-    
-    if org_logo:
-        if org_logo.startswith("/"):
-            org_logo = "https://robertsspaceindustries.com" + org_logo
-    
-        embed.set_thumbnail(url=org_logo)
+    # Org logo thumbnail
+    org_logo_url = f"https://robertsspaceindustries.com/orgs/{org_sid.upper()}/logo"
+    embed.set_thumbnail(url=org_logo_url)
 
     if not members:
         embed.add_field(name="Members", value="No members found.", inline=False)
         embed.set_footer(text="Star Citizen — Organisation Members")
         return embed
 
-    sorted_members = sorted(
-        members,
-        key=member_rank_priority
-    )
+    groups = {
+        "Founder / Master": [],
+        "Officers / Recruitment": [],
+        "Regular Members": [],
+        "Other": [],
+    }
 
-    lines = []
-
-    for member in sorted_members[:25]:
+    for member in members:
         display = member.get("display") or member.get("handle") or "Unknown"
         handle = member.get("handle") or "—"
         rank = member.get("rank") or "—"
 
         roles = member.get("roles") or []
         if isinstance(roles, list) and roles:
-            roles_text = ", ".join(str(r) for r in roles[:3])
+            roles_text = ", ".join(str(r) for r in roles)
         else:
             roles_text = "—"
 
-        lines.append(
+        line = (
             f"**{display}**\n"
             f"`{handle}` • {rank} • {roles_text}"
         )
 
-    embed.add_field(
-        name="Members",
-        value="\n\n".join(lines),
-        inline=False
-    )
+        rank_l = str(rank).lower()
+        roles_l = roles_text.lower()
 
-    if len(members) > 25:
+        if "founder" in roles_l or "master" in rank_l:
+            groups["Founder / Master"].append(line)
+        elif "officer" in roles_l or "recruitment" in roles_l:
+            groups["Officers / Recruitment"].append(line)
+        elif "regular" in rank_l or "member" in rank_l:
+            groups["Regular Members"].append(line)
+        else:
+            groups["Other"].append(line)
+
+    for group_name, group_members in groups.items():
+        if not group_members:
+            continue
+
         embed.add_field(
-            name="Note",
-            value=f"Showing first 25 of {len(members)} members.",
+            name=group_name,
+            value="\n\n".join(group_members[:15]),
             inline=False
         )
 
