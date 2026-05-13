@@ -2613,7 +2613,30 @@ def member_rank_priority(member: dict):
 
     return (best, display)
 
-def build_members_embed(org_sid: str, members: list[dict]) -> discord.Embed:
+async def fetch_org_info_scapi(org_sid: str) -> dict | None:
+    if not STARCITIZEN_API_KEY or not org_sid:
+        return None
+
+    url = f"{SCAPI_BASE}/{STARCITIZEN_API_KEY}/v1/live/organization/{org_sid.upper()}"
+
+    try:
+        r = await _client_scapi.get(url)
+        print(f"[SCAPI] org info {org_sid.upper()} -> {r.status_code}")
+
+        if r.status_code != 200:
+            print(f"[SCAPI] org info body: {r.text[:500]}")
+            return None
+
+        payload = r.json()
+        data = payload.get("data") if isinstance(payload, dict) else None
+
+        return data if isinstance(data, dict) else None
+
+    except Exception as e:
+        print(f"[SCAPI] fetch_org_info_scapi failed: {e}")
+        return None
+
+def build_members_embed(org_sid: str, members: list[dict], org_info: dict | None = None) -> discord.Embed:
     embed = discord.Embed(
         title=f"👥 {org_sid.upper()} Members",
         description=f"Current organisation members found: **{len(members)}**",
@@ -2621,8 +2644,22 @@ def build_members_embed(org_sid: str, members: list[dict]) -> discord.Embed:
     )
 
     # Org logo thumbnail
-    org_logo_url = f"https://robertsspaceindustries.com/orgs/{org_sid.upper()}/logo"
-    embed.set_thumbnail(url=org_logo_url)
+    if org_info:
+        logo = (
+            org_info.get("logo")
+            or org_info.get("image")
+            or org_info.get("thumbnail")
+            or org_info.get("banner")
+        )
+
+        if isinstance(logo, dict):
+            logo = logo.get("url") or logo.get("source") or logo.get("small")
+
+        if logo:
+            logo = str(logo)
+            if logo.startswith("/"):
+                logo = "https://robertsspaceindustries.com" + logo
+            embed.set_thumbnail(url=logo)
 
     if not members:
         embed.add_field(name="Members", value="No members found.", inline=False)
@@ -2642,37 +2679,29 @@ def build_members_embed(org_sid: str, members: list[dict]) -> discord.Embed:
         rank = member.get("rank") or "—"
 
         roles = member.get("roles") or []
-        if isinstance(roles, list) and roles:
-            roles_text = ", ".join(str(r) for r in roles)
-        else:
-            roles_text = "—"
+        roles_text = ", ".join(str(r) for r in roles) if isinstance(roles, list) and roles else "—"
 
-        line = (
-            f"**{display}**\n"
-            f"`{handle}` • {rank} • {roles_text}"
-        )
+        clean_line = f"**{display}** — `{handle}`\n{rank} • {roles_text}"
 
         rank_l = str(rank).lower()
         roles_l = roles_text.lower()
 
         if "founder" in roles_l or "master" in rank_l:
-            groups["Founder / Master"].append(line)
+            groups["Founder / Master"].append(clean_line)
         elif "officer" in roles_l or "recruitment" in roles_l:
-            groups["Officers / Recruitment"].append(line)
+            groups["Officers / Recruitment"].append(clean_line)
         elif "regular" in rank_l or "member" in rank_l:
-            groups["Regular Members"].append(line)
+            groups["Regular Members"].append(clean_line)
         else:
-            groups["Other"].append(line)
+            groups["Other"].append(clean_line)
 
     for group_name, group_members in groups.items():
-        if not group_members:
-            continue
-
-        embed.add_field(
-            name=group_name,
-            value="\n\n".join(group_members[:15]),
-            inline=False
-        )
+        if group_members:
+            embed.add_field(
+                name=group_name,
+                value="\n\n".join(group_members[:15]),
+                inline=False
+            )
 
     embed.set_footer(text="Star Citizen — Organisation Members")
     return embed
@@ -7091,7 +7120,8 @@ async def members_command(interaction: discord.Interaction):
             await log_star_command_usage(interaction, "members", message=msg)
             return
 
-        embed = build_members_embed(SC_ORG_SID, members)
+        org_info = await fetch_org_info_scapi(SC_ORG_SID)
+        embed = build_members_embed(SC_ORG_SID, members, org_info)
 
         msg = await send_temp_followup(interaction, embed=embed)
         await log_star_command_usage(interaction, "members", message=msg)
