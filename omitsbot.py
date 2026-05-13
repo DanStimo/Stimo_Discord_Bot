@@ -2425,8 +2425,6 @@ def build_ship_embed(ship: dict) -> discord.Embed:
     print(list(ship.keys()))
 
     description = ship_text(
-
-    description = ship_text(
         ship.get("description")
         or ship.get("short_description")
         or ship.get("excerpt"),
