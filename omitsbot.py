@@ -406,39 +406,66 @@ async def log_star_command_usage(
     extra_text: str | None = None
 ):
     """
-    Log the actual Star Citizen command output to the configured log channel.
+    Log ALL Star Citizen commands ONLY into the Phonics server log channel.
     """
+
+    PHONICS_GUILD_ID = 1373595733403631677
+
+    # PUT YOUR PHONICS LOG CHANNEL ID HERE
+    PHONICS_STAR_LOG_CHANNEL_ID = 1504020053992149062
+
+    # Ignore commands used outside Phonics
     if not interaction.guild:
         return
-        
-    if interaction.guild.id != 1373595733403631677:
-        return
 
-    log_ch = (
-        interaction.guild.get_channel(STAR_LOG_CHANNEL_ID)
-        or client.get_channel(STAR_LOG_CHANNEL_ID)
-    )
-    if not log_ch:
-        print(f"[WARN] Star log channel {STAR_LOG_CHANNEL_ID} not found")
+    if interaction.guild.id != PHONICS_GUILD_ID:
+        print(f"[STAR LOG] Ignoring /{command_name} from non-Phonics guild")
         return
 
     try:
-        user_name = interaction.user.display_name if isinstance(interaction.user, discord.Member) else interaction.user.name
-        channel_mention = interaction.channel.mention if interaction.channel else "#unknown"
+        # Always fetch the channel directly from the Phonics guild
+        phonics_guild = client.get_guild(PHONICS_GUILD_ID)
+
+        if not phonics_guild:
+            print("[STAR LOG] Could not find Phonics guild")
+            return
+
+        log_ch = phonics_guild.get_channel(PHONICS_STAR_LOG_CHANNEL_ID)
+
+        if not log_ch:
+            print(f"[STAR LOG] Could not find Phonics log channel {PHONICS_STAR_LOG_CHANNEL_ID}")
+            return
+
+        user_name = (
+            interaction.user.display_name
+            if isinstance(interaction.user, discord.Member)
+            else interaction.user.name
+        )
+
+        channel_mention = (
+            interaction.channel.mention
+            if interaction.channel
+            else "#unknown"
+        )
+
         header = f"📦 /{command_name} by {user_name} in {channel_mention}:"
 
-        if message:
-            if message.embeds:
-                await log_ch.send(content=header, embeds=message.embeds)
-                return
-            if message.content:
-                await log_ch.send(content=f"{header}\n{message.content}")
-                return
+        # Embed logging
+        if message and message.embeds:
+            await log_ch.send(content=header, embeds=message.embeds)
+            return
 
+        # Text logging
+        if message and message.content:
+            await log_ch.send(content=f"{header}\n{message.content}")
+            return
+
+        # Extra text fallback
         if extra_text:
             await log_ch.send(content=f"{header}\n{extra_text}")
             return
 
+        # Final fallback
         await log_ch.send(content=header)
 
     except Exception as e:
