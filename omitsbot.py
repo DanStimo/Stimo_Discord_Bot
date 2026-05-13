@@ -2681,7 +2681,11 @@ def build_members_embed(org_sid: str, members: list[dict], org_info: dict | None
         roles = member.get("roles") or []
         roles_text = ", ".join(str(r) for r in roles) if isinstance(roles, list) and roles else "—"
 
-        clean_line = f"**{display}** — `{handle}`\n{rank} • {roles_text}"
+        clean_line = (
+        f"**{display}**\n"
+        f"└ `{handle}` • {rank}\n"
+        f"└ {roles_text}"
+    )
 
         rank_l = str(rank).lower()
         roles_l = roles_text.lower()
@@ -2695,13 +2699,20 @@ def build_members_embed(org_sid: str, members: list[dict], org_info: dict | None
         else:
             groups["Other"].append(clean_line)
 
-    for group_name, group_members in groups.items():
-        if group_members:
-            embed.add_field(
-                name=group_name,
-                value="\n\n".join(group_members[:15]),
-                inline=False
-            )
+    SECTION_STYLES = {
+    "Founder / Master": "👑 Founder / Master",
+    "Officers / Recruitment": "🛡️ Officers / Recruitment",
+    "Regular Members": "👥 Regular Members",
+    "Other": "📦 Other",
+}
+
+for group_name, group_members in groups.items():
+    if group_members:
+        embed.add_field(
+            name=SECTION_STYLES.get(group_name, group_name),
+            value="\n\n".join(group_members[:15]),
+            inline=False
+        )
 
     embed.set_footer(text="Star Citizen — Organisation Members")
     return embed
