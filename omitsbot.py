@@ -410,6 +410,9 @@ async def log_star_command_usage(
     """
     if not interaction.guild:
         return
+        
+    if interaction.guild.id != 1373595733403631677:
+        return
 
     log_ch = (
         interaction.guild.get_channel(STAR_LOG_CHANNEL_ID)
