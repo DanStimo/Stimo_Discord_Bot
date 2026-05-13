@@ -1910,6 +1910,7 @@ def terminal_system_name(terminal_info: dict | None) -> str:
 SCWIKI_VEHICLES_URL = "https://api.star-citizen.wiki/api/shipmatrix/vehicles"
 
 _ship_cache = None
+_scapi_ship_cache = None
 
 async def get_all_ships_scwiki():
     global _ship_cache
@@ -1984,6 +1985,52 @@ async def get_all_ships_scwiki():
         print(f"[SCWIKI] exception loading ships :: {e}")
         _ship_cache = []
         return _ship_cache
+
+async def get_all_scapi_ships():
+    global _scapi_ship_cache
+
+    if _scapi_ship_cache is not None:
+        return _scapi_ship_cache
+
+    if not STARCITIZEN_API_KEY:
+        print("[SCAPI] Missing API key")
+        _scapi_ship_cache = []
+        return _scapi_ship_cache
+
+    url = f"{SCAPI_BASE}/{STARCITIZEN_API_KEY}/v1/{SCAPI_MODE}/ships"
+
+    try:
+        r = await _client_scapi.get(
+            url,
+            params={"page_max": 1000}
+        )
+
+        print(f"[SCAPI] full ship cache -> {r.status_code}")
+
+        if r.status_code != 200:
+            print(f"[SCAPI] body: {r.text[:500]}")
+            _scapi_ship_cache = []
+            return _scapi_ship_cache
+
+        payload = r.json()
+
+        data = payload.get("data", [])
+
+        if not isinstance(data, list):
+            print("[SCAPI] unexpected payload shape")
+            _scapi_ship_cache = []
+            return _scapi_ship_cache
+
+        _scapi_ship_cache = data
+
+        print(f"[SCAPI] cached {len(_scapi_ship_cache)} ships")
+
+        return _scapi_ship_cache
+
+    except Exception as e:
+        print(f"[SCAPI] failed loading ship cache: {e}")
+        _scapi_ship_cache = []
+        return _scapi_ship_cache
 
 
 def _ship_display_name(ship: dict) -> str:
@@ -2280,87 +2327,74 @@ def _manufacturer_name(ship: dict) -> str:
 
 
 async def fetch_ship_from_scapi(ship_name: str) -> dict | None:
-    if not STARCITIZEN_API_KEY:
-        raise RuntimeError("STARCITIZEN_API_KEY is missing from .env")
+    ships = await get_all_scapi_ships()
 
-    url = f"{SCAPI_BASE}/{STARCITIZEN_API_KEY}/v1/{SCAPI_MODE}/ships"
+    if not ships:
+        return None
 
-    search_names = [
-        ship_name,
-        ship_name.replace("RSI ", ""),
-        ship_name.replace("Aegis ", ""),
-        ship_name.replace("Crusader ", ""),
-        ship_name.replace("Drake ", ""),
-        ship_name.replace("Anvil ", ""),
-        ship_name.replace("Origin ", ""),
-        ship_name.replace("MISC ", ""),
-        ship_name.replace("Argo ", ""),
-        ship_name.replace("ARGO ", ""),
-    ]
+    q = _normalize_sc_name(ship_name)
 
-    seen = set()
+    exact = []
+    partial = []
 
-    for name in search_names:
-        name = name.strip()
-        if not name or name.lower() in seen:
+    for ship in ships:
+        names = [
+            str(ship.get("name", "")).strip(),
+            str(ship.get("name_full", "")).strip(),
+            str(ship.get("slug", "")).strip(),
+        ]
+
+        norm_names = [
+            _normalize_sc_name(n)
+            for n in names
+            if n
+        ]
+
+        # exact
+        if any(q == n for n in norm_names):
+            exact.append(ship)
             continue
 
-        seen.add(name.lower())
+        # partial
+        if any(q in n for n in norm_names):
+            partial.append(ship)
 
-        try:
-            r = await _client_scapi.get(
-                url,
-                params={
-                    "name": name,
-                    "page_max": 1,
-                }
-            )
+    if exact:
+        print(f"[SCAPI] exact match for {ship_name}")
+        return exact[0]
 
-            print(f"[SCAPI] ship search '{name}' -> {r.status_code}")
+    if partial:
+        print(f"[SCAPI] partial match for {ship_name}")
+        return partial[0]
 
-            if r.status_code != 200:
-                print(f"[SCAPI] body: {r.text[:500]}")
-                continue
+    # fuzzy fallback
+    choices = {}
+    choice_names = []
 
-            payload = r.json()
+    for ship in ships:
+        name = str(ship.get("name") or "").strip()
 
-            print("[SCAPI] payload keys:", list(payload.keys()) if isinstance(payload, dict) else type(payload))
+        if not name:
+            continue
 
-            data = payload.get("data") if isinstance(payload, dict) else payload
+        choice_names.append(name)
+        choices[name] = ship
 
-            # Shape 1: data is directly a list
-            if isinstance(data, list) and data:
-                print(f"[SCAPI] found list result for {name}")
-                return data[0]
+    fuzzy = process.extractOne(
+        ship_name,
+        choice_names,
+        scorer=fuzz.token_sort_ratio
+    )
 
-            # Shape 2: data is a dict containing ships
-            if isinstance(data, dict):
-                print("[SCAPI] data keys:", list(data.keys()))
+    if fuzzy:
+        matched_name, score = fuzzy
 
-                for key in ("ships", "results", "items", "data"):
-                    nested = data.get(key)
-                    if isinstance(nested, list) and nested:
-                        print(f"[SCAPI] found nested list result in data['{key}']")
-                        return nested[0]
+        print(f"[SCAPI] fuzzy match {matched_name} ({score})")
 
-                # Shape 3: data itself is the ship
-                if data.get("name") or data.get("id") or data.get("description"):
-                    print(f"[SCAPI] found direct dict result for {name}")
-                    return data
+        if score >= 70:
+            return choices[matched_name]
 
-            # Shape 4: whole payload contains ships/results/items
-            if isinstance(payload, dict):
-                for key in ("ships", "results", "items"):
-                    nested = payload.get(key)
-                    if isinstance(nested, list) and nested:
-                        print(f"[SCAPI] found payload['{key}'] result for {name}")
-                        return nested[0]
-
-            print(f"[SCAPI] no usable ship data found for '{name}'")
-            print(f"[SCAPI] body preview: {r.text[:700]}")
-
-        except Exception as e:
-            print(f"[SCAPI] fetch_ship_from_scapi failed for {name}: {e}")
+    print(f"[SCAPI] no ship found for {ship_name}")
 
     return None
     
@@ -7442,6 +7476,7 @@ async def on_ready():
     print(f"Bot is ready as {client.user}")
     await warm_ea_session()
     asyncio.create_task(warm_scwiki_ship_cache())
+    asyncio.create_task(get_all_scapi_ships())
     
     # Run background tasks once (avoid duplicates on reconnect)
     if not getattr(client, "background_started", False):
