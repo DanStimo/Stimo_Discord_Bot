@@ -2549,13 +2549,16 @@ async def fetch_org_members_scapi(org_sid: str, max_pages: int = 10) -> list[dic
 
     members = []
 
+    # Org members works best in live mode
+    mode = "live"
+
     for page in range(1, max_pages + 1):
-        url = f"{SCAPI_BASE}/{STARCITIZEN_API_KEY}/v1/{SCAPI_MODE}/organization_members/{org_sid}"
+        url = f"{SCAPI_BASE}/{STARCITIZEN_API_KEY}/v1/{mode}/organization_members/{org_sid.upper()}"
 
         try:
             r = await _client_scapi.get(url, params={"page": page})
 
-            print(f"[SCAPI] org members {org_sid} page {page} -> {r.status_code}")
+            print(f"[SCAPI] org members {org_sid.upper()} page {page} -> {r.status_code}")
 
             if r.status_code != 200:
                 print(f"[SCAPI] body: {r.text[:500]}")
@@ -2565,11 +2568,11 @@ async def fetch_org_members_scapi(org_sid: str, max_pages: int = 10) -> list[dic
             data = payload.get("data") if isinstance(payload, dict) else None
 
             if not isinstance(data, list) or not data:
+                print(f"[SCAPI] no members returned on page {page}")
                 break
 
             members.extend(data)
 
-            # API pages are 32 members. If fewer than 32, we reached the end.
             if len(data) < 32:
                 break
 
@@ -2578,7 +2581,6 @@ async def fetch_org_members_scapi(org_sid: str, max_pages: int = 10) -> list[dic
             break
 
     return members
-
 
 def build_members_embed(org_sid: str, members: list[dict]) -> discord.Embed:
     embed = discord.Embed(
