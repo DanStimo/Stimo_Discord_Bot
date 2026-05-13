@@ -7475,7 +7475,7 @@ async def init_db():
     if DB_POOL:
         return
     if not DATABASE_URL:
-    print("[INFO] DATABASE_URL not set — using local JSON storage only.")
+        print("[INFO] DATABASE_URL not set — using local JSON storage only.")
     else:
         # existing Postgres init code here
 
