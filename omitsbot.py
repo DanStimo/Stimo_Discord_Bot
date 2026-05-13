@@ -7475,7 +7475,9 @@ async def init_db():
     if DB_POOL:
         return
     if not DATABASE_URL:
-        raise RuntimeError("DATABASE_URL is not set")
+    print("[INFO] DATABASE_URL not set — using local JSON storage only.")
+    else:
+        # existing Postgres init code here
 
     DB_POOL = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=5)
     async with DB_POOL.acquire() as con:
