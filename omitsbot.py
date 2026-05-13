@@ -2458,8 +2458,19 @@ def build_ship_embed(ship: dict) -> discord.Embed:
         or _ship_scu(ship)
     )
 
-    crew_min = ship_text(ship.get("min_crew") or ship.get("crew_min"))
-    crew_max = ship_text(ship.get("max_crew") or ship.get("crew_max"))
+    crew_min = ship_text(
+    ship.get("min_crew")
+    or ship.get("crew_min")
+    or ship.get("crew")
+    or ship.get("minCrew")
+    )
+    
+    crew_max = ship_text(
+        ship.get("max_crew")
+        or ship.get("crew_max")
+        or ship.get("crew")
+        or ship.get("maxCrew")
+    )
 
     crew = crew_min if crew_min == crew_max else f"{crew_min} - {crew_max}"
 
@@ -2471,8 +2482,29 @@ def build_ship_embed(ship: dict) -> discord.Embed:
     embed.add_field(name="Crew", value=crew, inline=True)
     embed.add_field(name="Cargo", value=f"{cargo} SCU" if cargo not in (None, "", "—") else "—", inline=True)
 
-    embed.add_field(name="Length", value=f"{ship_text(ship.get('length'))} m", inline=True)
-    embed.add_field(name="Mass", value=f"{ship_text(ship.get('mass'))} kg", inline=True)
+    length = (
+    ship.get("length")
+    or ship.get("lengths")
+    or ship.get("size_length")
+    or ship.get("vehicle_length")
+    )
+    
+    embed.add_field(
+        name="Length",
+        value=f"{ship_text(length)} m",
+        inline=True
+    )
+    mass = (
+    ship.get("mass")
+    or ship.get("vehicle_mass")
+    or ship.get("weight")
+    )
+    
+    embed.add_field(
+        name="Mass",
+        value=f"{ship_text(mass)} kg",
+        inline=True
+    )
     embed.add_field(name="Status", value=ship_text(ship.get("production_status") or ship.get("status")).title(), inline=True)
 
     embed.set_footer(text="Star Citizen — Ship Data")
