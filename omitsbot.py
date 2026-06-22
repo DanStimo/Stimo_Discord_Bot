@@ -633,7 +633,9 @@ async def search_clubs_ea(query: str) -> list:
 
     data = await _ea_get_json(
         "https://proclubs.ea.com/api/fc/allTimeLeaderboard/search",
-        {"platform": PLATFORM, "clubName": query.strip()},
+        {
+            "clubName": query.strip()
+        }
     )
 
     if not isinstance(data, list):
