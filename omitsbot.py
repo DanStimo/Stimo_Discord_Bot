@@ -19,7 +19,7 @@ load_dotenv()
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 CLUB_ID = os.getenv("CLUB_ID", "167054")
-PLATFORM = os.getenv("PLATFORM", "gen5")
+PLATFORM = os.getenv("PLATFORM", "common-gen5")
 UEX_API_KEY = os.getenv("UEX_API_KEY", "").strip()
 UEX_API_BASE = os.getenv("UEX_API_BASE", "https://api.uexcorp.space/2.0").rstrip("/")
 
