@@ -99,6 +99,100 @@ tree = app_commands.CommandTree(client)
 # Channel where typing a club name without a command should trigger stats
 FREE_STATS_CHANNEL_ID = int(os.getenv("FREE_STATS_CHANNEL_ID", "0"))
 
+# Persistent club-search leaderboard
+SEARCH_LEADERBOARD_FILE = os.getenv(
+    "SEARCH_LEADERBOARD_FILE",
+    "search_leaderboard.json",
+)
+
+
+def load_search_leaderboard() -> dict:
+    try:
+        if not os.path.exists(SEARCH_LEADERBOARD_FILE):
+            return {"guilds": {}}
+
+        with open(
+            SEARCH_LEADERBOARD_FILE,
+            "r",
+            encoding="utf-8",
+        ) as file:
+            data = json.load(file)
+
+        if not isinstance(data, dict):
+            return {"guilds": {}}
+
+        data.setdefault("guilds", {})
+        return data
+
+    except Exception as error:
+        print(f"[LEADERBOARD] Failed to load data: {error}")
+        return {"guilds": {}}
+
+
+search_leaderboard_data = load_search_leaderboard()
+
+
+def save_search_leaderboard() -> None:
+    temporary_file = f"{SEARCH_LEADERBOARD_FILE}.tmp"
+
+    try:
+        with open(
+            temporary_file,
+            "w",
+            encoding="utf-8",
+        ) as file:
+            json.dump(
+                search_leaderboard_data,
+                file,
+                indent=2,
+                ensure_ascii=False,
+            )
+
+        os.replace(temporary_file, SEARCH_LEADERBOARD_FILE)
+
+    except Exception as error:
+        print(f"[LEADERBOARD] Failed to save data: {error}")
+
+
+def record_club_search(
+    guild: discord.Guild | None,
+    user: discord.abc.User,
+) -> None:
+    if guild is None or user.bot:
+        return
+
+    guild_id = str(guild.id)
+    user_id = str(user.id)
+
+    guild_data = search_leaderboard_data["guilds"].setdefault(
+        guild_id,
+        {"users": {}},
+    )
+
+    users = guild_data.setdefault("users", {})
+
+    entry = users.setdefault(
+        user_id,
+        {
+            "count": 0,
+            "display_name": user.name,
+        },
+    )
+
+    entry["count"] = int(entry.get("count", 0)) + 1
+    entry["display_name"] = getattr(
+        user,
+        "display_name",
+        user.name,
+    )
+
+    save_search_leaderboard()
+
+    print(
+        f"[LEADERBOARD] {entry['display_name']} now has "
+        f"{entry['count']} successful searches in guild {guild_id}"
+    )
+
 # =========================================================
 # PHONICS SELF-SELECT ROLES
 # =========================================================
@@ -4181,9 +4275,18 @@ class StatsDropdown(discord.ui.View):
                           "losses": data["stats"].get("losses"),
                           "skillRating": data["stats"].get("skillRating")},
                          (club_name or f"Club {club_id}").upper())
-        final_msg = await interaction.edit_original_response(content=None, embed=embed, view=view)
-
-        await log_command_output(interaction, "stats", final_msg)
+                final_msg = await interaction.edit_original_response(
+		            content=None,
+		            embed=embed,
+		            view=view,
+		        )
+		
+		        record_club_search(
+		            interaction.guild,
+		            interaction.user,
+		        )
+		
+		        await log_command_output(interaction, "stats", final_msg)
 
         # 🔔 auto-delete the final embed after N seconds
         asyncio.create_task(delete_after_delay(final_msg, 60))
@@ -4257,8 +4360,18 @@ class FreeStatsDropdown(discord.ui.View):
             },
             (club_name or f"Club {club_id}").upper()
         )
-        final_msg = await interaction.edit_original_response(content=None, embed=embed, view=view)
-        asyncio.create_task(delete_after_delay(final_msg, 60))
+                final_msg = await interaction.edit_original_response(
+		            content=None,
+		            embed=embed,
+		            view=view,
+		        )
+		
+		        record_club_search(
+		            self.request_message.guild,
+		            self.request_message.author,
+		        )
+		
+		        asyncio.create_task(delete_after_delay(final_msg, 60))
 
 class Stats5Dropdown(discord.ui.View):
     def __init__(self, results: list[dict]):
@@ -4626,8 +4739,14 @@ async def send_stats_message_to_channel(
         },
         (club_name or f"Club {club_id}").upper(),
     )
-    msg = await channel.send(embed=embed, view=view)
-    asyncio.create_task(delete_after_delay(msg, 60))
+        msg = await channel.send(embed=embed, view=view)
+	    asyncio.create_task(delete_after_delay(msg, 60))
+	
+	    if origin_message:
+	        record_club_search(
+	            origin_message.guild,
+	            origin_message.author,
+	        )
 
     # Mirror to the log channel with a header that looks like the slash command
     if origin_message:
@@ -5556,14 +5675,110 @@ async def stats_command(interaction: discord.Interaction, club: str):
 
         view = PrintRecordButton(data["stats"], (club_name or f"Club {club_id}").upper())
         
-        await msg.edit(content=None, embed=embed, view=view)
-        msg = await interaction.channel.fetch_message(msg.id)
-        await log_command_output(interaction, "stats", msg)
+                await msg.edit(content=None, embed=embed, view=view)
+
+		        record_club_search(
+		            interaction.guild,
+		            interaction.user,
+		        )
+		
+		        msg = await interaction.channel.fetch_message(msg.id)
+		        await log_command_output(interaction, "stats", msg)
         asyncio.create_task(delete_after_delay(msg, 60))
 
     except Exception as e:
         print(f"[ERROR] /stats failed: {e}")
         await interaction.followup.send("❌ An unexpected error occurred while fetching club stats.", ephemeral=True)
+
+@tree.command(
+    name="leaderboard",
+    description="Show who has researched the most EA FC clubs.",
+)
+async def leaderboard_command(
+    interaction: discord.Interaction,
+):
+    if interaction.guild is None:
+        await interaction.response.send_message(
+            "This command can only be used inside a server.",
+            ephemeral=True,
+        )
+        return
+
+    guild_id = str(interaction.guild.id)
+
+    guild_data = search_leaderboard_data.get(
+        "guilds",
+        {},
+    ).get(
+        guild_id,
+        {},
+    )
+
+    users = guild_data.get("users", {})
+
+    if not users:
+        await interaction.response.send_message(
+            "No successful club searches have been recorded yet.",
+            ephemeral=True,
+        )
+        return
+
+    ranked_users = sorted(
+        users.items(),
+        key=lambda item: int(item[1].get("count", 0)),
+        reverse=True,
+    )[:10]
+
+    medals = {
+        1: "🥇",
+        2: "🥈",
+        3: "🥉",
+    }
+
+    leaderboard_lines = []
+
+    for position, (user_id, entry) in enumerate(
+        ranked_users,
+        start=1,
+    ):
+        count = int(entry.get("count", 0))
+        marker = medals.get(position, f"`{position}.`")
+        search_word = "search" if count == 1 else "searches"
+
+        member = interaction.guild.get_member(int(user_id))
+
+        if member:
+            user_display = member.mention
+        else:
+            stored_name = entry.get(
+                "display_name",
+                f"User {user_id}",
+            )
+            user_display = discord.utils.escape_markdown(stored_name)
+
+        leaderboard_lines.append(
+            f"{marker} {user_display} — **{count} {search_word}**"
+        )
+
+    total_searches = sum(
+        int(entry.get("count", 0))
+        for entry in users.values()
+    )
+
+    embed = discord.Embed(
+        title="🔍 Club Research Leaderboard",
+        description="\n".join(leaderboard_lines),
+        color=discord.Color.gold(),
+    )
+
+    embed.set_footer(
+        text=f"{total_searches} successful club searches recorded"
+    )
+
+    if interaction.guild.icon:
+        embed.set_thumbnail(url=interaction.guild.icon.url)
+
+    await interaction.response.send_message(embed=embed)
 
 @tree.command(name="lineup", description="Create an interactive lineup from a formation.")
 @app_commands.describe(
