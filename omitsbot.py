@@ -14,6 +14,8 @@ import asyncpg
 import logging
 from discord.utils import escape_markdown
 import math
+from io import BytesIO
+from PIL import Image
 
 load_dotenv()
 
@@ -95,7 +97,7 @@ client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
 
 # Channel where typing a club name without a command should trigger stats
-FREE_STATS_CHANNEL_ID = 1362795404185305129
+FREE_STATS_CHANNEL_ID = int(os.getenv("FREE_STATS_CHANNEL_ID", "0"))
 
 # =========================================================
 # PHONICS SELF-SELECT ROLES
@@ -114,7 +116,7 @@ SELF_SELECT_ROLES = {
 }
 
 # Channel where we log free-typed stats lookups
-LOG_CHANNEL_ID = 1383731281577246810
+LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID", "0"))
 STAR_LOG_CHANNEL_ID = int(os.getenv("STAR_LOG_CHANNEL_ID", str(LOG_CHANNEL_ID)))
 STAR_COMMAND_DELETE_SECONDS = int(os.getenv("STAR_COMMAND_DELETE_SECONDS", "90"))
 
@@ -126,54 +128,120 @@ def build_crest_url(team_id: str | int) -> str | None:
         return None
     return CREST_URL_TEMPLATE.format(teamId=str(team_id))
 
-async def get_team_id_for_club(club_id: str | int) -> str | None:
+async def get_crest_asset_id_for_club(club_id: str | int) -> str | None:
     """
-    Try to find teamId for a club:
-      1) overallStats (fast, single call)
-      2) fall back to the newest matches and read clubs[club_id].details.teamId
+    Find the EA crestAssetId used by the crest image CDN.
     """
     club_id = str(club_id)
 
-    # 1) overallStats
+    # Try overallStats first, in case customKit is included.
     try:
-        r = await _client_ea.get(
+        response = await _client_ea.get(
             "https://proclubs.ea.com/api/fc/clubs/overallStats",
             params={"platform": PLATFORM, "clubIds": club_id},
         )
-        if r.status_code == 200:
-            data = r.json() or []
+
+        if response.status_code == 200:
+            data = response.json() or []
+
             if isinstance(data, list) and data:
-                tid = data[0].get("teamId")
-                if tid:
-                    return str(tid)
+                row = data[0] or {}
+                custom_kit = row.get("customKit") or {}
+                crest_id = (
+                    custom_kit.get("crestAssetId")
+                    or row.get("crestAssetId")
+                )
+
+                if crest_id is not None and str(crest_id):
+                    return str(crest_id)
+
     except Exception as e:
         print(f"[crest] overallStats lookup failed: {e}")
 
-    # 2) matches fallback (check newest first among common types)
+    # Recent matches reliably include details.customKit.crestAssetId.
     try:
         match_types = ["leagueMatch", "playoffMatch", "friendlyMatch"]
         newest = []
-        for mt in match_types:
-            mres = await _client_ea.get(
+
+        for match_type in match_types:
+            response = await _client_ea.get(
                 "https://proclubs.ea.com/api/fc/clubs/matches",
-                params={"matchType": mt, "platform": PLATFORM, "clubIds": club_id},
+                params={
+                    "matchType": match_type,
+                    "platform": PLATFORM,
+                    "clubIds": club_id,
+                },
             )
-            if mres.status_code == 404:
+
+            if response.status_code == 404:
                 continue
-            mres.raise_for_status()
-            arr = mres.json() or []
-            newest.extend(arr)
-        newest.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
-        for m in newest:
-            clubs = m.get("clubs", {}) or {}
-            mine = clubs.get(club_id) or {}
-            details = mine.get("details") or {}
-            tid = details.get("teamId")
-            if tid:
-                return str(tid)
+
+            response.raise_for_status()
+            newest.extend(response.json() or [])
+
+        newest.sort(
+            key=lambda match: match.get("timestamp", 0),
+            reverse=True,
+        )
+
+        for match in newest:
+            clubs = match.get("clubs") or {}
+            club = clubs.get(club_id) or {}
+            details = club.get("details") or {}
+
+            custom_kit = (
+                details.get("customKit")
+                or club.get("customKit")
+                or {}
+            )
+
+            crest_id = custom_kit.get("crestAssetId")
+            team_id = details.get("teamId")
+
+            # EA normally displays the base team logo when teamId has
+            # a valid image. Custom clubs may have a generated teamId
+            # with no image, so fall back to crestAssetId.
+            candidates = [
+                (team_id, "teamId/base asset"),
+                (crest_id, "custom crest asset"),
+            ]
+
+            for image_id, source in candidates:
+                if image_id is None or not str(image_id):
+                    continue
+
+                crest_url = build_crest_url(image_id)
+                if not crest_url:
+                    continue
+
+                try:
+                    image_response = await _client_ea.get(crest_url)
+                    content_type = image_response.headers.get(
+                        "content-type", ""
+                    ).lower()
+
+                    if (
+                        image_response.status_code == 200
+                        and content_type.startswith("image/")
+                    ):
+                        print(
+                            f"[crest] Club {club_id}: "
+                            f"teamId={team_id}, "
+                            f"crestAssetId={crest_id}, "
+                            f"selected={image_id} ({source})"
+                        )
+                        return str(image_id)
+
+                except Exception as image_error:
+                    print(
+                        f"[crest] Could not test asset "
+                        f"{image_id}: {image_error}"
+                    )
+
     except Exception as e:
         print(f"[crest] matches lookup failed: {e}")
 
+    print(f"[crest] No crestAssetId found for club {club_id}")
     return None
 
 # === Welcome Feature ===
@@ -263,19 +331,11 @@ async def on_member_join(member: discord.Member):
 
     # --- Hardcoded config ---
     WELCOME_CONFIG = {
-        1360645256961589428: {
-            "server_name": "Stimo's",
-            "welcome_channel_id": 1361690632392933527,
-            "member_role_id": 1361661691590606929,
-            "rules_channel_id": 1362311374293958856,
-            "roles_channel_id": 1361921570104283186,
-        },
-        1373595733403631677: {
-            "server_name": "Phonics'",
-            "welcome_channel_id": 1373595735265771591,
-            "member_role_id": 1373595733403631684,
-            "rules_channel_id": 1373595735051997299,
-            "roles_channel_id": 1376174726258360471,
+        1551149701972103208: {
+            "server_name": member.guild.name,
+            "welcome_channel_id": 1551149703167475744,
+            "member_role_id": 1551154383113429032,
+            "rules_channel_id": 1551159502273904731,
         },
     }
     
@@ -311,9 +371,7 @@ async def on_member_join(member: discord.Member):
     embed = discord.Embed(
         title="Welcome aboard! 👋",
         description=(
-            f"{member.mention}, you've reached **{config['server_name']}** Discord server!\n\n"
-            f"• **Read the rules:** <#{config['rules_channel_id']}>\n"
-            f"• **Grab roles:** <#{config['roles_channel_id']}>\n"
+            f"{member.mention}, you've reached the **{config['server_name']}** Discord server!\n\n"
             f"• **Say hi!:** <#{config['welcome_channel_id']}> 👋"
         ),
         color=WELCOME_COLOR,
@@ -345,11 +403,7 @@ async def on_member_join(member: discord.Member):
         message = await channel.send(content=member.mention, embed=embed)
 
         # react with custom emoji named "Wave"
-        emoji = discord.utils.get(member.guild.emojis, name="Wave")
-        if emoji:
-            await message.add_reaction(emoji)
-        else:
-            print("[WARN] Could not find custom emoji 'Wave' in this server; skipping reaction.")
+        await message.add_reaction("👋")
 
         print(f"[INFO] Welcome message posted for {member} in #{channel.name}")
 
@@ -634,6 +688,7 @@ async def search_clubs_ea(query: str) -> list:
     data = await _ea_get_json(
         "https://proclubs.ea.com/api/fc/allTimeLeaderboard/search",
         {
+            "platform": PLATFORM,
             "clubName": query.strip()
         }
     )
@@ -762,6 +817,84 @@ def build_crest_url(team_id: str | int | None) -> str | None:
     if not team_id:
         return None
     return f"https://eafc24.content.easports.com/fifa/fltOnlineAssets/24B23FDE-7835-41C2-87A2-F453DFDB2E82/2024/fcweb/crests/256x256/l{team_id}.png"
+
+_CREST_ACCENT_CACHE: dict[str, int] = {}
+
+
+def _dominant_colour_from_bytes(image_bytes: bytes) -> int:
+    """Extract a useful dominant colour while ignoring the background."""
+    with Image.open(BytesIO(image_bytes)) as source:
+        image = source.convert("RGBA")
+        image.thumbnail((96, 96))
+
+        pixels = [
+            (r, g, b)
+            for r, g, b, alpha in image.getdata()
+            if alpha >= 96
+            and not (r >= 245 and g >= 245 and b >= 245)
+            and not (r <= 15 and g <= 15 and b <= 15)
+        ]
+
+        if not pixels:
+            return 0xB30000
+
+        palette_source = Image.new("RGB", (len(pixels), 1))
+        palette_source.putdata(pixels)
+        quantized = palette_source.quantize(colors=8)
+
+        palette = quantized.getpalette() or []
+        ranked_colours = []
+
+        for count, palette_index in quantized.getcolors() or []:
+            position = palette_index * 3
+            if position + 2 >= len(palette):
+                continue
+
+            rgb = tuple(palette[position:position + 3])
+            saturation = max(rgb) - min(rgb)
+
+            # Slightly prefer distinctive colours over greys.
+            score = count * (1 + saturation / 255)
+            ranked_colours.append((score, rgb))
+
+        if not ranked_colours:
+            return 0xB30000
+
+        _, (r, g, b) = max(ranked_colours, key=lambda item: item[0])
+
+        # Prevent very dark accents from disappearing in Discord dark mode.
+        if (r + g + b) / 3 < 45:
+            r = min(255, r + 55)
+            g = min(255, g + 55)
+            b = min(255, b + 55)
+
+        return (r << 16) | (g << 8) | b
+
+
+async def get_crest_accent_colour(crest_asset_id: str | int | None) -> int:
+    fallback = 0xB30000
+    crest_url = build_crest_url(crest_asset_id) if crest_asset_id else None
+
+    if not crest_url:
+        return fallback
+
+    if crest_url in _CREST_ACCENT_CACHE:
+        return _CREST_ACCENT_CACHE[crest_url]
+
+    try:
+        response = await _client_ea.get(crest_url)
+        response.raise_for_status()
+
+        colour = await asyncio.to_thread(
+            _dominant_colour_from_bytes,
+            response.content,
+        )
+    except Exception as error:
+        print(f"[CREST COLOUR] Could not analyse {crest_url}: {error}")
+        colour = fallback
+
+    _CREST_ACCENT_CACHE[crest_url] = colour
+    return colour
 
 # --- Web helpers for EA endpoints ---
 async def warm_ea_session():
@@ -1033,7 +1166,7 @@ async def fetch_all_stats_for_club(club_id: str):
     days_task = asyncio.create_task(get_days_since_last_match(club_id))
     rank_task = asyncio.create_task(get_club_rank(club_id))
     last5_task = asyncio.create_task(get_last5_matches_summary(club_id))
-    teamid_task = asyncio.create_task(get_team_id_for_club(club_id))
+    crestid_task = asyncio.create_task(get_crest_asset_id_for_club(club_id))
     squad_task = asyncio.create_task(get_current_squad(club_id))
 
     stats = await stats_task
@@ -1041,8 +1174,9 @@ async def fetch_all_stats_for_club(club_id: str):
     days_since = await days_task
     rank = await rank_task
     last5 = await last5_task
-    team_id = await teamid_task
+    crest_asset_id = await crestid_task
     current_squad = await squad_task
+    accent_color = await get_crest_accent_colour(crest_asset_id)
 
     rank_display = f"#{rank}" if (isinstance(rank, int) or (isinstance(rank, str) and str(rank).isdigit())) else "Unranked"
     days_display = f"{days_since} day(s) ago" if days_since is not None else "—"
@@ -1054,8 +1188,9 @@ async def fetch_all_stats_for_club(club_id: str):
         "recent_form": form_string,
         "last5": last5 or "No recent matches",
         "days_display": days_display,
-        "teamId": team_id,
+        "crestAssetId": crest_asset_id,
         "current_squad": current_squad,
+	"accent_color": accent_color,
     }
 
 STAT_LABELS = {
@@ -1434,8 +1569,8 @@ async def build_stats5_embeds(club_id: str, club_name: str | None):
     if not totals:
         return []
 
-    team_id = await get_team_id_for_club(club_id)
-    crest_url = build_crest_url(team_id) if team_id else None
+    crest_asset_id = await get_crest_asset_id_for_club(club_id)
+    crest_url = build_crest_url(crest_asset_id) if crest_asset_id else None
 
     base_title = f"📊 {club_name.upper()} — LAST 5 PLAYER TOTALS"
     subtitle = f"Across League, Playoff and Friendly matches ({len(matches)} matches)"
@@ -1567,12 +1702,12 @@ def build_stats_embed(club_id: str, club_name: str | None, data: dict) -> discor
     embed = discord.Embed(
         title=f"{title_name}",
         description=None,
-        color=0xB30000
+        color=data.get("accent_color", 0xB30000)
     )
 
     # ✅ Crest thumbnail
-    team_id = data.get("teamId")
-    crest_url = build_crest_url(team_id) if team_id else None
+    crest_asset_id = data.get("crestAssetId")
+    crest_url = build_crest_url(crest_asset_id) if crest_asset_id else None
     if crest_url:
         embed.set_thumbnail(url=crest_url)
 
@@ -4246,8 +4381,8 @@ async def fetch_and_display_last5(interaction, club_id, club_name="Club", origin
     )
 
     # ✅ Crest thumbnail (proper indentation, no duplicate embed)
-    team_id = await get_team_id_for_club(club_id)
-    crest_url = build_crest_url(team_id) if team_id else None
+    crest_asset_id = await get_crest_asset_id_for_club(club_id)
+    crest_url = build_crest_url(crest_asset_id) if crest_asset_id else None
     if crest_url:
         embed.set_thumbnail(url=crest_url)
 
@@ -4997,8 +5132,8 @@ async def handle_lastmatch(interaction: discord.Interaction, club: str, from_dro
         )
 
         # ✅ ADD THIS BLOCK (right here, same indent level)
-        team_id = await get_team_id_for_club(str(club_id))
-        crest_url = build_crest_url(team_id) if team_id else None
+        crest_asset_id = await get_crest_asset_id_for_club(str(club_id))
+        crest_url = build_crest_url(crest_asset_id) if crest_asset_id else None
         if crest_url:
             embed.set_thumbnail(url=crest_url)
 

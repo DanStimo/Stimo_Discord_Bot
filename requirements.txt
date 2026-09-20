@@ -4,4 +4,4 @@ fuzzywuzzy
 python-Levenshtein
 python-dotenv
 asyncpg>=0.29.0
-
+Pillow
