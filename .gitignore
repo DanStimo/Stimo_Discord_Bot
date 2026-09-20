@@ -3,3 +3,5 @@
 __pycache__/
 *.py[cod]
 omitsbot.py.before-*
+search_leaderboard.json
+search_leaderboard.json.tmp
