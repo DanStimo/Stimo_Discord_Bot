@@ -700,9 +700,16 @@ async def on_message(message: discord.Message):
             matches = await search_clubs_ea(content)
 
             if not matches:
-                await warn_search_channel(
-                    message,
-                    f"No club was found matching **{content}**.",
+                asyncio.create_task(safe_delete(message))
+
+                no_result_message = await message.channel.send(
+                    f"{message.author.mention} no EA FC club was found "
+                    f"matching **{content}**. Please check the spelling "
+                    f"and try again."
+                )
+
+                asyncio.create_task(
+                    safe_delete(no_result_message, delay=15)
                 )
                 return
 
@@ -827,7 +834,7 @@ async def search_clubs_ea(query: str) -> list:
         "https://proclubs.ea.com/api/fc/allTimeLeaderboard/search",
         {
             "platform": PLATFORM,
-            "clubName": query.strip()
+            "clubName": query.strip().upper()
         }
     )
 
