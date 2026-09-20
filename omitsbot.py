@@ -558,45 +558,54 @@ async def log_stats_embed_for_request(
 async def on_message(message: discord.Message):
     if message.author.bot or not message.guild:
         return
+
     if message.channel.id != FREE_STATS_CHANNEL_ID:
         return
 
-        content = (message.content or "").strip()
+    content = (message.content or "").strip()
 
-	    valid_club_name = (
-	        2 <= len(content) <= 15
-	        and all(
-	            character.isalnum() or character == " "
-	            for character in content
-	        )
-	    )
-	
-	    if not valid_club_name:
-	        await warn_search_channel(
-	            message,
-	            "That message is not a valid EA FC club name.",
-	        )
-	        return
+    valid_club_name = (
+        2 <= len(content) <= 15
+        and all(
+            character.isalnum() or character == " "
+            for character in content
+        )
+    )
+
+    if not valid_club_name:
+        await warn_search_channel(
+            message,
+            "That message is not a valid EA FC club name.",
+        )
+        return
 
     try:
         async with message.channel.typing():
-            # If they typed a clubId directly
+            # Direct club ID search
             if content.isdigit():
                 club_id = content
                 found = await search_clubs_ea(content)
-                club_name = str(found[0]["clubInfo"]["name"]) if found else f"Club {club_id}"
 
-                # 🔵 LOG: numeric path
-                #await log_free_stats(message, query=content, resolved=f"{club_name} (ID {club_id})")
+                club_name = (
+                    str(found[0]["clubInfo"]["name"])
+                    if found
+                    else f"Club {club_id}"
+                )
 
-                # delete the user's post so our response "replaces" it
                 asyncio.create_task(safe_delete(message))
-                await send_stats_message_to_channel(message.channel, club_id, club_name, origin_message=message)
+
+                await send_stats_message_to_channel(
+                    message.channel,
+                    club_id,
+                    club_name,
+                    origin_message=message,
+                )
                 return
 
-            # Search by name
+            # Club name search
             matches = await search_clubs_ea(content)
-			if not matches:
+
+            if not matches:
                 await warn_search_channel(
                     message,
                     f"No club was found matching **{content}**.",
@@ -604,26 +613,38 @@ async def on_message(message: discord.Message):
                 return
 
             if len(matches) == 1:
-                c = matches[0]["clubInfo"]
-
-                # 🔵 LOG: single match resolved
-                #await log_free_stats(message, query=content, resolved=f"{c['name']} (ID {c['clubId']})")
+                club = matches[0]["clubInfo"]
 
                 asyncio.create_task(safe_delete(message))
-                await send_stats_message_to_channel(message.channel, str(c["clubId"]), c["name"], origin_message=message)
+
+                await send_stats_message_to_channel(
+                    message.channel,
+                    str(club["clubId"]),
+                    club["name"],
+                    origin_message=message,
+                )
                 return
 
-            # 🔵 LOG: multiple matches, unresolved selection
-            #await log_free_stats(message, query=content, resolved="multiple matches")
-
-            # Multiple matches → present selector; delete the original user message
+            # Multiple matches
             asyncio.create_task(safe_delete(message))
-            view = FreeStatsDropdown(matches, original_query=content, request_message=message)
-            m = await message.channel.send("Multiple clubs found. Please select:", view=view)
-            asyncio.create_task(delete_after_delay(m, 90))
 
-    except Exception as e:
-        print(f"[ERROR] free-typed stats failed: {e}")
+            view = FreeStatsDropdown(
+                matches,
+                original_query=content,
+                request_message=message,
+            )
+
+            selector = await message.channel.send(
+                "Multiple clubs found. Please select:",
+                view=view,
+            )
+
+            asyncio.create_task(
+                delete_after_delay(selector, 90)
+            )
+
+    except Exception as error:
+        print(f"[ERROR] free-typed stats failed: {error}")
         
 # Load or initialize club mapping
 try:
