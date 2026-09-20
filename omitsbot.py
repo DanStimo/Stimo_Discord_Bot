@@ -1328,7 +1328,7 @@ async def fetch_all_stats_for_club(club_id: str):
         "days_display": days_display,
         "crestAssetId": crest_asset_id,
         "current_squad": current_squad,
-	"accent_color": accent_color,
+        "accent_color": accent_color,
     }
 
 STAT_LABELS = {
@@ -4269,24 +4269,28 @@ class StatsDropdown(discord.ui.View):
         data = await fetch_all_stats_for_club(club_id)
         embed = build_stats_embed(club_id, club_name, data)
 
-        view = PrintRecordButton({"matchesPlayed": data["stats"].get("matchesPlayed"),
-                          "wins": data["stats"].get("wins"),
-                          "draws": data["stats"].get("draws"),
-                          "losses": data["stats"].get("losses"),
-                          "skillRating": data["stats"].get("skillRating")},
-                         (club_name or f"Club {club_id}").upper())
-                final_msg = await interaction.edit_original_response(
-		            content=None,
-		            embed=embed,
-		            view=view,
-		        )
-		
-		        record_club_search(
-		            interaction.guild,
-		            interaction.user,
-		        )
-		
-		        await log_command_output(interaction, "stats", final_msg)
+        view = PrintRecordButton(
+            {
+                "matchesPlayed": data["stats"].get("matchesPlayed"),
+                "wins": data["stats"].get("wins"),
+                "draws": data["stats"].get("draws"),
+                "losses": data["stats"].get("losses"),
+                "skillRating": data["stats"].get("skillRating"),
+            },
+            (club_name or f"Club {club_id}").upper(),
+        )
+        final_msg = await interaction.edit_original_response(
+            content=None,
+            embed=embed,
+            view=view,
+        )
+
+        record_club_search(
+            interaction.guild,
+            interaction.user,
+        )
+
+        await log_command_output(interaction, "stats", final_msg)
 
         # 🔔 auto-delete the final embed after N seconds
         asyncio.create_task(delete_after_delay(final_msg, 60))
@@ -4360,18 +4364,18 @@ class FreeStatsDropdown(discord.ui.View):
             },
             (club_name or f"Club {club_id}").upper()
         )
-                final_msg = await interaction.edit_original_response(
-		            content=None,
-		            embed=embed,
-		            view=view,
-		        )
-		
-		        record_club_search(
-		            self.request_message.guild,
-		            self.request_message.author,
-		        )
-		
-		        asyncio.create_task(delete_after_delay(final_msg, 60))
+        final_msg = await interaction.edit_original_response(
+            content=None,
+            embed=embed,
+            view=view,
+        )
+
+        record_club_search(
+            self.request_message.guild,
+            self.request_message.author,
+        )
+
+        asyncio.create_task(delete_after_delay(final_msg, 60))
 
 class Stats5Dropdown(discord.ui.View):
     def __init__(self, results: list[dict]):
@@ -4739,14 +4743,14 @@ async def send_stats_message_to_channel(
         },
         (club_name or f"Club {club_id}").upper(),
     )
-        msg = await channel.send(embed=embed, view=view)
-	    asyncio.create_task(delete_after_delay(msg, 60))
-	
-	    if origin_message:
-	        record_club_search(
-	            origin_message.guild,
-	            origin_message.author,
-	        )
+    msg = await channel.send(embed=embed, view=view)
+    asyncio.create_task(delete_after_delay(msg, 60))
+
+    if origin_message:
+        record_club_search(
+            origin_message.guild,
+            origin_message.author,
+        )
 
     # Mirror to the log channel with a header that looks like the slash command
     if origin_message:
@@ -5675,15 +5679,15 @@ async def stats_command(interaction: discord.Interaction, club: str):
 
         view = PrintRecordButton(data["stats"], (club_name or f"Club {club_id}").upper())
         
-                await msg.edit(content=None, embed=embed, view=view)
+        await msg.edit(content=None, embed=embed, view=view)
 
-		        record_club_search(
-		            interaction.guild,
-		            interaction.user,
-		        )
-		
-		        msg = await interaction.channel.fetch_message(msg.id)
-		        await log_command_output(interaction, "stats", msg)
+        record_club_search(
+            interaction.guild,
+            interaction.user,
+        )
+
+        msg = await interaction.channel.fetch_message(msg.id)
+        await log_command_output(interaction, "stats", msg)
         asyncio.create_task(delete_after_delay(msg, 60))
 
     except Exception as e:
