@@ -418,6 +418,21 @@ async def safe_delete(msg: discord.Message, delay: float | None = None):
     except (discord.Forbidden, discord.NotFound, discord.HTTPException):
         pass
 
+async def warn_search_channel(
+    message: discord.Message,
+    reason: str,
+):
+    await safe_delete(message)
+
+    warning = await message.channel.send(
+        f"{message.author.mention} {reason}\n"
+        f"This channel is only for **EA FC club searches**. "
+        f"Enter a club name containing **2–15 letters, numbers or spaces**, "
+        f"with no punctuation."
+    )
+
+    asyncio.create_task(safe_delete(warning, delay=15))
+
 async def send_temp_followup(
     interaction: discord.Interaction,
     *,
@@ -546,11 +561,22 @@ async def on_message(message: discord.Message):
     if message.channel.id != FREE_STATS_CHANNEL_ID:
         return
 
-    content = (message.content or "").strip()
-    if not content or content.startswith(("/", "!", ".", "?")):
-        return
-    if len(content) < 2 or len(content) > 64:
-        return
+        content = (message.content or "").strip()
+
+	    valid_club_name = (
+	        2 <= len(content) <= 15
+	        and all(
+	            character.isalnum() or character == " "
+	            for character in content
+	        )
+	    )
+	
+	    if not valid_club_name:
+	        await warn_search_channel(
+	            message,
+	            "That message is not a valid EA FC club name.",
+	        )
+	        return
 
     try:
         async with message.channel.typing():
@@ -570,14 +596,11 @@ async def on_message(message: discord.Message):
 
             # Search by name
             matches = await search_clubs_ea(content)
-            if not matches:
-                # 🔵 LOG: no matches
-                #await log_free_stats(message, query=content, resolved="no matches")
-
-                # delete the user’s message and show a short-lived note
-                asyncio.create_task(safe_delete(message))
-                m = await message.channel.send("No matching clubs found.")
-                asyncio.create_task(delete_after_delay(m, 15))
+			if not matches:
+                await warn_search_channel(
+                    message,
+                    f"No club was found matching **{content}**.",
+                )
                 return
 
             if len(matches) == 1:
