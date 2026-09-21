@@ -1224,6 +1224,212 @@ async def get_last_match(club_id):
         print(f"[ERROR] Failed to fetch last match: {e}")
         return "Last match data not available."
 
+POSITION_ID_GROUPS = {
+    "Goalkeepers": {0},
+    "Defenders": {1, 2, 3, 4, 5, 6, 7, 8},
+    "Midfielders": {9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19},
+    "Forwards": {20, 21, 22, 23, 24, 25, 26, 27},
+}
+
+POSITION_NAME_GROUPS = {
+    "GK": "Goalkeepers",
+    "SW": "Defenders", "RWB": "Defenders", "RB": "Defenders",
+    "RCB": "Defenders", "CB": "Defenders", "LCB": "Defenders",
+    "LB": "Defenders", "LWB": "Defenders",
+    "RDM": "Midfielders", "CDM": "Midfielders", "LDM": "Midfielders",
+    "RM": "Midfielders", "RCM": "Midfielders", "CM": "Midfielders",
+    "LCM": "Midfielders", "LM": "Midfielders", "RAM": "Midfielders",
+    "CAM": "Midfielders", "LAM": "Midfielders",
+    "RF": "Forwards", "CF": "Forwards", "LF": "Forwards",
+    "RW": "Forwards", "RS": "Forwards", "ST": "Forwards",
+    "LS": "Forwards", "LW": "Forwards",
+}
+
+def _player_position_group(player: dict) -> str:
+    """Turn EA's numeric or text position into an embed group."""
+    raw = player.get("position", player.get("pos", ""))
+    text = str(raw).strip().upper()
+
+    if text.lstrip("-").isdigit():
+        position_id = int(text)
+        for group, position_ids in POSITION_ID_GROUPS.items():
+            if position_id in position_ids:
+                return group
+
+    if text in POSITION_NAME_GROUPS:
+        return POSITION_NAME_GROUPS[text]
+    if "KEEP" in text or "GOAL" in text:
+        return "Goalkeepers"
+    if "DEF" in text or "BACK" in text:
+        return "Defenders"
+    if "MID" in text:
+        return "Midfielders"
+    if "FOR" in text or "ATT" in text or "STRIK" in text or "WING" in text:
+        return "Forwards"
+
+    return "Players"
+
+def _match_rating(player: dict) -> str:
+    rating = _to_number(player.get("rating"))
+    return f"{float(rating):.1f}" if rating is not None else "—"
+
+def _percentage(made, attempted) -> int:
+    made_num = int(_to_number(made) or 0)
+    attempted_num = int(_to_number(attempted) or 0)
+    return round((made_num / attempted_num) * 100) if attempted_num else 0
+
+def _format_last_match_player(player: dict, group: str) -> str:
+    name = escape_markdown(_player_display_name(player))
+    rating = _match_rating(player)
+
+    if group == "Forwards":
+        return (
+            f"**{name}** — ⚽ {int(_to_number(player.get('goals')) or 0)} | "
+            f"🅰️ {int(_to_number(player.get('assists')) or 0)} | "
+            f"🎯 {int(_to_number(player.get('shotson')) or 0)}/"
+            f"{int(_to_number(player.get('shots')) or 0)} | ⭐ {rating}"
+        )
+
+    if group == "Midfielders":
+        pass_pct = _percentage(player.get("passesmade"), player.get("passattempts"))
+        return (
+            f"**{name}** — ⚽ {int(_to_number(player.get('goals')) or 0)} | "
+            f"🅰️ {int(_to_number(player.get('assists')) or 0)} | "
+            f"🎯 Pass {pass_pct}% | 🔁 {int(_to_number(player.get('interceptions')) or 0)} | "
+            f"⭐ {rating}"
+        )
+
+    if group == "Defenders":
+        return (
+            f"**{name}** — 🛡️ {int(_to_number(player.get('tacklesmade')) or 0)} tackles | "
+            f"🔁 {int(_to_number(player.get('interceptions')) or 0)} int | "
+            f"🧱 {int(_to_number(player.get('blocks')) or 0)} blocks | ⭐ {rating}"
+        )
+
+    if group == "Goalkeepers":
+        return (
+            f"**{name}** — 🧤 {int(_to_number(player.get('saves')) or 0)} saves | "
+            f"🥅 {int(_to_number(player.get('goalsconceded')) or 0)} conceded | "
+            f"🧼 {int(_to_number(player.get('cleansheetsgk', player.get('cleansheets'))) or 0)} CS | "
+            f"⭐ {rating}"
+        )
+
+    return (
+        f"**{name}** — ⚽ {int(_to_number(player.get('goals')) or 0)} | "
+        f"🅰️ {int(_to_number(player.get('assists')) or 0)} | ⭐ {rating}"
+    )
+
+async def get_last_match_details(club_id: str | int) -> dict | None:
+    """Return the newest match plus position-aware player lines."""
+    club_id = str(club_id)
+    all_matches = []
+
+    try:
+        for match_type in ("leagueMatch", "playoffMatch", "friendlyMatch"):
+            matches = await _ea_get_json(
+                "https://proclubs.ea.com/api/fc/clubs/matches",
+                {"matchType": match_type, "platform": PLATFORM, "clubIds": club_id},
+            ) or []
+            for match in matches:
+                match["_matchType"] = match_type
+            all_matches.extend(matches)
+
+        if not all_matches:
+            return None
+
+        all_matches.sort(key=lambda match: match.get("timestamp", 0), reverse=True)
+
+        last5_lines = []
+        for recent_match in all_matches[:5]:
+            recent_clubs = recent_match.get("clubs") or {}
+            recent_ours = recent_clubs.get(club_id) or {}
+            recent_opponent_id = next(
+                (cid for cid in recent_clubs if str(cid) != club_id),
+                None,
+            )
+            recent_opponent = recent_clubs.get(recent_opponent_id) or {}
+            recent_our_score = int(recent_ours.get("goals", 0) or 0)
+            recent_opponent_score = int(recent_opponent.get("goals", 0) or 0)
+            recent_result = (
+                "✅" if recent_our_score > recent_opponent_score
+                else "❌" if recent_our_score < recent_opponent_score
+                else "➖"
+            )
+            recent_raw_type = recent_match.get("_matchType") or recent_match.get("matchType")
+            recent_type = MATCH_TYPE_LABELS.get(
+                recent_raw_type,
+                recent_raw_type or "Match",
+            )
+            recent_opponent_name = (
+                (recent_opponent.get("details") or {}).get("name")
+                or recent_opponent.get("name")
+                or "Unknown"
+            )
+            last5_lines.append(
+                f"{recent_result} {recent_type} — vs "
+                f"{escape_markdown(recent_opponent_name)} "
+                f"({recent_our_score}–{recent_opponent_score})"
+            )
+
+        match = all_matches[0]
+        clubs = match.get("clubs") or {}
+        our_club = clubs.get(club_id) or {}
+        opponent_id = next((cid for cid in clubs if str(cid) != club_id), None)
+        opponent = clubs.get(opponent_id) or {}
+
+        our_score = int(our_club.get("goals", 0) or 0)
+        opponent_score = int(opponent.get("goals", 0) or 0)
+        if our_score > opponent_score:
+            result_text, result_emoji = "WIN", "🟢"
+        elif our_score < opponent_score:
+            result_text, result_emoji = "LOSS", "🔴"
+        else:
+            result_text, result_emoji = "DRAW", "🟡"
+
+        raw_type = match.get("_matchType") or match.get("matchType")
+        match_type = MATCH_TYPE_LABELS.get(raw_type, raw_type or "Match")
+        opponent_name = (
+            (opponent.get("details") or {}).get("name")
+            or opponent.get("name")
+            or "Unknown"
+        )
+
+        grouped_players = {
+            "Forwards": [],
+            "Midfielders": [],
+            "Defenders": [],
+            "Goalkeepers": [],
+            "Players": [],
+        }
+        players = ((match.get("players") or {}).get(club_id) or {}).values()
+        for player in players:
+            if not isinstance(player, dict):
+                continue
+            group = _player_position_group(player)
+            grouped_players[group].append(player)
+
+        for group_players in grouped_players.values():
+            group_players.sort(
+                key=lambda player: float(_to_number(player.get("rating")) or 0),
+                reverse=True,
+            )
+
+        return {
+            "last5": "\n".join(last5_lines) or "No recent matches",
+            "summary": (
+                f"{result_emoji} **{result_text}** · {match_type}\n"
+                f"vs **{escape_markdown(opponent_name)}** · **{our_score}–{opponent_score}**"
+            ),
+            "players": {
+                group: [_format_last_match_player(player, group) for player in group_players]
+                for group, group_players in grouped_players.items()
+                if group_players
+            },
+        }
+    except Exception as e:
+        print(f"[ERROR] Failed to build last-match details: {e}")
+        return None
+
 async def get_club_rank(club_id: str | int):
     club_id = str(club_id)
 
@@ -1310,7 +1516,7 @@ async def fetch_all_stats_for_club(club_id: str):
     form_task = asyncio.create_task(get_recent_form(club_id))
     days_task = asyncio.create_task(get_days_since_last_match(club_id))
     rank_task = asyncio.create_task(get_club_rank(club_id))
-    last5_task = asyncio.create_task(get_last5_matches_summary(club_id))
+    last_match_task = asyncio.create_task(get_last_match_details(club_id))
     crestid_task = asyncio.create_task(get_crest_asset_id_for_club(club_id))
     squad_task = asyncio.create_task(get_current_squad(club_id))
 
@@ -1318,7 +1524,12 @@ async def fetch_all_stats_for_club(club_id: str):
     recent_form = await form_task
     days_since = await days_task
     rank = await rank_task
-    last5 = await last5_task
+    last_match = await last_match_task
+    last5 = (
+        last_match.get("last5", "No recent matches")
+        if last_match
+        else "No recent matches"
+    )
     crest_asset_id = await crestid_task
     current_squad = await squad_task
     accent_color = await get_crest_accent_colour(crest_asset_id)
@@ -1332,6 +1543,7 @@ async def fetch_all_stats_for_club(club_id: str):
         "rank_display": rank_display,
         "recent_form": form_string,
         "last5": last5 or "No recent matches",
+        "last_match": last_match,
         "days_display": days_display,
         "crestAssetId": crest_asset_id,
         "current_squad": current_squad,
@@ -1880,6 +2092,25 @@ def build_stats_embed(club_id: str, club_name: str | None, data: dict) -> discor
 
     # Row 5 — full width (Last 5)
     fields.append(_field("Last 5 Matches", last5, inline=False))
+
+    # Latest match summary and position-aware player statistics.
+    last_match = data.get("last_match")
+    if last_match:
+        fields.append(_field("Latest Match", last_match["summary"], inline=False))
+
+        group_titles = {
+            "Forwards": "⚽ Forwards",
+            "Midfielders": "🎯 Midfielders",
+            "Defenders": "🛡️ Defenders",
+            "Goalkeepers": "🧤 Goalkeepers",
+            "Players": "👤 Other Players",
+        }
+        for group in ("Forwards", "Midfielders", "Defenders", "Goalkeepers", "Players"):
+            player_lines = last_match["players"].get(group)
+            if player_lines:
+                fields.append(
+                    _field(group_titles[group], "\n".join(player_lines)[:1024], inline=False)
+                )
 
     # Row 6 — Current Squad (full width)
     squad_list = data.get("current_squad", []) or []
