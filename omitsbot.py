@@ -1283,9 +1283,16 @@ def _made_attempted(player: dict, made_key: str, attempted_key: str) -> str:
     attempted = int(_to_number(player.get(attempted_key)) or 0)
     return f"{made}/{attempted}"
 
+LAST_MATCH_NAME_WIDTH = 18
+
 def _format_last_match_player(player: dict, group: str) -> str:
-    # Code blocks give reliable column alignment, so keep the name compact.
-    name = _player_display_name(player).replace("`", "'")[:12]
+    # Preserve normal EA gamertags while keeping unusually long names aligned.
+    raw_name = _player_display_name(player).replace("`", "'")
+    name = (
+        raw_name
+        if len(raw_name) <= LAST_MATCH_NAME_WIDTH
+        else raw_name[:LAST_MATCH_NAME_WIDTH - 1] + "…"
+    )
     rating = _match_rating(player)
     pass_pct = _percentage(player.get("passesmade"), player.get("passattempts"))
     goals = int(_to_number(player.get("goals")) or 0)
@@ -1294,28 +1301,28 @@ def _format_last_match_player(player: dict, group: str) -> str:
     tackles = _made_attempted(player, "tacklesmade", "tackleattempts")
 
     if group == "Forwards":
-        return f"{name:<12}{goals:>2} {assists:>2} {shots:>2} {pass_pct:>3}% {rating:>4}"
+        return f"{name:<{LAST_MATCH_NAME_WIDTH}}{goals:>2} {assists:>2} {shots:>2} {pass_pct:>3}% {rating:>4}"
 
     if group == "Midfielders":
-        return f"{name:<12}{goals:>2} {assists:>2} {pass_pct:>3}% {tackles:>5} {rating:>4}"
+        return f"{name:<{LAST_MATCH_NAME_WIDTH}}{goals:>2} {assists:>2} {pass_pct:>3}% {tackles:>5} {rating:>4}"
 
     if group == "Defenders":
-        return f"{name:<12}{goals:>2} {assists:>2} {tackles:>5} {pass_pct:>3}% {rating:>4}"
+        return f"{name:<{LAST_MATCH_NAME_WIDTH}}{goals:>2} {assists:>2} {tackles:>5} {pass_pct:>3}% {rating:>4}"
 
     if group == "Goalkeepers":
         saves = int(_to_number(player.get("saves")) or 0)
         conceded = int(_to_number(player.get("goalsconceded")) or 0)
         clean_sheets = int(_to_number(player.get("cleansheetsgk")) or 0)
-        return f"{name:<12}{saves:>2} {conceded:>3} {clean_sheets:>2} {rating:>4}"
+        return f"{name:<{LAST_MATCH_NAME_WIDTH}}{saves:>2} {conceded:>3} {clean_sheets:>2} {rating:>4}"
 
-    return f"{name:<12}{goals:>2} {assists:>2} {shots:>2} {pass_pct:>3}% {rating:>4}"
+    return f"{name:<{LAST_MATCH_NAME_WIDTH}}{goals:>2} {assists:>2} {shots:>2} {pass_pct:>3}% {rating:>4}"
 
 LAST_MATCH_TABLE_HEADERS = {
-    "Forwards": f"{'Player':<12}{'G':>2} {'A':>2} {'Sh':>2} {'Pass':>4} {'Rt':>4}",
-    "Midfielders": f"{'Player':<12}{'G':>2} {'A':>2} {'Pass':>4} {'Tkl':>5} {'Rt':>4}",
-    "Defenders": f"{'Player':<12}{'G':>2} {'A':>2} {'Tkl':>5} {'Pass':>4} {'Rt':>4}",
-    "Goalkeepers": f"{'Player':<12}{'Sv':>2} {'Con':>3} {'CS':>2} {'Rt':>4}",
-    "Players": f"{'Player':<12}{'G':>2} {'A':>2} {'Sh':>2} {'Pass':>4} {'Rt':>4}",
+    "Forwards": f"{'Player':<{LAST_MATCH_NAME_WIDTH}}{'G':>2} {'A':>2} {'Sh':>2} {'Pass':>4} {'Rt':>4}",
+    "Midfielders": f"{'Player':<{LAST_MATCH_NAME_WIDTH}}{'G':>2} {'A':>2} {'Pass':>4} {'Tkl':>5} {'Rt':>4}",
+    "Defenders": f"{'Player':<{LAST_MATCH_NAME_WIDTH}}{'G':>2} {'A':>2} {'Tkl':>5} {'Pass':>4} {'Rt':>4}",
+    "Goalkeepers": f"{'Player':<{LAST_MATCH_NAME_WIDTH}}{'Sv':>2} {'Con':>3} {'CS':>2} {'Rt':>4}",
+    "Players": f"{'Player':<{LAST_MATCH_NAME_WIDTH}}{'G':>2} {'A':>2} {'Sh':>2} {'Pass':>4} {'Rt':>4}",
 }
 
 async def get_last_match_details(club_id: str | int) -> dict | None:
