@@ -1278,45 +1278,55 @@ def _percentage(made, attempted) -> int:
     attempted_num = int(_to_number(attempted) or 0)
     return round((made_num / attempted_num) * 100) if attempted_num else 0
 
+def _made_attempted(player: dict, made_key: str, attempted_key: str) -> str:
+    made = int(_to_number(player.get(made_key)) or 0)
+    attempted = int(_to_number(player.get(attempted_key)) or 0)
+    return f"{made}/{attempted}"
+
 def _format_last_match_player(player: dict, group: str) -> str:
     name = escape_markdown(_player_display_name(player))
     rating = _match_rating(player)
+    pass_pct = _percentage(player.get("passesmade"), player.get("passattempts"))
 
     if group == "Forwards":
         return (
             f"**{name}** — ⚽ {int(_to_number(player.get('goals')) or 0)} | "
             f"🅰️ {int(_to_number(player.get('assists')) or 0)} | "
-            f"🎯 {int(_to_number(player.get('shotson')) or 0)}/"
-            f"{int(_to_number(player.get('shots')) or 0)} | ⭐ {rating}"
+            f"🎯 {int(_to_number(player.get('shots')) or 0)} shots | "
+            f"👟 Pass {pass_pct}% | ⭐ {rating}"
         )
 
     if group == "Midfielders":
-        pass_pct = _percentage(player.get("passesmade"), player.get("passattempts"))
         return (
             f"**{name}** — ⚽ {int(_to_number(player.get('goals')) or 0)} | "
             f"🅰️ {int(_to_number(player.get('assists')) or 0)} | "
-            f"🎯 Pass {pass_pct}% | 🔁 {int(_to_number(player.get('interceptions')) or 0)} | "
+            f"👟 Pass {pass_pct}% | "
+            f"🛡️ Tkl {_made_attempted(player, 'tacklesmade', 'tackleattempts')} | "
             f"⭐ {rating}"
         )
 
     if group == "Defenders":
         return (
-            f"**{name}** — 🛡️ {int(_to_number(player.get('tacklesmade')) or 0)} tackles | "
-            f"🔁 {int(_to_number(player.get('interceptions')) or 0)} int | "
-            f"🧱 {int(_to_number(player.get('blocks')) or 0)} blocks | ⭐ {rating}"
+            f"**{name}** — 🛡️ Tkl {_made_attempted(player, 'tacklesmade', 'tackleattempts')} | "
+            f"👟 Pass {pass_pct}% | "
+            f"🧼 CS {int(_to_number(player.get('cleansheetsdef')) or 0)} | "
+            f"⭐ {rating}"
         )
 
     if group == "Goalkeepers":
         return (
             f"**{name}** — 🧤 {int(_to_number(player.get('saves')) or 0)} saves | "
             f"🥅 {int(_to_number(player.get('goalsconceded')) or 0)} conceded | "
-            f"🧼 {int(_to_number(player.get('cleansheetsgk', player.get('cleansheets'))) or 0)} CS | "
+            f"🧼 CS {int(_to_number(player.get('cleansheetsgk')) or 0)} | "
+            f"👟 Pass {pass_pct}% | "
             f"⭐ {rating}"
         )
 
     return (
         f"**{name}** — ⚽ {int(_to_number(player.get('goals')) or 0)} | "
-        f"🅰️ {int(_to_number(player.get('assists')) or 0)} | ⭐ {rating}"
+        f"🅰️ {int(_to_number(player.get('assists')) or 0)} | "
+        f"🎯 {int(_to_number(player.get('shots')) or 0)} shots | "
+        f"👟 Pass {pass_pct}% | ⭐ {rating}"
     )
 
 async def get_last_match_details(club_id: str | int) -> dict | None:
