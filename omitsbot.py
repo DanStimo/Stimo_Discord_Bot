@@ -82,10 +82,10 @@ EVENT_CREATOR_ROLE_ID = int(os.getenv("EVENT_CREATOR_ROLE_ID", "0")) if os.geten
 EVENT_CREATOR_ROLE_NAME = "Moderator"
 EVENTS_FILE = os.getenv("EVENTS_FILE", "events.json")
 TEMPLATES_FILE = os.getenv("TEMPLATES_FILE", "templates.json")
-ATTEND_EMOJI = "âœ…"
-ABSENT_EMOJI = "âŒ"
-MAYBE_EMOJI  = "ðŸ¤·"
-LATE_EMOJI   = "ðŸ•’"
+ATTEND_EMOJI = "✅"
+ABSENT_EMOJI = "❌"
+MAYBE_EMOJI  = "🤷"
+LATE_EMOJI   = "🕒"
 EVENT_EMBED_COLOR_HEX = os.getenv("EVENT_EMBED_COLOR_HEX", "#3498DB")
 DEFAULT_TZ = ZoneInfo("Europe/London")
 
@@ -201,12 +201,12 @@ SELF_ROLE_CHANNEL_ID = 1376174726258360471
 SELF_ROLE_MESSAGE_ID = 1376183419280818286
 
 SELF_SELECT_ROLES = {
-    "ðŸ‘®": 1375523553742553118,  # Security
-    "ðŸ’—": 1375523406144864357,  # Medical
-    "ðŸ‘·": 1375523774195175444,  # Industry
-    "ðŸŒ": 1375523125290336306,  # Logistics
-    "ðŸŒ": 1375523873671479406,  # Exploration
-    "ðŸ“·": 1375523226133987329,  # Media
+    "👮": 1375523553742553118,  # Security
+    "💗": 1375523406144864357,  # Medical
+    "👷": 1375523774195175444,  # Industry
+    "🌐": 1375523125290336306,  # Logistics
+    "🌍": 1375523873671479406,  # Exploration
+    "📷": 1375523226133987329,  # Media
 }
 
 # Channel where we log free-typed stats lookups
@@ -463,10 +463,10 @@ async def on_member_join(member: discord.Member):
 
     # --- Build embed ---
     embed = discord.Embed(
-        title="Welcome aboard! ðŸ‘‹",
+        title="Welcome aboard! 👋",
         description=(
             f"{member.mention}, you've reached the **{config['server_name']}** Discord server!\n\n"
-            f"â€¢ **Say hi!:** <#{config['welcome_channel_id']}> ðŸ‘‹"
+            f"• **Say hi!:** <#{config['welcome_channel_id']}> 👋"
         ),
         color=WELCOME_COLOR,
         timestamp=datetime.now(timezone.utc)
@@ -497,7 +497,7 @@ async def on_member_join(member: discord.Member):
         message = await channel.send(content=member.mention, embed=embed)
 
         # react with custom emoji named "Wave"
-        await message.add_reaction("ðŸ‘‹")
+        await message.add_reaction("👋")
 
         print(f"[INFO] Welcome message posted for {member} in #{channel.name}")
 
@@ -521,7 +521,7 @@ async def warn_search_channel(
     warning = await message.channel.send(
         f"{message.author.mention} {reason}\n"
         f"This channel is only for **EA FC club searches**. "
-        f"Enter a club name containing **2â€“15 letters, numbers or spaces**, "
+        f"Enter a club name containing **2–15 letters, numbers or spaces**, "
         f"with no punctuation."
     )
 
@@ -611,7 +611,7 @@ async def log_star_command_usage(
             else "#unknown"
         )
 
-        header = f"ðŸ“¦ /{command_name} by {user_name} in {channel_mention}:"
+        header = f"📦 /{command_name} by {user_name} in {channel_mention}:"
 
         # Embed logging
         if message and message.embeds:
@@ -645,7 +645,7 @@ async def log_stats_embed_for_request(
     if not log_ch:
         print(f"[WARN] Log channel {LOG_CHANNEL_ID} not found")
         return
-    header = f"ðŸ“¥/stats by {author.name} in {origin_channel.mention}:"
+    header = f"📥/stats by {author.name} in {origin_channel.mention}:"
     await log_ch.send(content=header, embed=embed)
 
 @client.event
@@ -761,15 +761,15 @@ def streak_emoji(value):
     try:
         value = int(value)
         if value <= 5:
-            return "â„ï¸"
+            return "❄️"
         elif value <= 9:
-            return "ðŸ”¥"
+            return "🔥"
         elif value <= 19:
-            return "ðŸ”¥ðŸ”¥"
+            return "🔥🔥"
         else:
-            return "ðŸ”¥ðŸ”¥ðŸ”¥"
+            return "🔥🔥🔥"
     except:
-        return "â“"
+        return "❓"
 
 class PrintRecordButton(discord.ui.View):
     def __init__(self, stats, club_name):
@@ -778,7 +778,7 @@ class PrintRecordButton(discord.ui.View):
         self.club_name = club_name
         self.message = None
 
-    @discord.ui.button(label="ðŸ–¨ï¸ Print Record", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="🖨️ Print Record", style=discord.ButtonStyle.primary)
     async def print_record(self, interaction: discord.Interaction, button: discord.ui.Button):
         wins = self.stats.get("wins", "N/A")
         draws = self.stats.get("draws", "N/A")
@@ -895,7 +895,7 @@ async def get_current_squad(club_id: str) -> list[str]:
 async def get_last_played_timestamp(club_id: str | int) -> datetime | None:
     """
     Returns a timezone-aware datetime of the club's most recent match
-    across league, playoff, and friendly â€” or None if no matches.
+    across league, playoff, and friendly — or None if no matches.
     """
     club_id = str(club_id)
     match_types = ["leagueMatch", "playoffMatch", "friendlyMatch"]
@@ -921,7 +921,7 @@ async def get_last_played_timestamp(club_id: str | int) -> datetime | None:
 
     def format_last_played(dt: datetime | None) -> str:
         if not dt:
-            return "â€”"
+            return "—"
         now = datetime.now(timezone.utc)
         delta = now - dt
         days = delta.days
@@ -936,7 +936,7 @@ async def get_last_played_timestamp(club_id: str | int) -> datetime | None:
 def format_last_played(dt: datetime | None) -> str:
     """Format a datetime into a human-friendly 'last played' string."""
     if not dt:
-        return "â€”"
+        return "—"
     now = datetime.now(timezone.utc)
     delta = now - dt
     days = delta.days
@@ -1109,11 +1109,11 @@ async def get_recent_form(club_id):
             our_score = int(club_data.get("goals", 0))
             opponent_score = int(opponent_data.get("goals", 0))
             if our_score > opponent_score:
-                results.append("âœ…")
+                results.append("✅")
             elif our_score < opponent_score:
-                results.append("âŒ")
+                results.append("❌")
             else:
-                results.append("âž–")
+                results.append("➖")
         return results
     except Exception as e:
         print(f"[ERROR] Failed to fetch recent form: {e}")
@@ -1123,7 +1123,7 @@ async def get_last5_matches_summary(club_id: str) -> str:
     """
     Returns a tidy multi-line string of the last 5 matches across
     league, playoff, friendly. Example line:
-    â€¢ League â€” vs Onion Bag (2â€“1) âœ…
+    • League — vs Onion Bag (2–1) ✅
     """
     club_id = str(club_id)
     match_types = ["leagueMatch", "playoffMatch", "friendlyMatch"]
@@ -1168,13 +1168,13 @@ async def get_last5_matches_summary(club_id: str) -> str:
             our_goals = int(our.get("goals", 0))
             opp_goals = int(opp.get("goals", 0))
             if our_goals > opp_goals:
-                res = "âœ…"
+                res = "✅"
             elif our_goals < opp_goals:
-                res = "âŒ"
+                res = "❌"
             else:
-                res = "âž–"
+                res = "➖"
 
-            lines.append(f"{res} {label} â€” vs {opp_name} ({our_goals}â€“{opp_goals})")
+            lines.append(f"{res} {label} — vs {opp_name} ({our_goals}–{opp_goals})")
 
         return "\n".join(lines)
 
@@ -1218,7 +1218,7 @@ async def get_last_match(club_id):
         )
         our_score = int(club_data.get("goals", 0))
         opponent_score = int(opponent_data.get("goals", 0))
-        result = "âœ…" if our_score > opponent_score else ("âŒ" if our_score < opponent_score else "âž–")
+        result = "✅" if our_score > opponent_score else ("❌" if our_score < opponent_score else "➖")
         return f"{result} - {label} - {opponent_name} ({our_score}-{opponent_score})"
     except Exception as e:
         print(f"[ERROR] Failed to fetch last match: {e}")
@@ -1271,7 +1271,7 @@ def _player_position_group(player: dict) -> str:
 
 def _match_rating(player: dict) -> str:
     rating = _to_number(player.get("rating"))
-    return f"{float(rating):.1f}" if rating is not None else "â€”"
+    return f"{float(rating):.1f}" if rating is not None else "—"
 
 def _percentage(made, attempted) -> int:
     made_num = int(_to_number(made) or 0)
@@ -1350,9 +1350,9 @@ async def get_last_match_details(club_id: str | int) -> dict | None:
             recent_our_score = int(recent_ours.get("goals", 0) or 0)
             recent_opponent_score = int(recent_opponent.get("goals", 0) or 0)
             recent_result = (
-                "âœ…" if recent_our_score > recent_opponent_score
-                else "âŒ" if recent_our_score < recent_opponent_score
-                else "âž–"
+                "✅" if recent_our_score > recent_opponent_score
+                else "❌" if recent_our_score < recent_opponent_score
+                else "➖"
             )
             recent_raw_type = recent_match.get("_matchType") or recent_match.get("matchType")
             recent_type = MATCH_TYPE_LABELS.get(
@@ -1365,9 +1365,9 @@ async def get_last_match_details(club_id: str | int) -> dict | None:
                 or "Unknown"
             )
             last5_lines.append(
-                f"{recent_result} {recent_type} â€” vs "
+                f"{recent_result} {recent_type} — vs "
                 f"{escape_markdown(recent_opponent_name)} "
-                f"({recent_our_score}â€“{recent_opponent_score})"
+                f"({recent_our_score}–{recent_opponent_score})"
             )
 
         match = all_matches[0]
@@ -1379,11 +1379,11 @@ async def get_last_match_details(club_id: str | int) -> dict | None:
         our_score = int(our_club.get("goals", 0) or 0)
         opponent_score = int(opponent.get("goals", 0) or 0)
         if our_score > opponent_score:
-            result_text, result_emoji = "WIN", "ðŸŸ¢"
+            result_text, result_emoji = "WIN", "🟢"
         elif our_score < opponent_score:
-            result_text, result_emoji = "LOSS", "ðŸ”´"
+            result_text, result_emoji = "LOSS", "🔴"
         else:
-            result_text, result_emoji = "DRAW", "ðŸŸ¡"
+            result_text, result_emoji = "DRAW", "🟡"
 
         raw_type = match.get("_matchType") or match.get("matchType")
         match_type = MATCH_TYPE_LABELS.get(raw_type, raw_type or "Match")
@@ -1416,8 +1416,8 @@ async def get_last_match_details(club_id: str | int) -> dict | None:
         return {
             "last5": "\n".join(last5_lines) or "No recent matches",
             "summary": (
-                f"{result_emoji} **{result_text}** Â· {match_type}\n"
-                f"vs **{escape_markdown(opponent_name)}** Â· **{our_score}â€“{opponent_score}**"
+                f"{result_emoji} **{result_text}** · {match_type}\n"
+                f"vs **{escape_markdown(opponent_name)}** · **{our_score}–{opponent_score}**"
             ),
             "players": {
                 group: [_format_last_match_player(player, group) for player in group_players]
@@ -1534,7 +1534,7 @@ async def fetch_all_stats_for_club(club_id: str):
     accent_color = await get_crest_accent_colour(crest_asset_id)
 
     rank_display = f"#{rank}" if (isinstance(rank, int) or (isinstance(rank, str) and str(rank).isdigit())) else "Unranked"
-    days_display = f"{days_since} day(s) ago" if days_since is not None else "â€”"
+    days_display = f"{days_since} day(s) ago" if days_since is not None else "—"
     form_string = " ".join(recent_form) if recent_form else "No recent matches"
 
     return {
@@ -1646,9 +1646,9 @@ def _build_stats5_leaders_text(totals: dict) -> str:
     )
 
     return (
-        f"âš½ Top scorer: {join_names(top_scorers)} ({best_goals})\n"
-        f"ðŸ…°ï¸ Top assister: {join_names(top_assisters)} ({best_assists})\n"
-        f"â­ Best avg rating: {join_names(best_rated_players)} ({best_rating:.1f})"
+        f"⚽ Top scorer: {join_names(top_scorers)} ({best_goals})\n"
+        f"🅰️ Top assister: {join_names(top_assisters)} ({best_assists})\n"
+        f"⭐ Best avg rating: {join_names(best_rated_players)} ({best_rating:.1f})"
     )
 
 def _sort_players_for_stats5(item: tuple[str, dict]):
@@ -1928,7 +1928,7 @@ async def build_stats5_embeds(club_id: str, club_name: str | None):
     crest_asset_id = await get_crest_asset_id_for_club(club_id)
     crest_url = build_crest_url(crest_asset_id) if crest_asset_id else None
 
-    base_title = f"ðŸ“Š {club_name.upper()} â€” LAST 5 PLAYER TOTALS"
+    base_title = f"📊 {club_name.upper()} — LAST 5 PLAYER TOTALS"
     subtitle = f"Across League, Playoff and Friendly matches ({len(matches)} matches)"
 
     player_items = sorted(
@@ -2013,7 +2013,7 @@ async def build_stats5_embeds(club_id: str, club_name: str | None):
             embed.set_thumbnail(url=crest_url)
 
         embed.add_field(name="Totals", value=table, inline=False)
-        embed.set_footer(text=f"EAFC â€” Aggregated from the most recent {len(matches)} matches")
+        embed.set_footer(text=f"EAFC — Aggregated from the most recent {len(matches)} matches")
         embeds.append(embed)
 
     return embeds
@@ -2022,7 +2022,7 @@ async def build_stats5_embeds(club_id: str, club_name: str | None):
 ZWSP = "\u200b"
 
 def _field(name: str, value: str, inline: bool = True) -> dict:
-    return {"name": name, "value": value if value else "â€”", "inline": inline}
+    return {"name": name, "value": value if value else "—", "inline": inline}
 
 def _spacer(inline: bool = True) -> dict:
     return {"name": ZWSP, "value": ZWSP, "inline": inline}
@@ -2033,7 +2033,7 @@ def _format_squad_table(names: list[str]) -> str:
 
     def compact(name: str) -> str:
         clean = str(name).replace("`", "'")
-        return clean if len(clean) <= width else clean[:width - 1] + "â€¦"
+        return clean if len(clean) <= width else clean[:width - 1] + "…"
 
     cleaned = [compact(name) for name in names]
     midpoint = math.ceil(len(cleaned) / 2)
@@ -2070,7 +2070,7 @@ def build_stats_embed(club_id: str, club_name: str | None, data: dict) -> discor
     ubstreak = s.get("unbeatenStreak", "0")
 
     rank_display = data.get("rank_display", "Unranked")
-    days_display = data.get("days_display", "â€”")
+    days_display = data.get("days_display", "—")
     recent_form = data.get("recent_form", "No recent matches")
     last5 = data.get("last5", "No recent matches")
 
@@ -2081,7 +2081,7 @@ def build_stats_embed(club_id: str, club_name: str | None, data: dict) -> discor
         color=data.get("accent_color", 0xB30000)
     )
 
-    # âœ… Crest thumbnail
+    # ✅ Crest thumbnail
     crest_asset_id = data.get("crestAssetId")
     crest_url = build_crest_url(crest_asset_id) if crest_asset_id else None
     if crest_url:
@@ -2089,38 +2089,38 @@ def build_stats_embed(club_id: str, club_name: str | None, data: dict) -> discor
 
     fields: list[dict] = []
 
-    # Row 1 â€” two columns (+spacer for grid)
+    # Row 1 — two columns (+spacer for grid)
     fields += [
-        _field("Leaderboard Rank", f"ðŸ“ˆ {rank_display}", inline=True),
-        _field("Skill Rating", f"ðŸ… {sr}", inline=True),
+        _field("Leaderboard Rank", f"📈 {rank_display}", inline=True),
+        _field("Skill Rating", f"🏅 {sr}", inline=True),
         _spacer(True),
     ]
 
-    # Row 2 â€” two-column record summary
+    # Row 2 — two-column record summary
     fields += [
-        _field("Matches Played", f"ðŸ“Š {mp}", inline=True),
+        _field("Matches Played", f"📊 {mp}", inline=True),
         _field("W-D-L", f"{wins} - {draws} - {losses}", inline=True),
         _spacer(True),
     ]
 
-    # Row 4 â€” two columns
+    # Row 4 — two columns
     fields += [
-        _field("Win Streak", f"ðŸ”¥ {wstreak}", inline=True),
-        _field("Unbeaten Streak", f"ðŸ›¡ï¸ {ubstreak}", inline=True),
+        _field("Win Streak", f"🔥 {wstreak}", inline=True),
+        _field("Unbeaten Streak", f"🛡️ {ubstreak}", inline=True),
         _spacer(True),
     ]
 
     # Latest match summary and position-aware player statistics.
     last_match = data.get("last_match")
     if last_match:
-        fields.append(_field("ðŸ“… LATEST MATCH", last_match["summary"], inline=False))
+        fields.append(_field("📅 LATEST MATCH", last_match["summary"], inline=False))
 
         group_titles = {
-            "Forwards": "âš½ FORWARDS",
-            "Midfielders": "ðŸŽ¯ MIDFIELDERS",
-            "Defenders": "ðŸ›¡ï¸ DEFENDERS",
-            "Goalkeepers": "ðŸ§¤ GOALKEEPERS",
-            "Players": "ðŸ‘¤ OTHER PLAYERS",
+            "Forwards": "⚽ FORWARDS",
+            "Midfielders": "🎯 MIDFIELDERS",
+            "Defenders": "🛡️ DEFENDERS",
+            "Goalkeepers": "🧤 GOALKEEPERS",
+            "Players": "👤 OTHER PLAYERS",
         }
         for group in ("Forwards", "Midfielders", "Defenders", "Goalkeepers", "Players"):
             player_lines = last_match["players"].get(group)
@@ -2139,20 +2139,20 @@ def build_stats_embed(club_id: str, club_name: str | None, data: dict) -> discor
                 )
 
     # Recent results follow the detailed latest-match section.
-    fields.append(_field("ðŸ“‹ RECENT RESULTS â€” LAST 5", last5, inline=False))
+    fields.append(_field("📋 RECENT RESULTS — LAST 5", last5, inline=False))
 
-    # Row 6 â€” Current Squad (full width)
+    # Row 6 — Current Squad (full width)
     squad_list = data.get("current_squad", []) or []
     if squad_list:
         squad_text = _format_squad_table(squad_list)
     else:
-        squad_text = "â€”"
+        squad_text = "—"
     
-    fields.append(_field("ðŸ‘¥ CURRENT SQUAD", squad_text, inline=False))
+    fields.append(_field("👥 CURRENT SQUAD", squad_text, inline=False))
 
-    # Row 6 â€” two columns
+    # Row 6 — two columns
     fields += [
-        _field("Last Active", f"ðŸ—“ï¸ {days_display}", inline=True),
+        _field("Last Active", f"🗓️ {days_display}", inline=True),
         _field("Club ID", f"`{club_id}`", inline=True),
         _spacer(True),
     ]
@@ -2160,7 +2160,7 @@ def build_stats_embed(club_id: str, club_name: str | None, data: dict) -> discor
     for f in fields:
         embed.add_field(**f)
 
-    embed.set_footer(text="EAFC â€” Pro Clubs Stats")
+    embed.set_footer(text="EAFC — Pro Clubs Stats")
     return embed
 
 def format_columns(names: list[str], cols: int = 2) -> str:
@@ -2169,7 +2169,7 @@ def format_columns(names: list[str], cols: int = 2) -> str:
     Uses simple spacing; NOT a code block so markdown is escaped beforehand.
     """
     if not names:
-        return "â€”"
+        return "—"
     escaped = [escape_markdown(n) for n in names]
     rows = math.ceil(len(escaped) / cols)
     # build columns as lists
@@ -2213,7 +2213,7 @@ async def rotate_presence():
     ]
 
     if not guild_ids:
-        print("[WARN] GUILD_IDS not set â€“ cannot rotate presence.")
+        print("[WARN] GUILD_IDS not set – cannot rotate presence.")
         return
 
     if len(guild_ids) != len(watch_role_ids):
@@ -2253,9 +2253,9 @@ async def rotate_presence():
 
             if all_candidates:
                 pick = random.choice(all_candidates)
-                watching_text = f"{pick.display_name} ðŸ‘€"
+                watching_text = f"{pick.display_name} 👀"
             else:
-                watching_text = "2 servers ðŸ‘€"
+                watching_text = "2 servers 👀"
 
             await client.change_presence(
                 activity=discord.Activity(
@@ -2638,7 +2638,7 @@ def _ship_scu(ship: dict) -> int:
     except Exception:
         return 0
 
-def ship_text(value, default="â€”"):
+def ship_text(value, default="—"):
     if value in (None, "", [], {}):
         return default
 
@@ -2848,7 +2848,7 @@ async def ship_autocomplete(
 
     return choices
 
-def _safe_ship_value(value, default="â€”"):
+def _safe_ship_value(value, default="—"):
     if value in (None, "", [], {}):
         return default
     return str(value)
@@ -2901,10 +2901,10 @@ def _manufacturer_name(ship: dict) -> str:
         return (
             manufacturer.get("name")
             or manufacturer.get("code")
-            or str(ship.get("manufacturer_id") or "â€”")
+            or str(ship.get("manufacturer_id") or "—")
         )
 
-    return str(manufacturer or ship.get("manufacturer_id") or "â€”")
+    return str(manufacturer or ship.get("manufacturer_id") or "—")
 
 
 async def fetch_ship_from_scapi(ship_name: str) -> dict | None:
@@ -2999,7 +2999,7 @@ def build_ship_embed(ship: dict) -> discord.Embed:
         description = description[:347] + "..."
 
     embed = discord.Embed(
-        title=f"ðŸš€ {ship_name}",
+        title=f"🚀 {ship_name}",
         description=description,
         color=0x5865F2
     )
@@ -3049,7 +3049,7 @@ def build_ship_embed(ship: dict) -> discord.Embed:
     
     embed.add_field(name="Size", value=ship_text(ship.get("size")).title(), inline=True)
     embed.add_field(name="Crew", value=crew, inline=True)
-    embed.add_field(name="Cargo", value=f"{cargo} SCU" if cargo not in (None, "", "â€”") else "â€”", inline=True)
+    embed.add_field(name="Cargo", value=f"{cargo} SCU" if cargo not in (None, "", "—") else "—", inline=True)
     
     dimension = ship.get("dimension") or {}
     
@@ -3073,7 +3073,7 @@ def build_ship_embed(ship: dict) -> discord.Embed:
     )
     embed.add_field(name="Status", value=ship_text(ship.get("production_status") or ship.get("status")).title(), inline=True)
 
-    embed.set_footer(text="Star Citizen â€” Ship Data")
+    embed.set_footer(text="Star Citizen — Ship Data")
     return embed
 
 async def fetch_org_members_scapi(org_sid: str, max_pages: int = 10) -> list[dict]:
@@ -3174,7 +3174,7 @@ async def fetch_org_info_scapi(org_sid: str) -> dict | None:
 
 def build_members_embed(org_sid: str, members: list[dict], org_info: dict | None = None) -> discord.Embed:
     embed = discord.Embed(
-        title=f"ðŸ‘¥ {org_sid.upper()} Members",
+        title=f"👥 {org_sid.upper()} Members",
         description=f"Current organisation members found: **{len(members)}**",
         color=0x5865F2
     )
@@ -3199,20 +3199,20 @@ def build_members_embed(org_sid: str, members: list[dict], org_info: dict | None
 
     if not members:
         embed.add_field(name="Members", value="No members found.", inline=False)
-        embed.set_footer(text="Star Citizen â€” Organisation Members")
+        embed.set_footer(text="Star Citizen — Organisation Members")
         return embed
 
     groups = {
-        "ðŸ‘‘ Leadership": [],
-        "ðŸ›¡ï¸ Staff": [],
-        "ðŸ‘¥ Members": [],
-        "ðŸ“¦ Other": [],
+        "👑 Leadership": [],
+        "🛡️ Staff": [],
+        "👥 Members": [],
+        "📦 Other": [],
     }
 
     for member in members:
         display = str(member.get("display") or member.get("handle") or "Unknown").strip()
         handle = str(member.get("handle") or "").strip()
-        rank = str(member.get("rank") or "â€”").strip()
+        rank = str(member.get("rank") or "—").strip()
 
         roles = member.get("roles") or []
         cleaned_roles = [
@@ -3229,7 +3229,7 @@ def build_members_embed(org_sid: str, members: list[dict], org_info: dict | None
 
         details = rank
         if roles_text:
-            details += f" â€¢ {roles_text}"
+            details += f" • {roles_text}"
 
         line = f"**{display}**{handle_part}\n*{details}*"
 
@@ -3237,25 +3237,25 @@ def build_members_embed(org_sid: str, members: list[dict], org_info: dict | None
         roles_l = roles_text.lower()
 
         if "founder" in roles_l or "master" in rank_l:
-            groups["ðŸ‘‘ Leadership"].append(line)
+            groups["👑 Leadership"].append(line)
         elif "officer" in roles_l or "recruitment" in roles_l or "branding" in roles_l:
-            groups["ðŸ›¡ï¸ Staff"].append(line)
+            groups["🛡️ Staff"].append(line)
         elif "regular" in rank_l or "member" in rank_l:
-            groups["ðŸ‘¥ Members"].append(line)
+            groups["👥 Members"].append(line)
         else:
-            groups["ðŸ“¦ Other"].append(line)
+            groups["📦 Other"].append(line)
 
     for group_name, group_members in groups.items():
         if not group_members:
             continue
 
         embed.add_field(
-            name=f"{group_name} Â· {len(group_members)}",
+            name=f"{group_name} · {len(group_members)}",
             value="\n\n".join(group_members[:15]),
             inline=False
         )
 
-    embed.set_footer(text="Phonics â€” Organisation Members")
+    embed.set_footer(text="Phonics — Organisation Members")
     return embed
 
 async def build_commodity_embed(
@@ -3292,14 +3292,14 @@ async def build_commodity_embed(
         return system_name == wanted_system
 
     embed = discord.Embed(
-        title=f"ðŸšš {commodity_name}",
+        title=f"🚚 {commodity_name}",
         description="Best buy/sell locations from UEX trade data.",
         color=0x5865F2
     )
 
     if not rows:
         embed.add_field(name="Prices", value="No price data found.", inline=False)
-        embed.set_footer(text="Star Citizen â€” UEX")
+        embed.set_footer(text="Star Citizen — UEX")
         return embed
 
     buy_candidates = [r for r in rows if r.get("price_buy") not in (None, "", 0)]
@@ -3354,10 +3354,10 @@ async def build_commodity_embed(
             system_name = terminal_system_name(terminal_info)
             buy_price = float(r.get("price_buy") or 0)
             profit = int(best_sell - buy_price)
-            stock = r.get("scu_buy") or r.get("stock_buy") or "â€”"
+            stock = r.get("scu_buy") or r.get("stock_buy") or "—"
 
             lines.append(
-                f"**[{system_name}] {terminal}** â€” Buy: `{int(buy_price)}` aUEC/SCU â€¢ Profit: `+{profit}` â€¢ Stock: `{stock}`"
+                f"**[{system_name}] {terminal}** — Buy: `{int(buy_price)}` aUEC/SCU • Profit: `+{profit}` • Stock: `{stock}`"
             )
 
         embed.add_field(name="Best Buy", value="\n".join(lines), inline=False)
@@ -3374,11 +3374,11 @@ async def build_commodity_embed(
             terminal = r.get("terminal_name") or r.get("name_terminal") or "Unknown"
             terminal_info = find_terminal_info(terminals, terminal)
             system_name = terminal_system_name(terminal_info)
-            price = r.get("price_sell", "â€”")
-            demand = r.get("scu_sell") or r.get("stock_sell") or "â€”"
+            price = r.get("price_sell", "—")
+            demand = r.get("scu_sell") or r.get("stock_sell") or "—"
 
             lines.append(
-                f"**[{system_name}] {terminal}** â€” Sell: `{price}` aUEC/SCU â€¢ Demand: `{demand}`"
+                f"**[{system_name}] {terminal}** — Sell: `{price}` aUEC/SCU • Demand: `{demand}`"
             )
 
         embed.add_field(name="Best Sell", value="\n".join(lines), inline=False)
@@ -3389,12 +3389,12 @@ async def build_commodity_embed(
             inline=False
         )
 
-    footer_bits = ["Star Citizen â€” UEX"]
+    footer_bits = ["Star Citizen — UEX"]
     if auto_load_only:
         footer_bits.append("Auto-load only")
     if wanted_system:
         footer_bits.append(f"System: {system_filter}")
-    embed.set_footer(text=" â€¢ ".join(footer_bits))
+    embed.set_footer(text=" • ".join(footer_bits))
 
     return embed
 
@@ -3424,14 +3424,14 @@ async def build_route_embed(
         return None
 
     embed = discord.Embed(
-        title=f"ðŸ“ˆ Best Routes â€” {commodity_name}",
+        title=f"📈 Best Routes — {commodity_name}",
         description="Top trade routes by profit and margin.",
         color=0x2ECC71
     )
 
     if not routes:
         embed.add_field(name="Routes", value="No routes found.", inline=False)
-        embed.set_footer(text="Star Citizen â€” UEX")
+        embed.set_footer(text="Star Citizen — UEX")
         return embed
 
     filtered_routes = []
@@ -3487,31 +3487,31 @@ async def build_route_embed(
 
     if not filtered_routes:
         embed.add_field(name="Routes", value="No routes found matching that filter.", inline=False)
-        embed.set_footer(text="Star Citizen â€” UEX")
+        embed.set_footer(text="Star Citizen — UEX")
         return embed
 
     def auto_icon(val):
         if val is True:
-            return "âœ…"
+            return "✅"
         if val is False:
-            return "âŒ"
-        return "â“"
+            return "❌"
+        return "❓"
 
     lines = []
 
     for r, origin, destination, origin_system, destination_system, origin_auto, destination_auto in filtered_routes[:10]:
-        margin = r.get("profit_margin") or r.get("margin") or "â€”"
-        profit_per_scu = r.get("profit") or r.get("profit_total") or "â€”"
+        margin = r.get("profit_margin") or r.get("margin") or "—"
+        profit_per_scu = r.get("profit") or r.get("profit_total") or "—"
 
         line = (
-            f"**[{origin_system}] {origin} {auto_icon(origin_auto)} â†’ [{destination_system}] {destination} {auto_icon(destination_auto)}**\n"
-            f"Profit: `{profit_per_scu}` aUEC/SCU â€¢ Margin: `{margin}`"
+            f"**[{origin_system}] {origin} {auto_icon(origin_auto)} → [{destination_system}] {destination} {auto_icon(destination_auto)}**\n"
+            f"Profit: `{profit_per_scu}` aUEC/SCU • Margin: `{margin}`"
         )
 
         if cargo_scu:
             try:
                 total_profit = float(profit_per_scu) * int(cargo_scu)
-                line += f" â€¢ Full Load ({cargo_scu} SCU): `{int(total_profit):,}` aUEC"
+                line += f" • Full Load ({cargo_scu} SCU): `{int(total_profit):,}` aUEC"
             except Exception:
                 pass
 
@@ -3531,15 +3531,15 @@ async def build_route_embed(
     )
 
     if cargo_scu and ship_name:
-        embed.set_author(name=f"Ship: {ship_name} â€¢ {cargo_scu} SCU")
+        embed.set_author(name=f"Ship: {ship_name} • {cargo_scu} SCU")
     elif cargo_scu:
         embed.set_author(name=f"Cargo: {cargo_scu} SCU")
 
     footer_bits = [
-        "Star Citizen â€” UEX",
-        "âœ… Auto-load",
-        "âŒ No auto-load",
-        "â” Unknown"
+        "Star Citizen — UEX",
+        "✅ Auto-load",
+        "❌ No auto-load",
+        "❔ Unknown"
     ]
     
     if auto_load_only:
@@ -3548,7 +3548,7 @@ async def build_route_embed(
     if wanted_system:
         footer_bits.append(f"System: {system_filter}")
     
-    embed.set_footer(text=" â€¢ ".join(footer_bits))
+    embed.set_footer(text=" • ".join(footer_bits))
 
     return embed
 
@@ -3583,7 +3583,7 @@ class CommodityDropdown(discord.ui.View):
         options.append(discord.SelectOption(label="None of these", value="none"))
 
         select = discord.ui.Select(
-            placeholder="Choose a commodityâ€¦",
+            placeholder="Choose a commodity…",
             options=options,
             min_values=1,
             max_values=1
@@ -3686,7 +3686,7 @@ class ShipDropdown(discord.ui.View):
         options.append(discord.SelectOption(label="None of these", value="none"))
 
         select = discord.ui.Select(
-            placeholder="Choose a shipâ€¦",
+            placeholder="Choose a ship…",
             options=options,
             min_values=1,
             max_values=1
@@ -3761,7 +3761,7 @@ class ShipDropdown(discord.ui.View):
                 auto_load_only=self.auto_load_only,
                 system_filter=self.system_filter
             )
-            embed.set_author(name=f"Ship: {ship_name} â€¢ {ship_scu} SCU")
+            embed.set_author(name=f"Ship: {ship_name} • {ship_scu} SCU")
             command_name = "cargo"
 
         elif self.mode == "route":
@@ -3836,7 +3836,7 @@ class TerminalDropdown(discord.ui.View):
             options.append(discord.SelectOption(label="None of these", value="none"))
 
         select = discord.ui.Select(
-            placeholder="Choose a terminalâ€¦",
+            placeholder="Choose a terminal…",
             options=options[:25],
             min_values=1,
             max_values=1
@@ -3899,17 +3899,17 @@ class TerminalDropdown(discord.ui.View):
         )
 
         embed = discord.Embed(
-            title=f"ðŸª {chosen.get('name', 'Unknown Terminal')}",
-            description=f"Available trading commodities â€¢ {system_name}",
+            title=f"🏪 {chosen.get('name', 'Unknown Terminal')}",
+            description=f"Available trading commodities • {system_name}",
             color=0x3498DB
         )
 
         if buy:
-            lines = [f"{c.get('commodity_name', 'Unknown')} â€” `{c.get('price_buy', 'â€”')}`" for c in buy[:10]]
+            lines = [f"{c.get('commodity_name', 'Unknown')} — `{c.get('price_buy', '—')}`" for c in buy[:10]]
             embed.add_field(name="Buys", value="\n".join(lines), inline=False)
 
         if sell:
-            lines = [f"{c.get('commodity_name', 'Unknown')} â€” `{c.get('price_sell', 'â€”')}`" for c in sell[:10]]
+            lines = [f"{c.get('commodity_name', 'Unknown')} — `{c.get('price_sell', '—')}`" for c in sell[:10]]
             embed.add_field(name="Sells", value="\n".join(lines), inline=False)
 
         await interaction.edit_original_response(content=None, embed=embed, view=None)
@@ -3943,19 +3943,19 @@ async def build_bestnow_embed(
 
     def auto_icon(value):
         if value is True:
-            return "âœ…"
+            return "✅"
         if value is False:
-            return "âŒ"
-        return "â”"
+            return "❌"
+        return "❔"
 
     embed = discord.Embed(
-        title="ðŸ’° Best Trade Right Now",
+        title="💰 Best Trade Right Now",
         color=0x2ECC71
     )
 
     if not isinstance(ranked, list) or not ranked:
         embed.description = "No commodity ranking data found."
-        embed.set_footer(text="Star Citizen â€” UEX")
+        embed.set_footer(text="Star Citizen — UEX")
         return embed
 
     # Try top ranked commodities first, then find their best route.
@@ -4033,38 +4033,38 @@ async def build_bestnow_embed(
 
     if not best:
         embed.description = "No profitable trade found matching your filters."
-        footer_bits = ["Star Citizen â€” UEX", "âœ… Auto-load", "âŒ No auto-load", "â” Unknown"]
+        footer_bits = ["Star Citizen — UEX", "✅ Auto-load", "❌ No auto-load", "❔ Unknown"]
         if auto_load_only:
             footer_bits.append("Auto-load only")
         if system_filter:
             footer_bits.append(f"System: {system_filter}")
-        embed.set_footer(text=" â€¢ ".join(footer_bits))
+        embed.set_footer(text=" • ".join(footer_bits))
         return embed
 
     line = (
-        f"**{best['commodity']}** â€” Buy at **[{best['origin_system']}] {best['origin']} {auto_icon(best['origin_auto'])}** "
-        f"â†’ Sell at **[{best['destination_system']}] {best['destination']} {auto_icon(best['destination_auto'])}** "
+        f"**{best['commodity']}** — Buy at **[{best['origin_system']}] {best['origin']} {auto_icon(best['origin_auto'])}** "
+        f"→ Sell at **[{best['destination_system']}] {best['destination']} {auto_icon(best['destination_auto'])}** "
         f"for **{int(best['profit']):,} aUEC/SCU profit**"
     )
 
     if cargo_scu:
         full_profit = int(best["profit"] * int(cargo_scu))
-        line += f" â€¢ **Full load:** `{full_profit:,}` aUEC"
+        line += f" • **Full load:** `{full_profit:,}` aUEC"
 
     embed.description = line
 
     if cargo_scu and ship_name:
-        embed.set_author(name=f"Ship: {ship_name} â€¢ {cargo_scu} SCU")
+        embed.set_author(name=f"Ship: {ship_name} • {cargo_scu} SCU")
     elif cargo_scu:
         embed.set_author(name=f"Cargo: {cargo_scu} SCU")
 
-    footer_bits = ["Star Citizen â€” UEX", "âœ… Auto-load", "âŒ No auto-load", "â” Unknown"]
+    footer_bits = ["Star Citizen — UEX", "✅ Auto-load", "❌ No auto-load", "❔ Unknown"]
     if auto_load_only:
         footer_bits.append("Auto-load only")
     if system_filter:
         footer_bits.append(f"System: {system_filter}")
 
-    embed.set_footer(text=" â€¢ ".join(footer_bits))
+    embed.set_footer(text=" • ".join(footer_bits))
     return embed
         
 async def search_terminal_uex(query: str) -> list[dict]:
@@ -4221,7 +4221,7 @@ async def build_trending_embed(limit: int = 10) -> discord.Embed:
     items = await get_trending_commodities(limit=limit)
 
     embed = discord.Embed(
-        title="ðŸ“ˆ Trending Commodities",
+        title="📈 Trending Commodities",
         description="Most traded commodities by average monthly SCU volume.",
         color=0xF1C40F
     )
@@ -4232,21 +4232,21 @@ async def build_trending_embed(limit: int = 10) -> discord.Embed:
             value="No trending commodity data was returned by UEX.",
             inline=False
         )
-        embed.set_footer(text="Star Citizen â€” UEX")
+        embed.set_footer(text="Star Citizen — UEX")
         return embed
 
     lines = []
     for idx, item in enumerate(items, start=1):
         name = item.get("name", "Unknown")
-        code = item.get("code", "â€”")
+        code = item.get("code", "—")
         buy_scu = int(item.get("_buy_scu_avg_month", 0))
         sell_scu = int(item.get("_sell_scu_avg_month", 0))
         total_scu = int(item.get("_total_scu_avg_month", 0))
-        cax_score = item.get("cax_score", "â€”")
+        cax_score = item.get("cax_score", "—")
 
         lines.append(
             f"**{idx}. {name}** (`{code}`)\n"
-            f"Buy: `{buy_scu:,}` SCU/mo â€¢ Sell: `{sell_scu:,}` SCU/mo â€¢ Total: `{total_scu:,}` SCU/mo â€¢ CAX: `{cax_score}`"
+            f"Buy: `{buy_scu:,}` SCU/mo • Sell: `{sell_scu:,}` SCU/mo • Total: `{total_scu:,}` SCU/mo • CAX: `{cax_score}`"
         )
 
     field_text = ""
@@ -4256,7 +4256,7 @@ async def build_trending_embed(limit: int = 10) -> discord.Embed:
         field_text += line + "\n\n"
 
     embed.add_field(name="Top Commodities", value=field_text.strip(), inline=False)
-    embed.set_footer(text="Star Citizen â€” UEX")
+    embed.set_footer(text="Star Citizen — UEX")
     return embed
 
 
@@ -4294,13 +4294,13 @@ async def build_cargo_embed(
         return system_name == wanted_system
 
     embed = discord.Embed(
-        title=f"ðŸ“¦ Cargo Calculator â€” {commodity_name}",
+        title=f"📦 Cargo Calculator — {commodity_name}",
         color=0xF1C40F
     )
 
     if not rows:
         embed.description = "No price data found for this commodity."
-        embed.set_footer(text="Star Citizen â€” UEX")
+        embed.set_footer(text="Star Citizen — UEX")
         return embed
 
     if auto_load_only:
@@ -4337,12 +4337,12 @@ async def build_cargo_embed(
             f"Locations must support at least `{min_required_scu:,.0f}` SCU "
             f"(75% of your `{cargo_scu}` SCU ship)."
         )
-        footer_bits = ["Star Citizen â€” UEX"]
+        footer_bits = ["Star Citizen — UEX"]
         if auto_load_only:
             footer_bits.append("Auto-load only")
         if wanted_system:
             footer_bits.append(f"System: {system_filter}")
-        embed.set_footer(text=" â€¢ ".join(footer_bits))
+        embed.set_footer(text=" • ".join(footer_bits))
         return embed
 
     sell_terminal = (
@@ -4408,12 +4408,12 @@ async def build_cargo_embed(
     embed.add_field(name="Total Cost", value=f"`{total_cost:,.2f}` aUEC", inline=True)
     embed.add_field(name="Total Profit", value=f"`{total_profit:,.2f}` aUEC", inline=True)
 
-    footer_bits = ["Star Citizen â€” UEX"]
+    footer_bits = ["Star Citizen — UEX"]
     if auto_load_only:
         footer_bits.append("Auto-load only")
     if wanted_system:
         footer_bits.append(f"System: {system_filter}")
-    embed.set_footer(text=" â€¢ ".join(footer_bits))
+    embed.set_footer(text=" • ".join(footer_bits))
 
     return embed
 
@@ -4465,7 +4465,7 @@ async def log_command_output(
         return
 
     embed = discord.Embed(
-        title=f"ðŸ“¦ Command Archive: /{command_name}",
+        title=f"📦 Command Archive: /{command_name}",
         color=discord.Color.dark_grey()
     )
     embed.add_field(name="User", value=f"{interaction.user.name}", inline=False)
@@ -4476,7 +4476,7 @@ async def log_command_output(
         if message.embeds:
             for em in message.embeds:
                 await archive_channel.send(
-                    content=f"ðŸ“¥ /{command_name} by {interaction.user.name} in {interaction.channel.mention}:",
+                    content=f"📥 /{command_name} by {interaction.user.name} in {interaction.channel.mention}:",
                     embed=em
                 )
         elif message.content:
@@ -4501,7 +4501,7 @@ class StatsDropdown(discord.ui.View):
         ]
         options.append(discord.SelectOption(label="None of these", value="none"))
 
-        select = discord.ui.Select(placeholder="Choose a clubâ€¦", options=options, min_values=1, max_values=1)
+        select = discord.ui.Select(placeholder="Choose a club…", options=options, min_values=1, max_values=1)
         select.callback = self._on_select
         self.add_item(select)
 
@@ -4523,8 +4523,8 @@ class StatsDropdown(discord.ui.View):
 
         await interaction.response.defer()
 
-        # turn the dropdown message â†’ loading text
-        loading_msg = await interaction.edit_original_response(content="â³ Fetching club statsâ€¦", view=None)
+        # turn the dropdown message → loading text
+        loading_msg = await interaction.edit_original_response(content="⏳ Fetching club stats…", view=None)
 
         # fetch + render
         data = await fetch_all_stats_for_club(club_id)
@@ -4553,7 +4553,7 @@ class StatsDropdown(discord.ui.View):
 
         await log_command_output(interaction, "stats", final_msg)
 
-        # ðŸ”” auto-delete the final embed after N seconds
+        # 🔔 auto-delete the final embed after N seconds
         asyncio.create_task(delete_after_delay(final_msg, 60))
 
 class FreeStatsDropdown(discord.ui.View):
@@ -4569,14 +4569,14 @@ class FreeStatsDropdown(discord.ui.View):
         ]
         options.append(discord.SelectOption(label="None of these", value="none"))
 
-        select = discord.ui.Select(placeholder="Choose a clubâ€¦", options=options, min_values=1, max_values=1)
+        select = discord.ui.Select(placeholder="Choose a club…", options=options, min_values=1, max_values=1)
         select.callback = self._on_select
         self.add_item(select)
 
     async def _on_select(self, interaction: discord.Interaction):
         value = self.children[0].values[0]
         if value == "none":
-            # ðŸ”µ LOG: user cancelled the selection
+            # 🔵 LOG: user cancelled the selection
             #await log_free_stats(interaction.message, query=self.original_query, resolved="cancelled")
 
             msg = await interaction.response.edit_message(content="Selection cancelled.", view=None)
@@ -4585,7 +4585,7 @@ class FreeStatsDropdown(discord.ui.View):
 
         chosen = next((c for c in self.results if str(c["clubInfo"]["clubId"]) == str(value)), None)
         if not chosen:
-            # ðŸ”µ LOG: selection not found (edge case)
+            # 🔵 LOG: selection not found (edge case)
             #await log_free_stats(interaction.message, query=self.original_query, resolved="selection not found")
 
             msg = await interaction.response.edit_message(content="Could not find that club.", view=None)
@@ -4595,19 +4595,19 @@ class FreeStatsDropdown(discord.ui.View):
         club_id = str(chosen["clubInfo"]["clubId"])
         club_name = chosen["clubInfo"]["name"]
 
-        # ðŸ”µ LOG: final selection resolved
+        # 🔵 LOG: final selection resolved
         #await log_free_stats(interaction.message, query=self.original_query, resolved=f"{club_name} (ID {club_id})")
 
         await interaction.response.defer()
 
-        # turn the dropdown message â†’ loading text
-        loading_msg = await interaction.edit_original_response(content="â³ Fetching club statsâ€¦", view=None)
+        # turn the dropdown message → loading text
+        loading_msg = await interaction.edit_original_response(content="⏳ Fetching club stats…", view=None)
 
        # fetch + render
         data = await fetch_all_stats_for_club(club_id)
         embed = build_stats_embed(club_id, club_name, data)
         
-        # ðŸ”µ NEW: mirror the card to your log channel with a header like "/stats by ... in #..."
+        # 🔵 NEW: mirror the card to your log channel with a header like "/stats by ... in #..."
         await log_stats_embed_for_request(
             guild=self.request_message.guild,
             author=self.request_message.author,
@@ -4653,7 +4653,7 @@ class Stats5Dropdown(discord.ui.View):
         options.append(discord.SelectOption(label="None of these", value="none"))
 
         select = discord.ui.Select(
-            placeholder="Choose a clubâ€¦",
+            placeholder="Choose a club…",
             options=options,
             min_values=1,
             max_values=1
@@ -4679,7 +4679,7 @@ class Stats5Dropdown(discord.ui.View):
         club_name = chosen["clubInfo"]["name"]
 
         await interaction.response.defer()
-        await interaction.edit_original_response(content="â³ Fetching last 5 player totalsâ€¦", view=None)
+        await interaction.edit_original_response(content="⏳ Fetching last 5 player totals…", view=None)
 
         embeds = await build_stats5_embeds(club_id, club_name)
         if not embeds:
@@ -4798,11 +4798,11 @@ async def fetch_and_display_last5(interaction, club_id, club_name="Club", origin
 
     # Build embed once
     embed = discord.Embed(
-        title=f"ðŸ“… {club_name.upper()}'s Last 5",
+        title=f"📅 {club_name.upper()}'s Last 5",
         color=discord.Color.blue()
     )
 
-    # âœ… Crest thumbnail (proper indentation, no duplicate embed)
+    # ✅ Crest thumbnail (proper indentation, no duplicate embed)
     crest_asset_id = await get_crest_asset_id_for_club(club_id)
     crest_url = build_crest_url(crest_asset_id) if crest_asset_id else None
     if crest_url:
@@ -4823,15 +4823,15 @@ async def fetch_and_display_last5(interaction, club_id, club_name="Club", origin
         our_score = int(club_data.get("goals", 0))
         opponent_score = int(opponent_data.get("goals", 0)) if opponent_data else 0
 
-        result = "âœ…" if our_score > opponent_score else "âŒ" if our_score < opponent_score else "âž–"
+        result = "✅" if our_score > opponent_score else "❌" if our_score < opponent_score else "➖"
 
         raw_type = match.get("_matchType") or match.get("matchType")
         label = MATCH_TYPE_LABELS.get(raw_type, raw_type or "Unknown")
 
         # (Optional) put emoji first for alignment:
-        # name=f"{idx}âƒ£ {result} {label} â€” vs {opponent_name}",
+        # name=f"{idx}⃣ {result} {label} — vs {opponent_name}",
         embed.add_field(
-            name=f"{idx}âƒ£ {result} [{label}] vs {opponent_name}",
+            name=f"{idx}⃣ {result} [{label}] vs {opponent_name}",
             value=f"Score: {our_score}-{opponent_score}",
             inline=False
         )
@@ -4912,7 +4912,7 @@ class PlayerSelect(discord.ui.UserSelect):
             has_role = any(r.id == role_id for r in picked.roles)
             if not has_role:
                 await interaction.response.send_message(
-                    f"âŒ {picked.mention} doesn't have the required role <@&{role_id}>.",
+                    f"❌ {picked.mention} doesn't have the required role <@&{role_id}>.",
                     ephemeral=True
                 )
                 return
@@ -4921,7 +4921,7 @@ class FormationSelect(discord.ui.Select):
     def __init__(self):
         options = [discord.SelectOption(label=f, value=f) for f in FORMATIONS.keys()]
         super().__init__(
-            placeholder="Select a new formationâ€¦",
+            placeholder="Select a new formation…",
             options=options,
             min_values=1,
             max_values=1
@@ -5086,7 +5086,7 @@ async def auto_post_lineup_in_thread(ev: dict, thread: discord.Thread, formation
             "updated_at": None,
             "finished_once": False,
             "pinged_user_ids": [],
-            "kickoff_at": ev.get("datetime"),  # <â€” use the event time if present
+            "kickoff_at": ev.get("datetime"),  # <— use the event time if present
         }
 
         embed = make_lineup_embed(lp)
@@ -5151,10 +5151,10 @@ class LineupAssignView(discord.ui.View):
                 self.add_item(self._PrevButton())
                 self.add_item(self._NextButton())
             else:
-                # Role not found â€“ fallback to generic searchable picker
+                # Role not found – fallback to generic searchable picker
                 self.add_item(PlayerSelect(lp))
         else:
-            # No role set â€“ fallback to generic searchable picker
+            # No role set – fallback to generic searchable picker
             self.add_item(PlayerSelect(lp))
 
     # ---------- Pager helpers ----------
@@ -5168,7 +5168,7 @@ class LineupAssignView(discord.ui.View):
 
     class _PrevButton(discord.ui.Button):
         def __init__(self):
-            super().__init__(label="â—€ï¸ Prev", style=discord.ButtonStyle.secondary)
+            super().__init__(label="◀️ Prev", style=discord.ButtonStyle.secondary)
 
         async def callback(self, interaction: discord.Interaction):
             view: "LineupAssignView" = self.view  # type: ignore
@@ -5182,7 +5182,7 @@ class LineupAssignView(discord.ui.View):
 
     class _NextButton(discord.ui.Button):
         def __init__(self):
-            super().__init__(label="Next â–¶ï¸", style=discord.ButtonStyle.secondary)
+            super().__init__(label="Next ▶️", style=discord.ButtonStyle.secondary)
 
         async def callback(self, interaction: discord.Interaction):
             view: "LineupAssignView" = self.view  # type: ignore
@@ -5244,7 +5244,7 @@ class LineupAssignView(discord.ui.View):
         # Add dropdown if missing
         if not any(isinstance(c, FormationSelect) for c in self.children):
             self._formation_select = FormationSelect()
-            # Put it at the top-ish so itâ€™s obvious
+            # Put it at the top-ish so it’s obvious
             self.add_item(self._formation_select)
     
         self._formation_change_mode = True
@@ -5252,14 +5252,14 @@ class LineupAssignView(discord.ui.View):
     
         embed = make_lineup_embed(self.lp)
         # Optional: add a hint line
-        embed.description = (embed.description or "") + "\n\nâš ï¸ **Pick a new formation to continue.**"
+        embed.description = (embed.description or "") + "\n\n⚠️ **Pick a new formation to continue.**"
         await safe_interaction_edit(interaction, embed=embed, view=self)
     
     async def apply_new_formation(self, interaction: discord.Interaction, formation: str):
         """Apply a formation, rebuild positions, remove formation dropdown, re-enable assignments."""
         formation = (formation or "").strip()
         if formation not in FORMATIONS:
-            await interaction.response.send_message("âŒ Invalid formation.", ephemeral=True)
+            await interaction.response.send_message("❌ Invalid formation.", ephemeral=True)
             return
     
         # Set new formation + rebuild positions (all unassigned)
@@ -5297,7 +5297,7 @@ class LineupAssignView(discord.ui.View):
         member = interaction.user if isinstance(interaction.user, discord.Member) else (guild.get_member(interaction.user.id) if guild else None)
         ok = has_admin_role(member) if member else False
         if not ok:
-            await interaction.response.send_message("âŒ Only **Administrators** can use the lineup controls.", ephemeral=True)
+            await interaction.response.send_message("❌ Only **Administrators** can use the lineup controls.", ephemeral=True)
         return ok
 
     @discord.ui.button(label="Clear Selected", style=discord.ButtonStyle.secondary)
@@ -5321,7 +5321,7 @@ class LineupAssignView(discord.ui.View):
     async def clear_all(self, interaction: discord.Interaction, button: discord.ui.Button):
         # If nothing is assigned, tell the user and bail
         if not any(p.get("user_id") for p in self.lp.get("positions", [])):
-            await interaction.response.send_message("Nothing to clear â€” all positions are already unassigned.", ephemeral=True)
+            await interaction.response.send_message("Nothing to clear — all positions are already unassigned.", ephemeral=True)
             return
     
         # Clear every assignment
@@ -5356,12 +5356,12 @@ class LineupAssignView(discord.ui.View):
         embed = make_lineup_embed(self.lp)
         await safe_interaction_edit(interaction, embed=embed, view=None)
 
-        # 2) Ensure âœ… reaction is present
+        # 2) Ensure ✅ reaction is present
         try:
             msg = interaction.message or self.message
             if msg:
                 try:
-                    await msg.add_reaction("âœ…")
+                    await msg.add_reaction("✅")
                 except Exception:
                     pass
         except Exception:
@@ -5377,12 +5377,12 @@ class LineupAssignView(discord.ui.View):
         already_pinged = set(self.lp.get("pinged_user_ids", []))
         to_ping = assigned_ids if first_time else [u for u in assigned_ids if u not in already_pinged]
         
-        # 4) Send finalize/update message with pings (if thereâ€™s anyone to ping)
+        # 4) Send finalize/update message with pings (if there’s anyone to ping)
         if to_ping:
             title = self.lp.get("title") or f"{self.lp.get('formation')} Lineup"
             header = "finalized" if first_time else "updated"
             content = (
-                f"ðŸ“£ **{title}** {header}. Please confirm with âœ…\n"
+                f"📣 **{title}** {header}. Please confirm with ✅\n"
                 + " ".join(f"<@{u}>" for u in to_ping)
             )
         
@@ -5436,7 +5436,7 @@ async def _twitch_fetch_app_token() -> dict:
     async with httpx.AsyncClient(timeout=15, headers=headers) as c:
         r = await c.post(token_url, data=form)
 
-        # ðŸ‘‡ THIS is the important change
+        # 👇 THIS is the important change
         if r.status_code != 200:
             raise RuntimeError(f"Twitch token failed {r.status_code}: {r.text}")
 
@@ -5550,16 +5550,16 @@ async def handle_lastmatch(interaction: discord.Interaction, club: str, from_dro
         our_score = int(club_data.get("goals", 0)) if club_data else 0
         opponent_score = int(opponent_data.get("goals", 0)) if opponent_data else 0
 
-        result_emoji = "âœ…" if our_score > opponent_score else "âŒ" if our_score < opponent_score else "âž–"
+        result_emoji = "✅" if our_score > opponent_score else "❌" if our_score < opponent_score else "➖"
         result_text = "Win" if our_score > opponent_score else "Loss" if our_score < opponent_score else "Draw"
 
         embed = discord.Embed(
-            title=f"ðŸ“… Last Match: [{label}] {our_name} vs {opponent_name}",
+            title=f"📅 Last Match: [{label}] {our_name} vs {opponent_name}",
             description=f"{result_emoji} {result_text} ({our_score}-{opponent_score})",
             color=discord.Color.green() if our_score > opponent_score else discord.Color.red() if our_score < opponent_score else discord.Color.gold()
         )
 
-        # âœ… ADD THIS BLOCK (right here, same indent level)
+        # ✅ ADD THIS BLOCK (right here, same indent level)
         crest_asset_id = await get_crest_asset_id_for_club(str(club_id))
         crest_url = build_crest_url(crest_asset_id) if crest_asset_id else None
         if crest_url:
@@ -5578,7 +5578,7 @@ async def handle_lastmatch(interaction: discord.Interaction, club: str, from_dro
             saves = player.get("saves", 0)
             embed.add_field(
                 name=f"{name}",
-                value=(f"âš½ {goals} | ðŸŽ¯ {assists} | ðŸŸ¥ {red} | ðŸ›¡ï¸ {tackles} | ðŸ§¤ {saves} | â­ {rating}"),
+                value=(f"⚽ {goals} | 🎯 {assists} | 🟥 {red} | 🛡️ {tackles} | 🧤 {saves} | ⭐ {rating}"),
                 inline=False
             )
 
@@ -5637,8 +5637,8 @@ class Top100View(discord.ui.View):
 
     def _loading_embed(self) -> discord.Embed:
         page_count = (len(self.data) + self.per_page - 1) // self.per_page
-        title = f"ðŸ† Top 100 Clubs (Page {self.page + 1}/{page_count})"
-        body = "â³ Fetching latest dataâ€¦"
+        title = f"🏆 Top 100 Clubs (Page {self.page + 1}/{page_count})"
+        body = "⏳ Fetching latest data…"
         subtitle = "_Navigate using the buttons below._\n\n"
         embed = discord.Embed(
             title=title,
@@ -5677,17 +5677,17 @@ class Top100View(discord.ui.View):
         # data extraction
         name = club.get("name") or (club.get("clubInfo", {}) or {}).get("name") or "Unknown"
         name = md_escape(name)
-        rank = club.get("rank", "â€”")
-        sr = club.get("skillRating", club.get("skill", "â€”"))
+        rank = club.get("rank", "—")
+        sr = club.get("skillRating", club.get("skill", "—"))
         cid = str(club.get("clubId", ""))
 
         # optional last played
         lp = format_last_played(self.last_played_cache.get(cid))
-        last_str = f" â€¢ Last Played: {lp}" if lp and lp != "â€”" else ""
+        last_str = f" • Last Played: {lp}" if lp and lp != "—" else ""
 
         # two-line entry
-        line1 = f"**#{rank} â€“ {name}**"
-        line2 = f"â­ Skill Rating: {sr}{last_str}"
+        line1 = f"**#{rank} – {name}**"
+        line2 = f"⭐ Skill Rating: {sr}{last_str}"
 
         return f"{line1}\n{line2}"
 
@@ -5699,7 +5699,7 @@ class Top100View(discord.ui.View):
         body = "\n\n".join(description_lines) if description_lines else "No data."
 
         page_count = (len(self.data) + self.per_page - 1) // self.per_page
-        title = f"ðŸ† Top 100 Clubs (Page {self.page + 1}/{page_count})"
+        title = f"🏆 Top 100 Clubs (Page {self.page + 1}/{page_count})"
         subtitle = "_Navigate using the buttons below._\n\n"
 
         embed = discord.Embed(
@@ -5711,7 +5711,7 @@ class Top100View(discord.ui.View):
         return embed
 
     # ---------- buttons (INSIDE the class) ----------
-    @discord.ui.button(label="â®ï¸ First", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="⏮️ First", style=discord.ButtonStyle.secondary)
     async def first_page(self, interaction: discord.Interaction, button: discord.ui.Button):
         if self._busy:
             await interaction.response.defer()
@@ -5728,7 +5728,7 @@ class Top100View(discord.ui.View):
         finally:
             self._busy = False
     
-    @discord.ui.button(label="â¬…ï¸ Prev", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="⬅️ Prev", style=discord.ButtonStyle.primary)
     async def prev_page(self, interaction: discord.Interaction, button: discord.ui.Button):
         if self._busy:
             await interaction.response.defer()
@@ -5746,7 +5746,7 @@ class Top100View(discord.ui.View):
         finally:
             self._busy = False
     
-    @discord.ui.button(label="âž¡ï¸ Next", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="➡️ Next", style=discord.ButtonStyle.primary)
     async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
         if self._busy:
             await interaction.response.defer()
@@ -5764,7 +5764,7 @@ class Top100View(discord.ui.View):
         finally:
             self._busy = False
     
-    @discord.ui.button(label="â­ï¸ Last", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="⏭️ Last", style=discord.ButtonStyle.secondary)
     async def last_page(self, interaction: discord.Interaction, button: discord.ui.Button):
         if self._busy:
             await interaction.response.defer()
@@ -5797,7 +5797,7 @@ async def top100_command(interaction: discord.Interaction):
             {"platform": PLATFORM},
         )
         if not isinstance(data, list):
-            await interaction.followup.send("âš ï¸ No leaderboard data found.")
+            await interaction.followup.send("⚠️ No leaderboard data found.")
             return
 
         top_100 = sorted(data, key=lambda c: c.get("rank", 9999))[:100]
@@ -5809,7 +5809,7 @@ async def top100_command(interaction: discord.Interaction):
         await log_command_output(interaction, "t100", message)
     except Exception as e:
         print(f"[ERROR] Failed to fetch Top 100: {e}")
-        await send_temporary_message(interaction.followup, content="âŒ An error occurred while fetching the Top 100 clubs.")
+        await send_temporary_message(interaction.followup, content="❌ An error occurred while fetching the Top 100 clubs.")
 
 @tree.command(name="last5", description="Show the last 5 matches for a club.")
 @app_commands.describe(club="Club name or club ID")
@@ -5875,7 +5875,7 @@ async def stats5_command(interaction: discord.Interaction, club: str):
             club_id = str(hits[0]["clubInfo"]["clubId"])
             club_name = hits[0]["clubInfo"]["name"]
 
-        msg = await interaction.followup.send("â³ Fetching last 5 player totalsâ€¦")
+        msg = await interaction.followup.send("⏳ Fetching last 5 player totals…")
 
         embeds = await build_stats5_embeds(club_id, club_name)
         if not embeds:
@@ -5895,7 +5895,7 @@ async def stats5_command(interaction: discord.Interaction, club: str):
     except Exception as e:
         print(f"[ERROR] /stats5 failed: {e}")
         await interaction.followup.send(
-            "âŒ An unexpected error occurred while fetching last 5 player totals.",
+            "❌ An unexpected error occurred while fetching last 5 player totals.",
             ephemeral=True
         )
 
@@ -5928,15 +5928,15 @@ async def stats_command(interaction: discord.Interaction, club: str):
             club_id = str(hits[0]["clubInfo"]["clubId"])
             club_name = hits[0]["clubInfo"]["name"]
 
-        # One placeholder â†’ edit in-place
-        msg = await interaction.followup.send("â³ Fetching club statsâ€¦")
+        # One placeholder → edit in-place
+        msg = await interaction.followup.send("⏳ Fetching club stats…")
 
         try:
             data = await fetch_all_stats_for_club(club_id)
             embed = build_stats_embed(club_id, club_name, data)
         except Exception as e:
             print(f"[ERROR] fetch_all_stats_for_club failed: {e}")
-            embed = discord.Embed(title="âŒ Error", description="Could not fetch all stats for this club.", color=discord.Color.red())
+            embed = discord.Embed(title="❌ Error", description="Could not fetch all stats for this club.", color=discord.Color.red())
 
         view = PrintRecordButton(data["stats"], (club_name or f"Club {club_id}").upper())
         
@@ -5953,7 +5953,7 @@ async def stats_command(interaction: discord.Interaction, club: str):
 
     except Exception as e:
         print(f"[ERROR] /stats failed: {e}")
-        await interaction.followup.send("âŒ An unexpected error occurred while fetching club stats.", ephemeral=True)
+        await interaction.followup.send("❌ An unexpected error occurred while fetching club stats.", ephemeral=True)
 
 @tree.command(
     name="leaderboard",
@@ -5995,9 +5995,9 @@ async def leaderboard_command(
     )[:10]
 
     medals = {
-        1: "ðŸ¥‡",
-        2: "ðŸ¥ˆ",
-        3: "ðŸ¥‰",
+        1: "🥇",
+        2: "🥈",
+        3: "🥉",
     }
 
     leaderboard_lines = []
@@ -6022,7 +6022,7 @@ async def leaderboard_command(
             user_display = discord.utils.escape_markdown(stored_name)
 
         leaderboard_lines.append(
-            f"{marker} {user_display} â€” **{count} {search_word}**"
+            f"{marker} {user_display} — **{count} {search_word}**"
         )
 
     total_searches = sum(
@@ -6031,7 +6031,7 @@ async def leaderboard_command(
     )
 
     embed = discord.Embed(
-        title="ðŸ” Club Research Leaderboard",
+        title="🔍 Club Research Leaderboard",
         description="\n".join(leaderboard_lines),
         color=discord.Color.gold(),
     )
@@ -6065,7 +6065,7 @@ async def lineup_command(
     await interaction.response.defer(ephemeral=True)
     target_channel = channel or interaction.channel
     if not isinstance(target_channel, (discord.TextChannel, discord.Thread)):
-        await safe_interaction_respond(interaction, content="âŒ Please specify a valid text channel.", ephemeral=True)
+        await safe_interaction_respond(interaction, content="❌ Please specify a valid text channel.", ephemeral=True)
         return
 
         # Parse optional kickoff (Europe/London -> UTC ISO)
@@ -6079,7 +6079,7 @@ async def lineup_command(
             except Exception:
                 await safe_interaction_respond(
                     interaction,
-                    content="âŒ Invalid kickoff format. Use `DD-MM-YYYY HH:MM` (24-hour), Europe/London.",
+                    content="❌ Invalid kickoff format. Use `DD-MM-YYYY HH:MM` (24-hour), Europe/London.",
                     ephemeral=True
                 )
                 return
@@ -6114,10 +6114,10 @@ async def lineup_command(
         lineups_store["next_id"] = lid + 1
         save_lineups_store()
     except Exception as e:
-        await safe_interaction_respond(interaction, content=f"âŒ Failed to post lineup: {e}", ephemeral=True)
+        await safe_interaction_respond(interaction, content=f"❌ Failed to post lineup: {e}", ephemeral=True)
         return
 
-    await safe_interaction_respond(interaction, content=f"âœ… Lineup created (ID `{lid}`) in {target_channel.mention}.", ephemeral=True)
+    await safe_interaction_respond(interaction, content=f"✅ Lineup created (ID `{lid}`) in {target_channel.mention}.", ephemeral=True)
     #await log_command_output(interaction, "lineup", sent)
 
 
@@ -6130,19 +6130,19 @@ async def editlineup_command(interaction: discord.Interaction, lineup_id: int):
 
     lp = lineups_store.get("lineups", {}).get(str(lineup_id))
     if not lp:
-        await safe_interaction_respond(interaction, content="âŒ Lineup ID not found.", ephemeral=True)
+        await safe_interaction_respond(interaction, content="❌ Lineup ID not found.", ephemeral=True)
         return
 
     member = interaction.user if isinstance(interaction.user, discord.Member) else interaction.guild.get_member(interaction.user.id)
     if not user_can_edit_lineup(member, lp):
-        await safe_interaction_respond(interaction, content="âŒ You don't have permission to edit this lineup.", ephemeral=True)
+        await safe_interaction_respond(interaction, content="❌ You don't have permission to edit this lineup.", ephemeral=True)
         return
 
     try:
         ch = client.get_channel(lp["channel_id"]) or await client.fetch_channel(lp["channel_id"])
         msg = await ch.fetch_message(lp["message_id"])
     except Exception as e:
-        await safe_interaction_respond(interaction, content=f"âŒ Couldn't access the lineup message: {e}", ephemeral=True)
+        await safe_interaction_respond(interaction, content=f"❌ Couldn't access the lineup message: {e}", ephemeral=True)
         return
 
     # Re-attach an active view
@@ -6151,10 +6151,10 @@ async def editlineup_command(interaction: discord.Interaction, lineup_id: int):
     try:
         await msg.edit(embed=make_lineup_embed(lp), view=view)
     except Exception as e:
-        await safe_interaction_respond(interaction, content=f"âŒ Failed to attach editor: {e}", ephemeral=True)
+        await safe_interaction_respond(interaction, content=f"❌ Failed to attach editor: {e}", ephemeral=True)
         return
 
-    await safe_interaction_respond(interaction, content=f"âœï¸ Editing lineup `{lineup_id}`.", ephemeral=True)
+    await safe_interaction_respond(interaction, content=f"✏️ Editing lineup `{lineup_id}`.", ephemeral=True)
     #await log_command_output(interaction, "editlineup", msg)
 
 @tree.command(name="deletelineup", description="Delete a lineup by ID.")
@@ -6165,13 +6165,13 @@ async def deletelineup_command(interaction: discord.Interaction, lineup_id: int)
     # Find lineup
     lp = lineups_store.get("lineups", {}).get(str(lineup_id))
     if not lp:
-        await safe_interaction_respond(interaction, content="âŒ Lineup ID not found.", ephemeral=True)
+        await safe_interaction_respond(interaction, content="❌ Lineup ID not found.", ephemeral=True)
         return
 
     # Permission: creator or Moderator (same as edit)
     member = interaction.user if isinstance(interaction.user, discord.Member) else interaction.guild.get_member(interaction.user.id)
     if not user_can_edit_lineup(member, lp):
-        await safe_interaction_respond(interaction, content="âŒ You don't have permission to delete this lineup.", ephemeral=True)
+        await safe_interaction_respond(interaction, content="❌ You don't have permission to delete this lineup.", ephemeral=True)
         return
 
     # Try to delete the original lineup message
@@ -6188,10 +6188,10 @@ async def deletelineup_command(interaction: discord.Interaction, lineup_id: int)
         lineups_store["lineups"].pop(str(lineup_id), None)
         save_lineups_store()
     except Exception as e:
-        await safe_interaction_respond(interaction, content=f"âš ï¸ Deleted message but failed to update storage: {e}", ephemeral=True)
+        await safe_interaction_respond(interaction, content=f"⚠️ Deleted message but failed to update storage: {e}", ephemeral=True)
         return
 
-    await safe_interaction_respond(interaction, content=f"ðŸ—‘ï¸ Lineup `{lineup_id}` deleted.", ephemeral=True)
+    await safe_interaction_respond(interaction, content=f"🗑️ Lineup `{lineup_id}` deleted.", ephemeral=True)
     # (Optional) log to your archive channel:
     # await log_command_output(interaction, "deletelineup", extra_text=f"Deleted lineup {lineup_id}.")
 
@@ -6217,7 +6217,7 @@ def save_json_file(path, data):
         loop = asyncio.get_running_loop()
         loop.create_task(db_save_json(path, data))
     except RuntimeError:
-        # No running loop (very early import) â€” ignore
+        # No running loop (very early import) — ignore
         pass
 
 events_store = {"next_id": 1, "events": {}}
@@ -6236,7 +6236,7 @@ def make_event_embed(ev: dict) -> discord.Embed:
     embed_description = f"**Event Info**\n{desc_text}"
 
     embed = discord.Embed(
-        title=f"ðŸ“… {ev.get('name')}",
+        title=f"📅 {ev.get('name')}",
         description=embed_description,
         color=color
     )
@@ -6263,7 +6263,7 @@ def make_event_embed(ev: dict) -> discord.Embed:
     # Columns: Attend / Absent / Maybe
     def users_to_text(user_ids):
         if not user_ids:
-            return "â€”"
+            return "—"
         return "\n".join(f"<@{uid}>" for uid in user_ids)
 
     def late_to_text(ev: dict) -> str:
@@ -6278,16 +6278,16 @@ def make_event_embed(ev: dict) -> discord.Embed:
                 continue
             try:
                 dt = datetime.fromisoformat(iso).astimezone(timezone.utc)
-                lines.append(f"<@{uid}> â€” {LATE_EMOJI} {discord.utils.format_dt(dt, style='t')}")
+                lines.append(f"<@{uid}> — {LATE_EMOJI} {discord.utils.format_dt(dt, style='t')}")
             except Exception:
-                lines.append(f"<@{uid}> â€” {LATE_EMOJI} (time set)")
+                lines.append(f"<@{uid}> — {LATE_EMOJI} (time set)")
         return "\n".join(lines)
     
     attend_txt = users_to_text(ev.get("attend", []))
     late_txt = late_to_text(ev)
     if late_txt:
-        attend_txt = attend_txt if attend_txt != "â€”" else ""
-        attend_txt = (attend_txt + ("\n" if attend_txt else "") + late_txt).strip() or "â€”"
+        attend_txt = attend_txt if attend_txt != "—" else ""
+        attend_txt = (attend_txt + ("\n" if attend_txt else "") + late_txt).strip() or "—"
     
     embed.add_field(name=f"{ATTEND_EMOJI} Attend", value=attend_txt, inline=True)
     embed.add_field(name=f"{ABSENT_EMOJI} Absent", value=users_to_text(ev.get("absent", [])), inline=True)
@@ -6317,7 +6317,7 @@ def make_event_embed(ev: dict) -> discord.Embed:
     except Exception:
         pass
 
-    embed.set_footer(text=f"Phonics Bot â€¢ Event ID: {ev.get('id')}", icon_url=footer_icon)
+    embed.set_footer(text=f"Phonics Bot • Event ID: {ev.get('id')}", icon_url=footer_icon)
     return embed
 
 def user_can_create_events(member: discord.Member) -> bool:
@@ -6373,7 +6373,7 @@ class AttendLaterTimeSelect(discord.ui.Select):
 
         options = build_late_time_options(ev)
         super().__init__(
-            placeholder="Select your arrival timeâ€¦",
+            placeholder="Select your arrival time…",
             options=options[:25],  # (we only have 8)
             min_values=1,
             max_values=1
@@ -6382,7 +6382,7 @@ class AttendLaterTimeSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         # Only the reacting user can use it
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message("This dropdown isnâ€™t for you ðŸ™‚", ephemeral=True)
+            await interaction.response.send_message("This dropdown isn’t for you 🙂", ephemeral=True)
             return
 
         arrival_iso = self.values[0]
@@ -6391,7 +6391,7 @@ class AttendLaterTimeSelect(discord.ui.Select):
         self.ev.setdefault("attend_later_times", {})
         self.ev["attend_later_times"][str(self.user_id)] = arrival_iso
 
-        # Ensure theyâ€™re not in absent/maybe/attend (optional: you can also remove from attend)
+        # Ensure they’re not in absent/maybe/attend (optional: you can also remove from attend)
         for k in ("absent", "maybe", "attend"):
             if self.user_id in (self.ev.get(k) or []):
                 self.ev[k].remove(self.user_id)
@@ -6460,7 +6460,7 @@ def make_lineup_embed(lp: dict) -> discord.Embed:
             pass
 
     embed = discord.Embed(
-        title=f"ðŸ§© {title}",
+        title=f"🧩 {title}",
         description="\n".join(details),
         color=color,
     )
@@ -6469,10 +6469,10 @@ def make_lineup_embed(lp: dict) -> discord.Embed:
     positions: list[dict] = lp.get("positions", [])
     lines = []
     for pos in positions:
-        mention = f"<@{pos['user_id']}>" if pos.get("user_id") else "â€”"
-        lines.append(f"**{pos['code']}** â€” {mention}")
+        mention = f"<@{pos['user_id']}>" if pos.get("user_id") else "—"
+        lines.append(f"**{pos['code']}** — {mention}")
 
-    embed.add_field(name="Lineup", value="\n".join(lines) or "â€”", inline=False)
+    embed.add_field(name="Lineup", value="\n".join(lines) or "—", inline=False)
 
     # Server icon as thumbnail (optional) + footer icon
     try:
@@ -6482,7 +6482,7 @@ def make_lineup_embed(lp: dict) -> discord.Embed:
         pass
 
     footer_icon = guild.icon.url if (guild and guild.icon) else None
-    embed.set_footer(text=f"Phonics Bot â€¢ Lineup ID: {lp.get('id')}", icon_url=footer_icon)
+    embed.set_footer(text=f"Phonics Bot • Lineup ID: {lp.get('id')}", icon_url=footer_icon)
     return embed
 
 # -------------------------
@@ -6499,7 +6499,7 @@ def make_twitch_live_embed(stream: dict, game_box_url: str | None) -> discord.Em
 
     # Base embed
     embed = discord.Embed(
-        title=f"ðŸ”´ LIVE: {streamer}",
+        title=f"🔴 LIVE: {streamer}",
         description=f"**{title}**",
         color=color,
         url=twitch_url,  # make title clickable
@@ -6543,7 +6543,7 @@ def make_twitch_live_embed(stream: dict, game_box_url: str | None) -> discord.Em
         cache_bust = int(datetime.now(timezone.utc).timestamp())
         embed.set_image(url=f"{preview}?v={cache_bust}")
 
-    embed.set_footer(text="Phonics Bot â€¢ Twitch Live")
+    embed.set_footer(text="Phonics Bot • Twitch Live")
     return embed
 
 class WatchButtonView(discord.ui.View):
@@ -6574,16 +6574,16 @@ async def createtemplate_command(
 ):
     member = interaction.user
     if not user_can_create_events(member):
-        await safe_interaction_respond(interaction, content="âŒ You do not have permission to create templates.", ephemeral=True)
+        await safe_interaction_respond(interaction, content="❌ You do not have permission to create templates.", ephemeral=True)
         return
 
     key = template_name.strip()
     if not key:
-        await safe_interaction_respond(interaction, content="âŒ Template name cannot be empty.", ephemeral=True)
+        await safe_interaction_respond(interaction, content="❌ Template name cannot be empty.", ephemeral=True)
         return
 
     if key in templates_store:
-        await safe_interaction_respond(interaction, content="âŒ A template with that name already exists. Delete it first or choose another name.", ephemeral=True)
+        await safe_interaction_respond(interaction, content="❌ A template with that name already exists. Delete it first or choose another name.", ephemeral=True)
         return
 
     templates_store[key] = {
@@ -6596,7 +6596,7 @@ async def createtemplate_command(
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     save_templates_store()
-    await safe_interaction_respond(interaction, content=f"âœ… Template `{key}` created.", ephemeral=True)
+    await safe_interaction_respond(interaction, content=f"✅ Template `{key}` created.", ephemeral=True)
 
 @tree.command(name="listtemplates", description="List saved event templates.")
 async def listtemplates_command(interaction: discord.Interaction):
@@ -6606,11 +6606,11 @@ async def listtemplates_command(interaction: discord.Interaction):
 
     lines = []
     for k, t in templates_store.items():
-        channel_part = f" â€¢ Channel: <#{t['channel_id']}>" if t.get("channel_id") else ""
+        channel_part = f" • Channel: <#{t['channel_id']}>" if t.get("channel_id") else ""
         stream_part = ""
         if t.get("twitch_url"):
-            stream_part = f" â€¢ Stream: {t['twitch_url'].rsplit('/', 1)[-1]}"
-        lines.append(f"**{k}** â€” {t.get('name')} {channel_part}{stream_part}\n{t.get('description')[:150]}")
+            stream_part = f" • Stream: {t['twitch_url'].rsplit('/', 1)[-1]}"
+        lines.append(f"**{k}** — {t.get('name')} {channel_part}{stream_part}\n{t.get('description')[:150]}")
     text = "\n\n".join(lines)
     await safe_interaction_respond(
         interaction,
@@ -6623,17 +6623,17 @@ async def listtemplates_command(interaction: discord.Interaction):
 async def deletetemplate_command(interaction: discord.Interaction, template_name: str):
     member = interaction.user
     if not user_can_create_events(member):
-        await safe_interaction_respond(interaction, content="âŒ You do not have permission to delete templates.", ephemeral=True)
+        await safe_interaction_respond(interaction, content="❌ You do not have permission to delete templates.", ephemeral=True)
         return
 
     key = template_name.strip()
     if key not in templates_store:
-        await safe_interaction_respond(interaction, content="âŒ Template not found.", ephemeral=True)
+        await safe_interaction_respond(interaction, content="❌ Template not found.", ephemeral=True)
         return
 
     templates_store.pop(key, None)
     save_templates_store()
-    await safe_interaction_respond(interaction, content=f"âœ… Template `{key}` deleted.", ephemeral=True)
+    await safe_interaction_respond(interaction, content=f"✅ Template `{key}` deleted.", ephemeral=True)
 
 # -------------------------
 # Event creation from template
@@ -6641,8 +6641,8 @@ async def deletetemplate_command(interaction: discord.Interaction, template_name
 @tree.command(name="createfromtemplate", description="Create an event from a saved template (Moderator role required).")
 @app_commands.describe(
     template_name="Template to use",
-    date="Date (DD-MM-YYYY) â€” local to Europe/London",
-    time="Time (HH:MM 24-hour) â€” local to Europe/London",
+    date="Date (DD-MM-YYYY) — local to Europe/London",
+    time="Time (HH:MM 24-hour) — local to Europe/London",
     formation="Formation (required) for the lineup in the event thread",
     channel="Optional channel to post the event in (defaults to template channel or current channel)",
     role="Optional role to ping (overrides template's saved role)",
@@ -6654,7 +6654,7 @@ async def createfromtemplate_command(
     template_name: str,
     date: str,
     time: str,
-    formation: app_commands.Choice[str],  # âœ… REQUIRED
+    formation: app_commands.Choice[str],  # ✅ REQUIRED
     channel: discord.TextChannel = None,
     role: discord.Role = None,
     stream: str = None
@@ -6662,13 +6662,13 @@ async def createfromtemplate_command(
     await interaction.response.defer(ephemeral=True)
     member = interaction.user
     if not user_can_create_events(member):
-        await safe_interaction_respond(interaction, content="âŒ You do not have permission to create events.", ephemeral=True)
+        await safe_interaction_respond(interaction, content="❌ You do not have permission to create events.", ephemeral=True)
         return
 
     key = template_name.strip()
     tpl = templates_store.get(key)
     if not tpl:
-        await safe_interaction_respond(interaction, content="âŒ Template not found.", ephemeral=True)
+        await safe_interaction_respond(interaction, content="❌ Template not found.", ephemeral=True)
         return
 
     # Resolve role
@@ -6687,7 +6687,7 @@ async def createfromtemplate_command(
         dt_local = dt_local_naive.replace(tzinfo=DEFAULT_TZ)
         dt_utc = dt_local.astimezone(timezone.utc)
     except Exception:
-        await safe_interaction_respond(interaction, content="âŒ Invalid date/time format. Please use `DD-MM-YYYY` and `HH:MM` (24-hour).", ephemeral=True)
+        await safe_interaction_respond(interaction, content="❌ Invalid date/time format. Please use `DD-MM-YYYY` and `HH:MM` (24-hour).", ephemeral=True)
         return
 
     target_channel = None
@@ -6701,7 +6701,7 @@ async def createfromtemplate_command(
     target_channel = target_channel or interaction.channel
 
     if not isinstance(target_channel, (discord.TextChannel, discord.Thread)):
-        await safe_interaction_respond(interaction, content="âŒ Please specify a valid text channel.", ephemeral=True)
+        await safe_interaction_respond(interaction, content="❌ Please specify a valid text channel.", ephemeral=True)
         return
 
     eid = events_store.get("next_id", 1)
@@ -6747,7 +6747,7 @@ async def createfromtemplate_command(
             except Exception:
                 pass
 
-            # ðŸš€ Auto-create + pin a lineup inside the new event thread
+            # 🚀 Auto-create + pin a lineup inside the new event thread
             try:
                 await auto_post_lineup_in_thread(ev, thread, formation.value)  # uses DEFAULT_LINEUP_FORMATION
             except Exception as le:
@@ -6757,7 +6757,7 @@ async def createfromtemplate_command(
             print(f"[WARN] Could not create thread for event {eid}: {te}")
 
     except Exception as e:
-        await safe_interaction_respond(interaction, content=f"âŒ Failed to post event: {e}", ephemeral=True)
+        await safe_interaction_respond(interaction, content=f"❌ Failed to post event: {e}", ephemeral=True)
         return
 
     ev["message_id"] = sent.id
@@ -6767,7 +6767,7 @@ async def createfromtemplate_command(
 
     await safe_interaction_respond(
         interaction,
-        content=f"âœ… Event created from template `{key}` with ID `{eid}` and posted in {target_channel.mention}.",
+        content=f"✅ Event created from template `{key}` with ID `{eid}` and posted in {target_channel.mention}.",
         ephemeral=True
     )
 
@@ -6778,8 +6778,8 @@ async def createfromtemplate_command(
 @app_commands.describe(
     name="Event name",
     description="Event description",
-    date="Date (DD-MM-YYYY) â€” local to Europe/London",
-    time="Time (HH:MM 24-hour) â€” local to Europe/London",
+    date="Date (DD-MM-YYYY) — local to Europe/London",
+    time="Time (HH:MM 24-hour) — local to Europe/London",
     formation="Formation (required) for the lineup in the event thread",
     channel="Channel to post the event in (optional, defaults to current channel)",
     role="Optional role to ping (will be spoilered)",
@@ -6792,7 +6792,7 @@ async def createevent_command(
     description: str,
     date: str,
     time: str,
-    formation: app_commands.Choice[str],  # âœ… REQUIRED
+    formation: app_commands.Choice[str],  # ✅ REQUIRED
     channel: discord.TextChannel = None,
     role: discord.Role = None,
     stream: str = None
@@ -6804,7 +6804,7 @@ async def createevent_command(
         member = interaction.guild.get_member(interaction.user.id)
 
     if not user_can_create_events(member):
-        await safe_interaction_respond(interaction, content="âŒ You do not have permission to create events (Moderator role required).", ephemeral=True)
+        await safe_interaction_respond(interaction, content="❌ You do not have permission to create events (Moderator role required).", ephemeral=True)
         return
 
     # parse DD-MM-YYYY
@@ -6813,12 +6813,12 @@ async def createevent_command(
         dt_local = dt_local_naive.replace(tzinfo=DEFAULT_TZ)
         dt_utc = dt_local.astimezone(timezone.utc)
     except Exception:
-        await safe_interaction_respond(interaction, content="âŒ Invalid date/time format. Please use `DD-MM-YYYY` for date and `HH:MM` (24-hour) for time.", ephemeral=True)
+        await safe_interaction_respond(interaction, content="❌ Invalid date/time format. Please use `DD-MM-YYYY` for date and `HH:MM` (24-hour) for time.", ephemeral=True)
         return
 
     target_channel = channel or interaction.channel
     if not isinstance(target_channel, (discord.TextChannel, discord.Thread)):
-        await safe_interaction_respond(interaction, content="âŒ Please specify a valid text channel.", ephemeral=True)
+        await safe_interaction_respond(interaction, content="❌ Please specify a valid text channel.", ephemeral=True)
         return
 
     eid = events_store.get("next_id", 1)
@@ -6869,7 +6869,7 @@ async def createevent_command(
             except Exception:
                 pass
 
-            # ðŸš€ Auto-create + pin a lineup inside the new event thread
+            # 🚀 Auto-create + pin a lineup inside the new event thread
             try:
                 await auto_post_lineup_in_thread(ev, thread, formation.value)  # uses DEFAULT_LINEUP_FORMATION
             except Exception as le:
@@ -6879,7 +6879,7 @@ async def createevent_command(
             print(f"[WARN] Could not create thread for event {eid}: {te}")
 
     except Exception as e:
-        await safe_interaction_respond(interaction, content=f"âŒ Failed to post event: {e}", ephemeral=True)
+        await safe_interaction_respond(interaction, content=f"❌ Failed to post event: {e}", ephemeral=True)
         return
 
     ev["message_id"] = sent.id
@@ -6887,19 +6887,19 @@ async def createevent_command(
     events_store["next_id"] = eid + 1
     save_events_store()
 
-    await safe_interaction_respond(interaction, content=f"âœ… Event created with ID `{eid}` and posted in {target_channel.mention}.", ephemeral=True)
+    await safe_interaction_respond(interaction, content=f"✅ Event created with ID `{eid}` and posted in {target_channel.mention}.", ephemeral=True)
 
 @tree.command(name="cancelevent", description="Cancel (delete) an event by ID (Moderator role required).")
 @app_commands.describe(event_id="Event ID")
 async def cancelevent_command(interaction: discord.Interaction, event_id: int):
     member = interaction.user
     if not user_can_create_events(member):
-        await safe_interaction_respond(interaction, content="âŒ You do not have permission to cancel events.", ephemeral=True)
+        await safe_interaction_respond(interaction, content="❌ You do not have permission to cancel events.", ephemeral=True)
         return
 
     ev = events_store.get("events", {}).get(str(event_id))
     if not ev:
-        await safe_interaction_respond(interaction, content="âŒ Event ID not found.", ephemeral=True)
+        await safe_interaction_respond(interaction, content="❌ Event ID not found.", ephemeral=True)
         return
 
     # Delete message; archive/lock thread if present
@@ -6920,19 +6920,19 @@ async def cancelevent_command(interaction: discord.Interaction, event_id: int):
 
     events_store["events"].pop(str(event_id), None)
     save_events_store()
-    await safe_interaction_respond(interaction, content=f"âœ… Event `{event_id}` cancelled and removed.", ephemeral=True)
+    await safe_interaction_respond(interaction, content=f"✅ Event `{event_id}` cancelled and removed.", ephemeral=True)
 
 @tree.command(name="closeevent", description="Close signups for an event (Moderator role required).")
 @app_commands.describe(event_id="Event ID")
 async def closeevent_command(interaction: discord.Interaction, event_id: int):
     member = interaction.user
     if not user_can_create_events(member):
-        await safe_interaction_respond(interaction, content="âŒ You do not have permission to close events.", ephemeral=True)
+        await safe_interaction_respond(interaction, content="❌ You do not have permission to close events.", ephemeral=True)
         return
 
     ev = events_store.get("events", {}).get(str(event_id))
     if not ev:
-        await safe_interaction_respond(interaction, content="âŒ Event ID not found.", ephemeral=True)
+        await safe_interaction_respond(interaction, content="❌ Event ID not found.", ephemeral=True)
         return
 
     ev["closed"] = True
@@ -6944,30 +6944,30 @@ async def closeevent_command(interaction: discord.Interaction, event_id: int):
         embed = make_event_embed(ev)
         embed.color = discord.Color.dark_grey()
         
-        ft = (embed.footer.text or f"Phonics Bot â€¢ Event ID: {ev.get('id')}") + " â€¢ CLOSED"
+        ft = (embed.footer.text or f"Phonics Bot • Event ID: {ev.get('id')}") + " • CLOSED"
         embed.set_footer(text=ft, icon_url=embed.footer.icon_url)
         
         await msg.edit(embed=embed)
     except Exception as e:
         print(f"[WARN] Could not edit event message when closing: {e}")
 
-    await safe_interaction_respond(interaction, content=f"âœ… Event `{event_id}` is now closed for signups.", ephemeral=True)
+    await safe_interaction_respond(interaction, content=f"✅ Event `{event_id}` is now closed for signups.", ephemeral=True)
 
 @tree.command(name="openevent", description="Open signups for an event (Moderator role required).")
 @app_commands.describe(event_id="Event ID")
 async def openevent_command(interaction: discord.Interaction, event_id: int):
     member = interaction.user
     if not user_can_create_events(member):
-        await safe_interaction_respond(interaction, content="âŒ You do not have permission to open events.", ephemeral=True)
+        await safe_interaction_respond(interaction, content="❌ You do not have permission to open events.", ephemeral=True)
         return
 
     ev = events_store.get("events", {}).get(str(event_id))
     if not ev:
-        await interaction.response.send_message("âŒ Event ID not found.", ephemeral=True)
+        await interaction.response.send_message("❌ Event ID not found.", ephemeral=True)
         return
 
     if not ev.get("closed", False):
-        await interaction.response.send_message("â„¹ï¸ Event is already open for signups.", ephemeral=True)
+        await interaction.response.send_message("ℹ️ Event is already open for signups.", ephemeral=True)
         return
 
     ev["closed"] = False
@@ -6983,14 +6983,14 @@ async def openevent_command(interaction: discord.Interaction, event_id: int):
     except Exception as e:
         print(f"[WARN] Could not edit event message when opening: {e}")
 
-    await interaction.response.send_message(f"âœ… Event `{event_id}` is now open for signups.", ephemeral=True)
+    await interaction.response.send_message(f"✅ Event `{event_id}` is now open for signups.", ephemeral=True)
 
 @tree.command(name="eventinfo", description="Show event info by ID.")
 @app_commands.describe(event_id="Event ID")
 async def eventinfo_command(interaction: discord.Interaction, event_id: int):
     ev = events_store.get("events", {}).get(str(event_id))
     if not ev:
-        await safe_interaction_respond(interaction, content="âŒ Event ID not found.", ephemeral=True)
+        await safe_interaction_respond(interaction, content="❌ Event ID not found.", ephemeral=True)
         return
     embed = make_event_embed(ev)
     await safe_interaction_respond(interaction, embed=embed, ephemeral=True)
@@ -7010,7 +7010,7 @@ def _event_choices(prefix: str, limit: int = 25):
             when_txt = discord.utils.format_dt(dt, style="F")
         except Exception:
             pass
-        display = f"{eid} â€” {name}" + (f" â€” {when_txt}" if when_txt else "")
+        display = f"{eid} — {name}" + (f" — {when_txt}" if when_txt else "")
         items.append((display, eid))
 
     prefix_l = (prefix or "").lower()
@@ -7059,7 +7059,7 @@ def _lineup_choices(prefix: str, limit: int = 25):
         except Exception:
             continue
         name = lp.get("title") or lp.get("formation")
-        display = f"{lid} â€” {name}"
+        display = f"{lid} — {name}"
         items.append((display, lid))
     prefix_l = (prefix or "").lower()
     if prefix_l:
@@ -7081,7 +7081,7 @@ async def _lineup_open_choices(prefix: str, limit: int = 25):
 
         # label text
         name = lp.get("title") or lp.get("formation") or "Lineup"
-        display = f"{lid} â€” {name}"
+        display = f"{lid} — {name}"
 
         # text filter (by id or label)
         if prefix_l and (prefix_l not in str(lid) and prefix_l not in display.lower()):
@@ -7117,15 +7117,15 @@ async def offside_command(interaction: discord.Interaction):
     try:
         count = await db_incr_offside()
     except Exception as e:
-        await interaction.response.send_message(f"âŒ Failed to update counter: {e}", ephemeral=True)
+        await interaction.response.send_message(f"❌ Failed to update counter: {e}", ephemeral=True)
         return
 
     # Build an embed with your standard color, but NO thumbnail
     color = discord.Color(int(EVENT_EMBED_COLOR_HEX.strip().lstrip("#"), 16))
-    desc = f"ðŸƒâ€â™‚ï¸â€âž¡ï¸MistrCraven has been caught offside **{count}** times. ðŸƒâ€â™‚ï¸"
+    desc = f"🏃‍♂️‍➡️MistrCraven has been caught offside **{count}** times. 🏃‍♂️"
 
     embed = discord.Embed(
-        title="ðŸš© Offside",
+        title="🚩 Offside",
         description=desc,
         color=color,
         timestamp=datetime.now(timezone.utc),
@@ -7141,7 +7141,7 @@ async def resetoffside_command(interaction: discord.Interaction):
     # Only allow admins (uses your existing role helper)
     member = interaction.user if isinstance(interaction.user, discord.Member) else interaction.guild.get_member(interaction.user.id)
     if not has_admin_role(member):
-        await interaction.response.send_message("âŒ Only **Administrators** can use /resetoffside.", ephemeral=True)
+        await interaction.response.send_message("❌ Only **Administrators** can use /resetoffside.", ephemeral=True)
         return
 
     # Make the reply ephemeral so it doesn't spam the channel
@@ -7157,9 +7157,9 @@ async def resetoffside_command(interaction: discord.Interaction):
         data["count"] = 0
         await db_save_json(OFFSIDE_KEY, data)
 
-        await interaction.followup.send(f"âœ… Offside counter reset (was **{before}**, now **0**).", ephemeral=True)
+        await interaction.followup.send(f"✅ Offside counter reset (was **{before}**, now **0**).", ephemeral=True)
     except Exception as e:
-        await interaction.followup.send(f"âš ï¸ Failed to reset counter: {e}", ephemeral=True)
+        await interaction.followup.send(f"⚠️ Failed to reset counter: {e}", ephemeral=True)
 
 @tree.command(name="commodity", description="Show Star Citizen commodity buy/sell data.")
 @app_commands.describe(
@@ -7220,7 +7220,7 @@ async def commodity_command(
         print(f"[ERROR] /commodity failed: {e}")
         await send_temp_followup(
             interaction,
-            content="âŒ An unexpected error occurred while fetching commodity data.",
+            content="❌ An unexpected error occurred while fetching commodity data.",
             ephemeral=True
         )
 
@@ -7335,7 +7335,7 @@ async def route_command(
         print(f"[ERROR] /route failed: {e}")
         await send_temp_followup(
             interaction,
-            content="âŒ An unexpected error occurred while fetching route data.",
+            content="❌ An unexpected error occurred while fetching route data.",
             ephemeral=True
         )
 
@@ -7402,17 +7402,17 @@ async def terminal_command(interaction: discord.Interaction, name: str):
         )
 
         embed = discord.Embed(
-            title=f"ðŸª {terminal.get('name', 'Unknown Terminal')}",
-            description=f"Available trading commodities â€¢ {system_name}",
+            title=f"🏪 {terminal.get('name', 'Unknown Terminal')}",
+            description=f"Available trading commodities • {system_name}",
             color=0x3498DB
         )
 
         if buy:
-            lines = [f"{c['commodity_name']} â€” `{c['price_buy']}`" for c in buy[:10]]
+            lines = [f"{c['commodity_name']} — `{c['price_buy']}`" for c in buy[:10]]
             embed.add_field(name="Buys", value="\n".join(lines), inline=False)
 
         if sell:
-            lines = [f"{c['commodity_name']} â€” `{c['price_sell']}`" for c in sell[:10]]
+            lines = [f"{c['commodity_name']} — `{c['price_sell']}`" for c in sell[:10]]
             embed.add_field(name="Sells", value="\n".join(lines), inline=False)
 
         msg = await send_temp_followup(interaction, embed=embed)
@@ -7451,7 +7451,7 @@ async def besttrade_command(interaction: discord.Interaction):
         routes = sorted(routes, key=lambda x: float(x.get("profit", 0)), reverse=True)
 
         embed = discord.Embed(
-            title="ðŸ’° Best Trade Routes",
+            title="💰 Best Trade Routes",
             description="Top profitable routes right now",
             color=0x2ECC71
         )
@@ -7461,9 +7461,9 @@ async def besttrade_command(interaction: discord.Interaction):
             origin = r.get("origin_terminal_name", "Unknown")
             dest = r.get("destination_terminal_name", "Unknown")
             commodity = r.get("commodity_name", "Unknown")
-            profit = r.get("profit", "â€”")
+            profit = r.get("profit", "—")
 
-            lines.append(f"**{commodity}**\n{origin} â†’ {dest}\nProfit: `{profit}` aUEC")
+            lines.append(f"**{commodity}**\n{origin} → {dest}\nProfit: `{profit}` aUEC")
 
         embed.add_field(name="Top Routes", value="\n\n".join(lines), inline=False)
 
@@ -7519,7 +7519,7 @@ async def ship_command(
         print(f"[ERROR] /ship failed: {e}")
         await send_temp_followup(
             interaction,
-            content="âŒ An unexpected error occurred while fetching ship data.",
+            content="❌ An unexpected error occurred while fetching ship data.",
             ephemeral=True
         )
 
@@ -7651,7 +7651,7 @@ async def cargo_command(
 
         if chosen_ship:
             embed.set_author(
-                name=f"Ship: {_ship_display_name(chosen_ship)} â€¢ {resolved_scu} SCU"
+                name=f"Ship: {_ship_display_name(chosen_ship)} • {resolved_scu} SCU"
             )
 
         msg = await send_temp_followup(interaction, embed=embed)
@@ -7661,7 +7661,7 @@ async def cargo_command(
         print(f"[ERROR] /cargo failed: {e}")
         await send_temp_followup(
             interaction,
-            content="âŒ An unexpected error occurred while calculating cargo profit.",
+            content="❌ An unexpected error occurred while calculating cargo profit.",
             ephemeral=True
         )
 
@@ -7696,7 +7696,7 @@ async def trending_command(
         print(f"[ERROR] /trending failed: {e}")
         await send_temp_followup(
             interaction,
-            content="âŒ An unexpected error occurred while fetching trending commodity data.",
+            content="❌ An unexpected error occurred while fetching trending commodity data.",
             ephemeral=True
         )
 
@@ -7771,7 +7771,7 @@ async def bestnow_command(
         print(f"[ERROR] /bestnow failed: {e}")
         await send_temp_followup(
             interaction,
-            content="âŒ An unexpected error occurred while fetching the best trade.",
+            content="❌ An unexpected error occurred while fetching the best trade.",
             ephemeral=True
         )
 
@@ -7806,7 +7806,7 @@ async def members_command(interaction: discord.Interaction):
     except RuntimeError as e:
         await send_temp_followup(
             interaction,
-            content=f"âŒ {e}",
+            content=f"❌ {e}",
             ephemeral=True
         )
 
@@ -7814,7 +7814,7 @@ async def members_command(interaction: discord.Interaction):
         print(f"[ERROR] /members failed: {e}")
         await send_temp_followup(
             interaction,
-            content="âŒ An unexpected error occurred while fetching organisation members.",
+            content="❌ An unexpected error occurred while fetching organisation members.",
             ephemeral=True
         )
 # ---------------------------------------------------
@@ -7965,7 +7965,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     emoji_str = str(payload.emoji)
     key = emoji_to_key(emoji_str)
 
-    # ðŸš« Block invalid reactions
+    # 🚫 Block invalid reactions
     if not key:
         try:
             ch = client.get_channel(ev["channel_id"]) or await client.fetch_channel(ev["channel_id"])
@@ -7989,7 +7989,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     uid = payload.user_id
     changed = False
 
-    # ðŸ•’ Attend Later â€” prompt for a time and stop here
+    # 🕒 Attend Later — prompt for a time and stop here
     if key == "attend_later":
         # Remove from attend/absent/maybe
         for k in ("attend", "absent", "maybe"):
@@ -8009,7 +8009,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
             except Exception:
                 pass
 
-            # Remove their ðŸ•’ reaction so reactions don't pile up
+            # Remove their 🕒 reaction so reactions don't pile up
             try:
                 guild = client.get_guild(payload.guild_id)
                 user_obj = (guild.get_member(uid) if guild else None) or await client.fetch_user(uid)
@@ -8032,7 +8032,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
 
         return
 
-    # âœ… NORMAL reactions (attend / absent / maybe)
+    # ✅ NORMAL reactions (attend / absent / maybe)
 
     # Remove from other lists when switching
     for k in ("attend", "absent", "maybe"):
@@ -8056,8 +8056,8 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     else:
         asyncio.create_task(remove_user_from_event_thread_if_needed(ev, uid))
 
-    # Save + update embed + remove the reaction (so reactions donâ€™t accumulate)
-    # Save + update embed + remove the reaction (so reactions donâ€™t accumulate)
+    # Save + update embed + remove the reaction (so reactions don’t accumulate)
+    # Save + update embed + remove the reaction (so reactions don’t accumulate)
     if changed:
         events_store["events"][str(ev["id"])] = ev
         save_events_store()
@@ -8082,7 +8082,7 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
 
     emoji_str = str(payload.emoji)
 
-    # âœ… Ignore bot-initiated removals (matches your mark_suppressed_reaction flow)
+    # ✅ Ignore bot-initiated removals (matches your mark_suppressed_reaction flow)
     key_tuple = (payload.message_id, payload.user_id, emoji_str)
     if key_tuple in pending_reaction_removals:
         pending_reaction_removals.discard(key_tuple)
@@ -8102,14 +8102,14 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
 
     uid = payload.user_id
 
-    # ðŸ•’ Attend Later removal (mapping)
+    # 🕒 Attend Later removal (mapping)
     if key == "attend_later":
         late_map = ev.get("attend_later_times") or {}
         if str(uid) in late_map:
             late_map.pop(str(uid), None)
             ev["attend_later_times"] = late_map
     else:
-        # âœ… Normal lists
+        # ✅ Normal lists
         if uid in ev.get(key, []):
             ev[key].remove(uid)
 
@@ -8138,7 +8138,7 @@ async def init_db():
         return
 
     if not DATABASE_URL:
-        print("[INFO] DATABASE_URL not set â€” using local JSON storage only.")
+        print("[INFO] DATABASE_URL not set — using local JSON storage only.")
         return
 
     DB_POOL = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=5)
@@ -8388,11 +8388,11 @@ async def on_ready():
             events_store = await db_load_json(EVENTS_FILE, {"next_id": 1, "events": {}})
             templates_store = await db_load_json(TEMPLATES_FILE, {})
             lineups_store = await db_load_json(LINEUPS_FILE, {"next_id": 1, "lineups": {}})
-            print("ðŸ—„ï¸ Loaded stores from Postgres.")
+            print("🗄️ Loaded stores from Postgres.")
         except Exception as e:
             print(f"[ERROR] Postgres load failed: {e}")
     else:
-        print("ðŸ—„ï¸ Postgres skipped â€” using local JSON storage only.")
+        print("🗄️ Postgres skipped — using local JSON storage only.")
         # (Optional) raise here if persistence is required
         # raise
         # --- command sync for multiple guilds ---
@@ -8414,14 +8414,14 @@ async def on_ready():
                     tree.copy_global_to(guild=guild)
 
                     cmds = await tree.sync(guild=guild)
-                    print(f"âœ… Synced {len(cmds)} commands to guild {gid}")
+                    print(f"✅ Synced {len(cmds)} commands to guild {gid}")
 
                 except Exception as e:
                     print(f"[ERROR] Failed to sync commands to guild {gid}: {e}")
 
             tree.clear_commands(guild=None)
             await tree.sync()
-            print("ðŸ§¹ Cleared global commands")
+            print("🧹 Cleared global commands")
 
     except Exception as e:
         print(f"[ERROR] Command sync failed: {e}")
@@ -8434,13 +8434,13 @@ async def on_ready():
     if not getattr(client, "background_started", False):
         try:
             client.loop.create_task(rotate_presence())
-            print("ðŸŒ€ Presence rotation started.")
+            print("🌀 Presence rotation started.")
         except Exception as e:
             print(f"[ERROR] Could not start presence rotation: {e}")
     
         try:
             client.loop.create_task(monitor_twitch_live())
-            print("ðŸ“¡ Twitch live monitor started.")
+            print("📡 Twitch live monitor started.")
         except Exception as e:
             print(f"[ERROR] Could not start Twitch monitor: {e}")
     
@@ -8456,7 +8456,7 @@ async def on_ready():
         channel = client.get_channel(channel_id)
     
         if channel:
-            message = await channel.send("âœ… - Phonics Bot is now online and ready for commands!")
+            message = await channel.send("✅ - Phonics Bot is now online and ready for commands!")
     
             async def delete_after_announcement(msg):
                 await asyncio.sleep(60)
