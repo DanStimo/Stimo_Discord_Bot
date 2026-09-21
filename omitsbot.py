@@ -1318,7 +1318,6 @@ def _format_last_match_player(player: dict, group: str) -> str:
             f"**{name}** — 🧤 {int(_to_number(player.get('saves')) or 0)} saves | "
             f"🥅 {int(_to_number(player.get('goalsconceded')) or 0)} conceded | "
             f"🧼 CS {int(_to_number(player.get('cleansheetsgk')) or 0)} | "
-            f"👟 Pass {pass_pct}% | "
             f"⭐ {rating}"
         )
 
