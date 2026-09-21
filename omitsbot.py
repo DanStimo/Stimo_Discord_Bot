@@ -1283,7 +1283,7 @@ def _made_attempted(player: dict, made_key: str, attempted_key: str) -> str:
     attempted = int(_to_number(player.get(attempted_key)) or 0)
     return f"{made}/{attempted}"
 
-LAST_MATCH_NAME_WIDTH = 18
+LAST_MATCH_NAME_WIDTH = 16
 
 def _format_last_match_player(player: dict, group: str) -> str:
     # Preserve normal EA gamertags while keeping unusually long names aligned.
