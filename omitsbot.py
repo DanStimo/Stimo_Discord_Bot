@@ -1283,16 +1283,9 @@ def _made_attempted(player: dict, made_key: str, attempted_key: str) -> str:
     attempted = int(_to_number(player.get(attempted_key)) or 0)
     return f"{made}/{attempted}"
 
-LAST_MATCH_NAME_WIDTH = 16
-
 def _format_last_match_player(player: dict, group: str) -> str:
-    # Preserve normal EA gamertags while keeping unusually long names aligned.
-    raw_name = _player_display_name(player).replace("`", "'")
-    name = (
-        raw_name
-        if len(raw_name) <= LAST_MATCH_NAME_WIDTH
-        else raw_name[:LAST_MATCH_NAME_WIDTH - 1] + "…"
-    )
+    # A vertical layout is readable on narrow phones and desktop Discord.
+    name = escape_markdown(_player_display_name(player))
     rating = _match_rating(player)
     pass_pct = _percentage(player.get("passesmade"), player.get("passattempts"))
     goals = int(_to_number(player.get("goals")) or 0)
@@ -1301,29 +1294,41 @@ def _format_last_match_player(player: dict, group: str) -> str:
     tackles = _made_attempted(player, "tacklesmade", "tackleattempts")
 
     if group == "Forwards":
-        return f"{name:<{LAST_MATCH_NAME_WIDTH}}{goals:>2} {assists:>2} {shots:>2} {pass_pct:>3}% {rating:>4}"
+        return (
+            f"**{name}**\n"
+            f"`G {goals} · A {assists} · Sh {shots}`  "
+            f"`Pass {pass_pct}% · Rt {rating}`"
+        )
 
     if group == "Midfielders":
-        return f"{name:<{LAST_MATCH_NAME_WIDTH}}{goals:>2} {assists:>2} {pass_pct:>3}% {tackles:>5} {rating:>4}"
+        return (
+            f"**{name}**\n"
+            f"`G {goals} · A {assists} · Pass {pass_pct}%`  "
+            f"`Tkl {tackles} · Rt {rating}`"
+        )
 
     if group == "Defenders":
-        return f"{name:<{LAST_MATCH_NAME_WIDTH}}{goals:>2} {assists:>2} {tackles:>5} {pass_pct:>3}% {rating:>4}"
+        return (
+            f"**{name}**\n"
+            f"`G {goals} · A {assists} · Pass {pass_pct}%`  "
+            f"`Tkl {tackles} · Rt {rating}`"
+        )
 
     if group == "Goalkeepers":
         saves = int(_to_number(player.get("saves")) or 0)
         conceded = int(_to_number(player.get("goalsconceded")) or 0)
         clean_sheets = int(_to_number(player.get("cleansheetsgk")) or 0)
-        return f"{name:<{LAST_MATCH_NAME_WIDTH}}{saves:>2} {conceded:>3} {clean_sheets:>2} {rating:>4}"
+        return (
+            f"**{name}**\n"
+            f"`Sv {saves} · Con {conceded}`  "
+            f"`CS {clean_sheets} · Rt {rating}`"
+        )
 
-    return f"{name:<{LAST_MATCH_NAME_WIDTH}}{goals:>2} {assists:>2} {shots:>2} {pass_pct:>3}% {rating:>4}"
-
-LAST_MATCH_TABLE_HEADERS = {
-    "Forwards": f"{'Player':<{LAST_MATCH_NAME_WIDTH}}{'G':>2} {'A':>2} {'Sh':>2} {'Pass':>4} {'Rt':>4}",
-    "Midfielders": f"{'Player':<{LAST_MATCH_NAME_WIDTH}}{'G':>2} {'A':>2} {'Pass':>4} {'Tkl':>5} {'Rt':>4}",
-    "Defenders": f"{'Player':<{LAST_MATCH_NAME_WIDTH}}{'G':>2} {'A':>2} {'Tkl':>5} {'Pass':>4} {'Rt':>4}",
-    "Goalkeepers": f"{'Player':<{LAST_MATCH_NAME_WIDTH}}{'Sv':>2} {'Con':>3} {'CS':>2} {'Rt':>4}",
-    "Players": f"{'Player':<{LAST_MATCH_NAME_WIDTH}}{'G':>2} {'A':>2} {'Sh':>2} {'Pass':>4} {'Rt':>4}",
-}
+    return (
+        f"**{name}**\n"
+        f"`G {goals} · A {assists} · Sh {shots}`  "
+        f"`Pass {pass_pct}% · Rt {rating}`"
+    )
 
 async def get_last_match_details(club_id: str | int) -> dict | None:
     """Return the newest match plus position-aware player lines."""
@@ -2035,24 +2040,11 @@ def _spacer(inline: bool = True) -> dict:
     return {"name": ZWSP, "value": ZWSP, "inline": inline}
 
 def _format_squad_table(names: list[str]) -> str:
-    """Display squad members in two balanced, aligned columns."""
-    width = 18
-
-    def compact(name: str) -> str:
-        clean = str(name).replace("`", "'")
-        return clean if len(clean) <= width else clean[:width - 1] + "…"
-
-    cleaned = [compact(name) for name in names]
-    midpoint = math.ceil(len(cleaned) / 2)
-    left = cleaned[:midpoint]
-    right = cleaned[midpoint:]
-    rows = []
-
-    for index, left_name in enumerate(left):
-        right_name = right[index] if index < len(right) else ""
-        rows.append(f"{left_name:<{width}}  {right_name}")
-
-    return "```text\n" + "\n".join(rows) + "\n```"
+    """Inline-code name chips wrap cleanly at any Discord client width."""
+    return " ".join(
+        f"`{str(name).replace('`', "'")}`"
+        for name in names
+    )
 
 def build_stats_embed(club_id: str, club_name: str | None, data: dict) -> discord.Embed:
     """
@@ -2132,17 +2124,9 @@ def build_stats_embed(club_id: str, club_name: str | None, data: dict) -> discor
         for group in ("Forwards", "Midfielders", "Defenders", "Goalkeepers", "Players"):
             player_lines = last_match["players"].get(group)
             if player_lines:
-                header = LAST_MATCH_TABLE_HEADERS[group]
-                rows = "\n".join(player_lines)
-                table = (
-                    "```text\n"
-                    f"{header}\n"
-                    f"{'-' * len(header)}\n"
-                    f"{rows}\n"
-                    "```"
-                )
+                player_text = "\n\n".join(player_lines)
                 fields.append(
-                    _field(group_titles[group], table, inline=False)
+                    _field(group_titles[group], player_text, inline=False)
                 )
 
     # Recent results follow the detailed latest-match section.
