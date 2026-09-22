@@ -1296,21 +1296,21 @@ def _format_last_match_player(player: dict, group: str) -> str:
     if group == "Forwards":
         return (
             f"**{name}**\n"
-            f"`G {goals} · A {assists} · Sh {shots}`  "
+            f"`G {goals} · A {assists} · Sh {shots}`\n"
             f"`Pass {pass_pct}% · Rt {rating}`"
         )
 
     if group == "Midfielders":
         return (
             f"**{name}**\n"
-            f"`G {goals} · A {assists} · Pass {pass_pct}%`  "
+            f"`G {goals} · A {assists} · Pass {pass_pct}%`\n"
             f"`Tkl {tackles} · Rt {rating}`"
         )
 
     if group == "Defenders":
         return (
             f"**{name}**\n"
-            f"`G {goals} · A {assists} · Pass {pass_pct}%`  "
+            f"`G {goals} · A {assists} · Pass {pass_pct}%`\n"
             f"`Tkl {tackles} · Rt {rating}`"
         )
 
@@ -1320,13 +1320,13 @@ def _format_last_match_player(player: dict, group: str) -> str:
         clean_sheets = int(_to_number(player.get("cleansheetsgk")) or 0)
         return (
             f"**{name}**\n"
-            f"`Sv {saves} · Con {conceded}`  "
+            f"`Sv {saves} · Con {conceded}`\n"
             f"`CS {clean_sheets} · Rt {rating}`"
         )
 
     return (
         f"**{name}**\n"
-        f"`G {goals} · A {assists} · Sh {shots}`  "
+        f"`G {goals} · A {assists} · Sh {shots}`\n"
         f"`Pass {pass_pct}% · Rt {rating}`"
     )
 
