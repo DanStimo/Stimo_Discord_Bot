@@ -2285,7 +2285,7 @@ async def rotate_presence():
                 await client.change_presence(
                     activity=discord.Activity(
                         type=discord.ActivityType.watching,
-                        name=f"#{rank} {club_name}",
+                        name=f"EA Top 10 | #{rank} {club_name}",
                     )
                 )
             except asyncio.CancelledError:
