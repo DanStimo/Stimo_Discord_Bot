@@ -2188,77 +2188,112 @@ def format_columns(names: list[str], cols: int = 2) -> str:
     # Return as a code block (monospace) so spacing lines up
     return "```\n" + "\n".join(lines) + "\n```"
 
+def _leaderboard_rank_value(club: dict) -> int:
+    """Return a sortable numeric rank, putting invalid ranks last."""
+    try:
+        return int(str(club.get("rank", "")).replace(",", "").strip())
+    except (TypeError, ValueError):
+        return 999999
+
+
+async def get_top_ten_presence_clubs() -> list[tuple[int, str]]:
+    """Fetch the current EA all-time leaderboard top ten."""
+    data = await _ea_get_json(
+        "https://proclubs.ea.com/api/fc/allTimeLeaderboard",
+        {"platform": PLATFORM},
+    )
+
+    if not isinstance(data, list):
+        raise ValueError(f"Unexpected leaderboard payload: {type(data).__name__}")
+
+    clubs: list[tuple[int, str]] = []
+    ordered = sorted(data, key=_leaderboard_rank_value)
+
+    for fallback_rank, club in enumerate(ordered, start=1):
+        if not isinstance(club, dict):
+            continue
+
+        name = (
+            club.get("name")
+            or (club.get("clubInfo") or {}).get("name")
+            or ""
+        )
+        name = " ".join(str(name).split()).strip()
+        if not name:
+            continue
+
+        rank = _leaderboard_rank_value(club)
+        if rank == 999999:
+            rank = fallback_rank
+
+        clubs.append((rank, name))
+        if len(clubs) == 10:
+            break
+
+    if not clubs:
+        raise ValueError("EA leaderboard did not contain any named clubs")
+
+    return clubs
+
+
 async def rotate_presence():
+    """Cycle through EA leaderboard positions #1 to #10."""
     await client.wait_until_ready()
 
-    guild_ids = [
-        int(x.strip())
-        for x in os.getenv("GUILD_IDS", "").split(",")
-        if x.strip()
-    ]
+    try:
+        rotate_seconds = max(
+            30,
+            int(os.getenv("LEADERBOARD_PRESENCE_SECONDS", "60")),
+        )
+    except ValueError:
+        rotate_seconds = 60
 
-    watch_role_ids = [
-        int(x.strip())
-        for x in os.getenv("WATCH_ROLE_IDS", "").split(",")
-        if x.strip()
-    ]
-
-    if not guild_ids:
-        print("[WARN] GUILD_IDS not set – cannot rotate presence.")
-        return
-
-    if len(guild_ids) != len(watch_role_ids):
-        print("[WARN] GUILD_IDS and WATCH_ROLE_IDS count does not match.")
-        return
+    cached_clubs: list[tuple[int, str]] = []
 
     while not client.is_closed():
         try:
-            all_candidates = []
-
-            for guild_id, role_id in zip(guild_ids, watch_role_ids):
-                guild = client.get_guild(guild_id)
-
-                if guild is None:
-                    try:
-                        guild = await client.fetch_guild(guild_id)
-                    except Exception as e:
-                        print(f"[ERROR] Could not fetch guild {guild_id}: {e}")
-                        continue
-
-                try:
-                    async for _ in guild.fetch_members(limit=None):
-                        pass
-                except Exception as e:
-                    print(f"[WARN] Could not fully fetch members for guild {guild_id}: {e}")
-
-                role = guild.get_role(role_id)
-
-                if role is None:
-                    print(f"[WARN] Role {role_id} not found in guild {guild_id}")
-                    continue
-
-                members = [m for m in role.members if not m.bot]
-
-                for member in members:
-                    all_candidates.append(member)
-
-            if all_candidates:
-                pick = random.choice(all_candidates)
-                watching_text = f"{pick.display_name} 👀"
-            else:
-                watching_text = "2 servers 👀"
-
-            await client.change_presence(
-                activity=discord.Activity(
-                    type=discord.ActivityType.watching,
-                    name=watching_text
-                )
+            latest_clubs = await get_top_ten_presence_clubs()
+            cached_clubs = latest_clubs
+            print(
+                f"[PRESENCE] Loaded EA leaderboard top {len(cached_clubs)}; "
+                f"rotating every {rotate_seconds}s."
             )
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            print(f"[PRESENCE] Could not refresh EA leaderboard: {error}")
 
-        except Exception as e:
-            print(f"[ERROR] Failed to rotate presence: {e}")
+        if not cached_clubs:
+            try:
+                await client.change_presence(
+                    activity=discord.Activity(
+                        type=discord.ActivityType.watching,
+                        name="EA FC Club Leaderboard",
+                    )
+                )
+            except Exception as error:
+                print(f"[PRESENCE] Could not set fallback activity: {error}")
 
-        await asyncio.sleep(300)
+            await asyncio.sleep(rotate_seconds)
+            continue
+
+        for rank, club_name in cached_clubs:
+            if client.is_closed():
+                return
+
+            try:
+                await client.change_presence(
+                    activity=discord.Activity(
+                        type=discord.ActivityType.watching,
+                        name=f"#{rank} {club_name}",
+                    )
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                print(f"[PRESENCE] Could not show #{rank} {club_name}: {error}")
+
+            await asyncio.sleep(rotate_seconds)
 
 # =========================================================
 # STAR CITIZEN / UEX
