@@ -2500,11 +2500,6 @@ def build_ea_top100_embeds(
     """Build ten mobile-friendly embeds containing ten clubs each."""
     embeds: list[discord.Embed] = []
     total_pages = max(1, math.ceil(len(clubs) / 10))
-    platform_name = (
-        "Cross-play (Current Gen)"
-        if PLATFORM == "common-gen5"
-        else PLATFORM
-    )
 
     for page_index in range(total_pages):
         start_index = page_index * 10
@@ -2580,24 +2575,20 @@ def build_ea_top100_embeds(
                     f"🏅 **{skill_rating:,} SR** · "
                     f"Division **{division_text}** · "
                     f"Best **{best_division_text}** · "
-                    f"Rep **{reputation}**\n"
+                    f"Rep **{reputation}** · "
+                    f"🧤 **{clean_sheets:,} CS**\n"
                     f"🎮 **{games_played:,} played** · "
                     f"✅ {wins:,} · ➖ {draws:,} · ❌ {losses:,} · "
-                    f"📈 **{win_rate:.1f}% wins**\n"
+                    f"📈 **{win_rate:.1f}% wins** · "
+                    f"ID: `{club_id}`\n"
                     f"⚽ {goals_for:,} GF (**{goals_per_game:.2f}/match**) · "
                     f"🥅 {goals_against:,} GA "
                     f"(**{conceded_per_game:.2f}/match**) · "
-                    f"GD **{goal_difference:+,}**\n"
-                    f"🧤 **{clean_sheets:,} clean sheets** · "
-                    f"Club ID: `{club_id}`"
+                    f"GD **{goal_difference:+,}**"
                 )
             )
 
-        embed.description = (
-            f"**Official EA all-time club leaderboard**\n"
-            f"Platform: **{platform_name}**\n\n"
-            + "\n\n".join(club_sections)
-        )
+        embed.description = "\n\n".join(club_sections)
 
         footer_icon = (
             client.user.display_avatar.url
