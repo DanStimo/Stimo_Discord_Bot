@@ -727,6 +727,10 @@ async def on_message(message: discord.Message):
     if message.author.bot or not message.guild:
         return
 
+    if message.channel.id == EA_TOP100_CHANNEL_ID:
+        await handle_ea_top100_channel_search(message)
+        return
+
     if message.channel.id != FREE_STATS_CHANNEL_ID:
         return
 
@@ -2392,6 +2396,7 @@ except ValueError:
     EA_TOP100_UPDATE_MINUTES = 30
 
 _ea_top100_refresh_lock = asyncio.Lock()
+_ea_top100_clubs_cache: list[dict] = []
 
 
 def _load_ea_top100_state() -> dict:
@@ -2601,6 +2606,280 @@ def build_ea_top100_embeds(
     return embeds
 
 
+def build_ea_top100_search_embed(club: dict) -> discord.Embed:
+    """Build a compact result card for a typed Top 100 search."""
+    rank = _leaderboard_rank_value(club)
+    club_name = escape_markdown(_ea_top100_club_name(club)).upper()
+    club_id = _ea_top100_club_id(club)
+    skill_rating = _ea_top100_int(club, "skillRating")
+    games_played = _ea_top100_int(club, "gamesPlayed")
+    wins = _ea_top100_int(club, "wins")
+    draws = _ea_top100_int(club, "ties")
+    losses = _ea_top100_int(club, "losses")
+    goals_for = _ea_top100_int(club, "goals")
+    goals_against = _ea_top100_int(club, "goalsAgainst")
+    clean_sheets = _ea_top100_int(club, "cleanSheets")
+    current_division = _ea_top100_int(club, "currentDivision")
+    best_division = _ea_top100_int(club, "bestDivision")
+    reputation = _ea_top100_int(club, "reputationlevel")
+    goal_difference = goals_for - goals_against
+    win_rate = (
+        (wins / games_played) * 100
+        if games_played > 0
+        else 0.0
+    )
+
+    medal = f"{_ea_top100_medal(rank)} " if rank <= 3 else "🏆 "
+    embed = discord.Embed(
+        title=f"{medal}TOP 100 RESULT — #{rank}",
+        description=(
+            f"### {club_name}\n"
+            f"🏅 **SR** {skill_rating:,} · "
+            f"**D** {current_division or '—'} · "
+            f"**BD** {best_division or '—'} · "
+            f"**R** {reputation}\n"
+            f"🎮 **P** {games_played:,} · "
+            f"**W-D-L** {wins:,}-{draws:,}-{losses:,} · "
+            f"**W%** {win_rate:.1f}\n"
+            f"⚽ **GF** {goals_for:,} · "
+            f"**GA** {goals_against:,} · "
+            f"**GD** {goal_difference:+,} · "
+            f"**CS** {clean_sheets:,}\n"
+            f"🆔 **Club ID** `{club_id}`"
+        ),
+        color=0x00D084,
+        timestamp=datetime.now(timezone.utc),
+    )
+
+    footer_icon = (
+        client.user.display_avatar.url
+        if client.user
+        else None
+    )
+    embed.set_footer(
+        text="EA FC Club Leaderboard • Top 100 search",
+        icon_url=footer_icon,
+    )
+    return embed
+
+
+def _normalise_ea_top100_search(value: str) -> str:
+    return " ".join(value.casefold().split())
+
+
+async def _log_ea_top100_search(
+    request_message: discord.Message,
+    embed: discord.Embed,
+) -> None:
+    """Mirror successful typed Top 100 searches to the search log."""
+    try:
+        log_channel = (
+            request_message.guild.get_channel(LOG_CHANNEL_ID)
+            or client.get_channel(LOG_CHANNEL_ID)
+        )
+        if not log_channel:
+            print(f"[TOP 100 SEARCH] Log channel {LOG_CHANNEL_ID} not found")
+            return
+
+        await log_channel.send(
+            content=(
+                f"🏆 Top 100 search by "
+                f"{request_message.author.mention} in "
+                f"{request_message.channel.mention}:"
+            ),
+            embed=embed,
+        )
+    except Exception as error:
+        print(f"[TOP 100 SEARCH] Could not write search log: {error}")
+
+
+async def _record_ea_top100_search(
+    request_message: discord.Message,
+    embed: discord.Embed,
+) -> None:
+    record_club_search(
+        request_message.guild,
+        request_message.author,
+    )
+    await _log_ea_top100_search(request_message, embed)
+
+
+class EATop100SearchDropdown(discord.ui.View):
+    def __init__(
+        self,
+        matches: list[dict],
+        request_message: discord.Message,
+    ):
+        super().__init__(timeout=90)
+        self.matches = matches[:25]
+        self.request_message = request_message
+
+        options = []
+        for club in self.matches:
+            rank = _leaderboard_rank_value(club)
+            name = _ea_top100_club_name(club)
+            skill_rating = _ea_top100_int(club, "skillRating")
+            wins = _ea_top100_int(club, "wins")
+            draws = _ea_top100_int(club, "ties")
+            losses = _ea_top100_int(club, "losses")
+
+            options.append(
+                discord.SelectOption(
+                    label=f"#{rank} — {name}"[:100],
+                    description=(
+                        f"SR {skill_rating:,} • "
+                        f"W-D-L {wins}-{draws}-{losses}"
+                    )[:100],
+                    value=_ea_top100_club_id(club),
+                )
+            )
+
+        select = discord.ui.Select(
+            placeholder="Choose a Top 100 club…",
+            options=options,
+            min_values=1,
+            max_values=1,
+        )
+        select.callback = self._on_select
+        self.add_item(select)
+
+    async def interaction_check(
+        self,
+        interaction: discord.Interaction,
+    ) -> bool:
+        if interaction.user.id == self.request_message.author.id:
+            return True
+
+        await interaction.response.send_message(
+            "This Top 100 search belongs to another user.",
+            ephemeral=True,
+        )
+        return False
+
+    async def _on_select(self, interaction: discord.Interaction):
+        selected_club_id = self.children[0].values[0]
+        chosen = next(
+            (
+                club
+                for club in self.matches
+                if _ea_top100_club_id(club) == selected_club_id
+            ),
+            None,
+        )
+
+        if chosen is None:
+            await interaction.response.edit_message(
+                content="That Top 100 club could not be found.",
+                embed=None,
+                view=None,
+            )
+            return
+
+        embed = build_ea_top100_search_embed(chosen)
+        await interaction.response.edit_message(
+            content=None,
+            embed=embed,
+            view=None,
+        )
+        self.stop()
+
+        await _record_ea_top100_search(self.request_message, embed)
+        asyncio.create_task(
+            safe_delete(interaction.message, delay=60)
+        )
+
+
+async def handle_ea_top100_channel_search(
+    message: discord.Message,
+) -> None:
+    """Handle typed club-name searches in the Top 100 channel."""
+    global _ea_top100_clubs_cache
+
+    content = (message.content or "").strip()
+    valid_club_name = (
+        2 <= len(content) <= 15
+        and all(
+            character.isalnum() or character == " "
+            for character in content
+        )
+    )
+
+    if not valid_club_name:
+        await warn_search_channel(
+            message,
+            "That message is not a valid EA FC club name.",
+        )
+        return
+
+    asyncio.create_task(safe_delete(message))
+
+    try:
+        async with message.channel.typing():
+            clubs = _ea_top100_clubs_cache
+            if not clubs:
+                clubs = await fetch_ea_top100_clubs()
+                _ea_top100_clubs_cache = clubs
+
+            query = _normalise_ea_top100_search(content)
+            exact_matches = [
+                club
+                for club in clubs
+                if _normalise_ea_top100_search(
+                    _ea_top100_club_name(club)
+                ) == query
+            ]
+
+            if exact_matches:
+                matches = exact_matches
+            else:
+                matches = [
+                    club
+                    for club in clubs
+                    if query in _normalise_ea_top100_search(
+                        _ea_top100_club_name(club)
+                    )
+                ]
+
+            if not matches:
+                response = await message.channel.send(
+                    f"{message.author.mention} **{content}** does not "
+                    f"currently appear in the EA FC Top 100."
+                )
+                asyncio.create_task(safe_delete(response, delay=15))
+                return
+
+            if len(matches) == 1:
+                embed = build_ea_top100_search_embed(matches[0])
+                response = await message.channel.send(embed=embed)
+                await _record_ea_top100_search(message, embed)
+                asyncio.create_task(safe_delete(response, delay=60))
+                return
+
+            view = EATop100SearchDropdown(matches, message)
+            result_count = len(matches)
+            selector = await message.channel.send(
+                (
+                    f"Found **{result_count}** matching Top 100 clubs. "
+                    f"Please select one:"
+                    + (
+                        " Showing the first 25 results."
+                        if result_count > 25
+                        else ""
+                    )
+                ),
+                view=view,
+            )
+            asyncio.create_task(safe_delete(selector, delay=90))
+
+    except Exception as error:
+        print(f"[TOP 100 SEARCH] Typed search failed: {error}")
+        response = await message.channel.send(
+            "The EA Top 100 search is temporarily unavailable. "
+            "Please try again shortly."
+        )
+        asyncio.create_task(safe_delete(response, delay=15))
+
+
 async def _discover_ea_top100_messages(channel) -> dict[str, int]:
     """Recover existing page IDs if the local state file is ever lost."""
     pages: dict[str, int] = {}
@@ -2657,6 +2936,8 @@ async def _delete_old_ea_top100_messages(channel) -> int:
 
 async def refresh_ea_top100(reason: str = "scheduled") -> dict:
     """Fetch the leaderboard and edit the persistent channel messages."""
+    global _ea_top100_clubs_cache
+
     if not EA_TOP100_CHANNEL_ID:
         raise RuntimeError("EA_TOP100_CHANNEL_ID is not configured")
 
@@ -2666,6 +2947,7 @@ async def refresh_ea_top100(reason: str = "scheduled") -> dict:
             channel = await client.fetch_channel(EA_TOP100_CHANNEL_ID)
 
         clubs = await fetch_ea_top100_clubs()
+        _ea_top100_clubs_cache = clubs
         updated_at = datetime.now(timezone.utc)
         embeds = build_ea_top100_embeds(clubs, updated_at)
 
