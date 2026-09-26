@@ -2369,6 +2369,420 @@ async def rotate_presence():
 
             await asyncio.sleep(rotate_seconds)
 
+
+# =========================================================
+# EA FC TOP 100 LEADERBOARD CHANNEL
+# =========================================================
+
+EA_TOP100_CHANNEL_ID = int(
+    os.getenv("EA_TOP100_CHANNEL_ID", "1553322041124585573")
+)
+EA_TOP100_STATE_FILE = os.getenv(
+    "EA_TOP100_STATE_FILE",
+    "ea_top100_messages.json",
+)
+
+try:
+    EA_TOP100_UPDATE_MINUTES = max(
+        10,
+        int(os.getenv("EA_TOP100_UPDATE_MINUTES", "30")),
+    )
+except ValueError:
+    EA_TOP100_UPDATE_MINUTES = 30
+
+_ea_top100_refresh_lock = asyncio.Lock()
+
+
+def _load_ea_top100_state() -> dict:
+    """Load the IDs of the persistent leaderboard messages."""
+    try:
+        with open(EA_TOP100_STATE_FILE, "r", encoding="utf-8") as file:
+            state = json.load(file)
+
+        if not isinstance(state, dict):
+            raise ValueError("state is not a JSON object")
+
+        state.setdefault("channel_id", EA_TOP100_CHANNEL_ID)
+        state.setdefault("pages", {})
+        return state
+    except FileNotFoundError:
+        return {
+            "channel_id": EA_TOP100_CHANNEL_ID,
+            "pages": {},
+        }
+    except Exception as error:
+        print(f"[TOP 100] Could not load message state: {error}")
+        return {
+            "channel_id": EA_TOP100_CHANNEL_ID,
+            "pages": {},
+        }
+
+
+def _save_ea_top100_state(state: dict) -> None:
+    """Atomically save the persistent leaderboard message IDs."""
+    temporary_file = f"{EA_TOP100_STATE_FILE}.tmp"
+
+    try:
+        with open(temporary_file, "w", encoding="utf-8") as file:
+            json.dump(state, file, indent=2, ensure_ascii=False)
+
+        os.replace(temporary_file, EA_TOP100_STATE_FILE)
+    except Exception as error:
+        print(f"[TOP 100] Could not save message state: {error}")
+
+
+def _ea_top100_int(club: dict, key: str, default: int = 0) -> int:
+    try:
+        return int(float(str(club.get(key, default)).replace(",", "")))
+    except (TypeError, ValueError):
+        return default
+
+
+def _ea_top100_float(club: dict, key: str, default: float = 0.0) -> float:
+    try:
+        return float(str(club.get(key, default)).replace(",", ""))
+    except (TypeError, ValueError):
+        return default
+
+
+def _ea_top100_club_name(club: dict) -> str:
+    club_info = club.get("clubInfo") or {}
+    name = (
+        club.get("clubName")
+        or club.get("name")
+        or club_info.get("name")
+        or "Unknown Club"
+    )
+    return " ".join(str(name).split()).strip()
+
+
+def _ea_top100_club_id(club: dict) -> str:
+    club_info = club.get("clubInfo") or {}
+    club_id = club.get("clubId") or club_info.get("clubId") or "Unknown"
+    return str(club_id)
+
+
+async def fetch_ea_top100_clubs() -> list[dict]:
+    """Fetch and validate the current EA all-time leaderboard top 100."""
+    data = await _ea_get_json(
+        "https://proclubs.ea.com/api/fc/allTimeLeaderboard",
+        {"platform": PLATFORM},
+        retries=5,
+    )
+
+    if not isinstance(data, list):
+        raise RuntimeError(
+            f"EA returned {type(data).__name__} instead of a leaderboard list"
+        )
+
+    clubs = [club for club in data if isinstance(club, dict)]
+    clubs.sort(key=_leaderboard_rank_value)
+    clubs = clubs[:100]
+
+    if not clubs:
+        raise RuntimeError("EA returned an empty leaderboard")
+
+    return clubs
+
+
+def _ea_top100_medal(rank: int) -> str:
+    return {
+        1: "🥇",
+        2: "🥈",
+        3: "🥉",
+    }.get(rank, "🏆")
+
+
+def build_ea_top100_embeds(
+    clubs: list[dict],
+    updated_at: datetime,
+) -> list[discord.Embed]:
+    """Build ten mobile-friendly embeds containing ten clubs each."""
+    embeds: list[discord.Embed] = []
+    total_pages = max(1, math.ceil(len(clubs) / 10))
+    platform_name = (
+        "Cross-play (Current Gen)"
+        if PLATFORM == "common-gen5"
+        else PLATFORM
+    )
+
+    for page_index in range(total_pages):
+        start_index = page_index * 10
+        page_clubs = clubs[start_index:start_index + 10]
+
+        if not page_clubs:
+            continue
+
+        first_rank = _leaderboard_rank_value(page_clubs[0])
+        last_rank = _leaderboard_rank_value(page_clubs[-1])
+
+        embed = discord.Embed(
+            title=(
+                f"EA FC TOP 100 — RANKS "
+                f"{first_rank}–{last_rank}"
+            ),
+            description=(
+                f"**Official EA all-time club leaderboard**\n"
+                f"Platform: **{platform_name}**"
+            ),
+            color=0x00D084,
+            timestamp=updated_at,
+        )
+
+        for fallback_rank, club in enumerate(
+            page_clubs,
+            start=start_index + 1,
+        ):
+            rank = _leaderboard_rank_value(club)
+            if rank == 999999:
+                rank = fallback_rank
+
+            club_name = escape_markdown(_ea_top100_club_name(club))
+            club_id = _ea_top100_club_id(club)
+            skill_rating = _ea_top100_int(club, "skillRating")
+            games_played = _ea_top100_int(club, "gamesPlayed")
+            wins = _ea_top100_int(club, "wins")
+            draws = _ea_top100_int(club, "ties")
+            losses = _ea_top100_int(club, "losses")
+            goals_for = _ea_top100_int(club, "goals")
+            goals_against = _ea_top100_int(club, "goalsAgainst")
+            clean_sheets = _ea_top100_int(club, "cleanSheets")
+            current_division = _ea_top100_int(club, "currentDivision")
+            best_division = _ea_top100_int(club, "bestDivision")
+            reputation = _ea_top100_int(club, "reputationlevel")
+
+            win_rate = (
+                (wins / games_played) * 100
+                if games_played > 0
+                else 0.0
+            )
+            goals_per_game = _ea_top100_float(club, "goalsPerGame")
+            conceded_per_game = _ea_top100_float(
+                club,
+                "goalsAgainstPerGame",
+            )
+            goal_difference = goals_for - goals_against
+
+            division_text = (
+                str(current_division)
+                if current_division > 0
+                else "—"
+            )
+            best_division_text = (
+                str(best_division)
+                if best_division > 0
+                else "—"
+            )
+
+            embed.add_field(
+                name=(
+                    f"{_ea_top100_medal(rank)} "
+                    f"#{rank} — {club_name}"
+                ),
+                value=(
+                    f"🏅 **{skill_rating:,} SR** · "
+                    f"Division **{division_text}** · "
+                    f"Best **{best_division_text}** · "
+                    f"Rep **{reputation}**\n"
+                    f"🎮 **{games_played:,} played** · "
+                    f"✅ {wins:,} · ➖ {draws:,} · ❌ {losses:,} · "
+                    f"📈 **{win_rate:.1f}% wins**\n"
+                    f"⚽ {goals_for:,} GF (**{goals_per_game:.2f}/match**) · "
+                    f"🥅 {goals_against:,} GA "
+                    f"(**{conceded_per_game:.2f}/match**) · "
+                    f"GD **{goal_difference:+,}**\n"
+                    f"🧤 **{clean_sheets:,} clean sheets** · "
+                    f"Club ID: `{club_id}`"
+                ),
+                inline=False,
+            )
+
+        footer_icon = (
+            client.user.display_avatar.url
+            if client.user
+            else None
+        )
+        embed.set_footer(
+            text=(
+                f"EA FC Club Leaderboard • Page "
+                f"{page_index + 1}/{total_pages} • "
+                f"Updates every {EA_TOP100_UPDATE_MINUTES} minutes"
+            ),
+            icon_url=footer_icon,
+        )
+        embeds.append(embed)
+
+    return embeds
+
+
+async def _discover_ea_top100_messages(channel) -> dict[str, int]:
+    """Recover existing page IDs if the local state file is ever lost."""
+    pages: dict[str, int] = {}
+    pattern = re.compile(r"EA FC TOP 100 — RANKS (\d+)–(\d+)")
+
+    async for message in channel.history(limit=100):
+        if not client.user or message.author.id != client.user.id:
+            continue
+        if not message.embeds:
+            continue
+
+        title = message.embeds[0].title or ""
+        match = pattern.fullmatch(title)
+        if not match:
+            continue
+
+        first_rank = int(match.group(1))
+        page_number = ((first_rank - 1) // 10) + 1
+        pages[str(page_number)] = message.id
+
+    return pages
+
+
+async def refresh_ea_top100(reason: str = "scheduled") -> dict:
+    """Fetch the leaderboard and edit the persistent channel messages."""
+    if not EA_TOP100_CHANNEL_ID:
+        raise RuntimeError("EA_TOP100_CHANNEL_ID is not configured")
+
+    async with _ea_top100_refresh_lock:
+        channel = client.get_channel(EA_TOP100_CHANNEL_ID)
+        if channel is None:
+            channel = await client.fetch_channel(EA_TOP100_CHANNEL_ID)
+
+        clubs = await fetch_ea_top100_clubs()
+        updated_at = datetime.now(timezone.utc)
+        embeds = build_ea_top100_embeds(clubs, updated_at)
+
+        state = _load_ea_top100_state()
+        if int(state.get("channel_id", 0) or 0) != EA_TOP100_CHANNEL_ID:
+            state = {
+                "channel_id": EA_TOP100_CHANNEL_ID,
+                "pages": {},
+            }
+
+        pages = state.get("pages") or {}
+        if not pages:
+            pages = await _discover_ea_top100_messages(channel)
+
+        created = 0
+        edited = 0
+
+        # Sending new pages in reverse order leaves ranks 1–10 as the
+        # newest message at the bottom of the channel on first setup.
+        missing_page_indexes = [
+            index
+            for index in range(len(embeds))
+            if not pages.get(str(index + 1))
+        ]
+        newly_created_pages: set[str] = set()
+
+        for page_index in reversed(missing_page_indexes):
+            message = await channel.send(embed=embeds[page_index])
+            page_key = str(page_index + 1)
+            pages[page_key] = message.id
+            newly_created_pages.add(page_key)
+            created += 1
+
+        for page_index, embed in enumerate(embeds):
+            page_key = str(page_index + 1)
+            message_id = pages.get(page_key)
+
+            if not message_id:
+                continue
+
+            if page_key in newly_created_pages:
+                continue
+
+            try:
+                message = await channel.fetch_message(int(message_id))
+            except (discord.NotFound, discord.Forbidden):
+                message = await channel.send(embed=embed)
+                pages[page_key] = message.id
+                created += 1
+                continue
+
+            if client.user and message.author.id != client.user.id:
+                message = await channel.send(embed=embed)
+                pages[page_key] = message.id
+                created += 1
+                continue
+
+            await message.edit(content=None, embed=embed)
+            edited += 1
+
+        state["channel_id"] = EA_TOP100_CHANNEL_ID
+        state["pages"] = pages
+        state["last_updated"] = updated_at.isoformat()
+        _save_ea_top100_state(state)
+
+        print(
+            f"[TOP 100] Refreshed {len(clubs)} clubs "
+            f"({created} created, {edited} edited; {reason})."
+        )
+
+        return {
+            "clubs": len(clubs),
+            "created": created,
+            "edited": edited,
+            "updated_at": updated_at,
+        }
+
+
+async def ea_top100_update_loop():
+    """Continuously refresh the leaderboard while the bot is running."""
+    await client.wait_until_ready()
+    normal_delay = EA_TOP100_UPDATE_MINUTES * 60
+
+    while not client.is_closed():
+        delay = normal_delay
+
+        try:
+            await refresh_ea_top100(reason="scheduled")
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            print(f"[TOP 100] Scheduled refresh failed: {error}")
+            delay = min(300, normal_delay)
+
+        await asyncio.sleep(delay)
+
+
+@tree.command(
+    name="refreshtop100",
+    description="Immediately refresh the EA FC Top 100 leaderboard.",
+)
+async def refresh_top100_command(interaction: discord.Interaction):
+    if not interaction.guild:
+        await interaction.response.send_message(
+            "This command must be used in the server.",
+            ephemeral=True,
+        )
+        return
+
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message(
+            "You must be an administrator to use this command.",
+            ephemeral=True,
+        )
+        return
+
+    await interaction.response.defer(ephemeral=True, thinking=True)
+
+    try:
+        result = await refresh_ea_top100(
+            reason=f"manual request by {interaction.user}",
+        )
+        await interaction.followup.send(
+            f"✅ Refreshed **{result['clubs']} clubs** across the "
+            f"Top 100 leaderboard embeds.",
+            ephemeral=True,
+        )
+    except Exception as error:
+        print(f"[TOP 100] Manual refresh failed: {error}")
+        await interaction.followup.send(
+            f"❌ The Top 100 refresh failed: `{error}`",
+            ephemeral=True,
+        )
+
 # =========================================================
 # STAR CITIZEN / UEX
 # =========================================================
@@ -8537,6 +8951,12 @@ async def on_ready():
             print("🌀 Presence rotation started.")
         except Exception as e:
             print(f"[ERROR] Could not start presence rotation: {e}")
+
+        try:
+            client.loop.create_task(ea_top100_update_loop())
+            print("🏆 EA Top 100 updater started.")
+        except Exception as e:
+            print(f"[ERROR] Could not start EA Top 100 updater: {e}")
     
         try:
             client.loop.create_task(monitor_twitch_live())
