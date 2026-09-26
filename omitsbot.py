@@ -485,7 +485,8 @@ async def on_member_join(member: discord.Member):
         embed.set_thumbnail(url=member.display_avatar.url)
 
     # Footer
-    embed.set_footer(text="Phonics Bot", icon_url="https://i.imgur.com/Uy3fdb1.png")
+    footer_icon = client.user.display_avatar.url if client.user else None
+    embed.set_footer(text="Phonics Bot", icon_url=footer_icon)
 
     # --- Send and react ---
     try:
