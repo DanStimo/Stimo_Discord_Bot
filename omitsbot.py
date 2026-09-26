@@ -419,6 +419,72 @@ def _twitch_url_from_input(value: str | None) -> str | None:
     username = v
     return f"https://twitch.tv/{username}"
 
+@tree.command(
+    name="refreshwelcomefooters",
+    description="Update the footer icon on existing welcome messages."
+)
+async def refresh_welcome_footers(interaction: discord.Interaction):
+    if not interaction.guild:
+        await interaction.response.send_message(
+            "This command must be used in the server.",
+            ephemeral=True,
+        )
+        return
+
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message(
+            "You must be an administrator to use this command.",
+            ephemeral=True,
+        )
+        return
+
+    await interaction.response.defer(ephemeral=True)
+
+    welcome_channel_id = 1551149703167475744
+    channel = interaction.guild.get_channel(welcome_channel_id)
+
+    if channel is None:
+        await interaction.followup.send(
+            "I could not find the welcome channel.",
+            ephemeral=True,
+        )
+        return
+
+    footer_icon = client.user.display_avatar.url
+    updated = 0
+
+    async for message in channel.history(limit=None):
+        if message.author.id != client.user.id:
+            continue
+
+        if not message.embeds:
+            continue
+
+        embed = message.embeds[0]
+
+        if embed.title != "Welcome aboard! 👋":
+            continue
+
+        updated_embed = embed.copy()
+        updated_embed.set_footer(
+            text="Phonics Bot",
+            icon_url=footer_icon,
+        )
+
+        try:
+            await message.edit(embed=updated_embed)
+            updated += 1
+        except discord.HTTPException as error:
+            print(
+                f"[WELCOME] Could not update message "
+                f"{message.id}: {error}"
+            )
+
+    await interaction.followup.send(
+        f"✅ Updated **{updated}** existing welcome messages.",
+        ephemeral=True,
+    )
+
 @client.event
 async def on_member_join(member: discord.Member):
     print(f"[JOIN] on_member_join fired for {member} (id={member.id})")
