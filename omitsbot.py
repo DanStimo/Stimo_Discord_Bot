@@ -2381,6 +2381,7 @@ EA_TOP100_STATE_FILE = os.getenv(
     "EA_TOP100_STATE_FILE",
     "ea_top100_messages.json",
 )
+EA_TOP100_CLUBS_PER_EMBED = 5
 
 try:
     EA_TOP100_UPDATE_MINUTES = max(
@@ -2497,13 +2498,18 @@ def build_ea_top100_embeds(
     clubs: list[dict],
     updated_at: datetime,
 ) -> list[discord.Embed]:
-    """Build ten mobile-friendly embeds containing ten clubs each."""
+    """Build mobile-friendly embeds containing five clubs each."""
     embeds: list[discord.Embed] = []
-    total_pages = max(1, math.ceil(len(clubs) / 10))
+    total_pages = max(
+        1,
+        math.ceil(len(clubs) / EA_TOP100_CLUBS_PER_EMBED),
+    )
 
     for page_index in range(total_pages):
-        start_index = page_index * 10
-        page_clubs = clubs[start_index:start_index + 10]
+        start_index = page_index * EA_TOP100_CLUBS_PER_EMBED
+        page_clubs = clubs[
+            start_index:start_index + EA_TOP100_CLUBS_PER_EMBED
+        ]
 
         if not page_clubs:
             continue
@@ -2522,7 +2528,7 @@ def build_ea_top100_embeds(
 
         club_sections: list[str] = []
 
-        # Each page is descending so all ten messages form one continuous
+        # Each page is descending so all messages form one continuous
         # #100-to-#1 list, with #1 at the very bottom of the channel.
         for reversed_index, club in enumerate(reversed(page_clubs)):
             rank = _leaderboard_rank_value(club)
@@ -2625,10 +2631,41 @@ async def _discover_ea_top100_messages(channel) -> dict[str, int]:
             continue
 
         first_rank = int(match.group(1))
-        page_number = ((first_rank - 1) // 10) + 1
+        page_number = (
+            (first_rank - 1) // EA_TOP100_CLUBS_PER_EMBED
+        ) + 1
         pages[str(page_number)] = message.id
 
     return pages
+
+
+async def _delete_old_ea_top100_messages(channel) -> int:
+    """Delete only this bot's old Top 100 embeds during layout migration."""
+    deleted = 0
+    pattern = re.compile(r"EA FC TOP 100 — RANKS \d+–\d+")
+
+    async for message in channel.history(limit=100):
+        if not client.user or message.author.id != client.user.id:
+            continue
+        if not message.embeds:
+            continue
+
+        title = message.embeds[0].title or ""
+        if not pattern.fullmatch(title):
+            continue
+
+        try:
+            await message.delete()
+            deleted += 1
+        except (discord.NotFound, discord.Forbidden):
+            continue
+        except discord.HTTPException as error:
+            print(
+                f"[TOP 100] Could not remove old message "
+                f"{message.id}: {error}"
+            )
+
+    return deleted
 
 
 async def refresh_ea_top100(reason: str = "scheduled") -> dict:
@@ -2651,6 +2688,27 @@ async def refresh_ea_top100(reason: str = "scheduled") -> dict:
                 "channel_id": EA_TOP100_CHANNEL_ID,
                 "pages": {},
             }
+
+        existing_pages = state.get("pages") or {}
+        try:
+            previous_clubs_per_embed = int(
+                state.get(
+                    "clubs_per_embed",
+                    10 if existing_pages else EA_TOP100_CLUBS_PER_EMBED,
+                )
+            )
+        except (TypeError, ValueError):
+            previous_clubs_per_embed = 10
+
+        if previous_clubs_per_embed != EA_TOP100_CLUBS_PER_EMBED:
+            deleted = await _delete_old_ea_top100_messages(channel)
+            print(
+                f"[TOP 100] Migrating leaderboard layout from "
+                f"{previous_clubs_per_embed} to "
+                f"{EA_TOP100_CLUBS_PER_EMBED} clubs per embed; "
+                f"removed {deleted} old messages."
+            )
+            state["pages"] = {}
 
         pages = state.get("pages") or {}
         if not pages:
@@ -2703,6 +2761,7 @@ async def refresh_ea_top100(reason: str = "scheduled") -> dict:
             edited += 1
 
         state["channel_id"] = EA_TOP100_CHANNEL_ID
+        state["clubs_per_embed"] = EA_TOP100_CLUBS_PER_EMBED
         state["pages"] = pages
         state["last_updated"] = updated_at.isoformat()
         _save_ea_top100_state(state)
