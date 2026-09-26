@@ -2521,23 +2521,22 @@ def build_ea_top100_embeds(
                 f"EA FC TOP 100 — RANKS "
                 f"{first_rank}–{last_rank}"
             ),
-            description=(
-                f"**Official EA all-time club leaderboard**\n"
-                f"Platform: **{platform_name}**"
-            ),
             color=0x00D084,
             timestamp=updated_at,
         )
 
-        for fallback_rank, club in enumerate(
-            page_clubs,
-            start=start_index + 1,
-        ):
+        club_sections: list[str] = []
+
+        # Each page is descending so all ten messages form one continuous
+        # #100-to-#1 list, with #1 at the very bottom of the channel.
+        for reversed_index, club in enumerate(reversed(page_clubs)):
             rank = _leaderboard_rank_value(club)
             if rank == 999999:
-                rank = fallback_rank
+                rank = start_index + len(page_clubs) - reversed_index
 
-            club_name = escape_markdown(_ea_top100_club_name(club))
+            club_name = escape_markdown(
+                _ea_top100_club_name(club)
+            ).upper()
             club_id = _ea_top100_club_id(club)
             skill_rating = _ea_top100_int(club, "skillRating")
             games_played = _ea_top100_int(club, "gamesPlayed")
@@ -2574,12 +2573,10 @@ def build_ea_top100_embeds(
                 else "—"
             )
 
-            embed.add_field(
-                name=(
-                    f"{_ea_top100_medal(rank)} "
-                    f"#{rank} — {club_name}"
-                ),
-                value=(
+            medal = f"{_ea_top100_medal(rank)} " if rank <= 3 else ""
+            club_sections.append(
+                (
+                    f"### {medal}#{rank} — {club_name}\n"
                     f"🏅 **{skill_rating:,} SR** · "
                     f"Division **{division_text}** · "
                     f"Best **{best_division_text}** · "
@@ -2593,9 +2590,14 @@ def build_ea_top100_embeds(
                     f"GD **{goal_difference:+,}**\n"
                     f"🧤 **{clean_sheets:,} clean sheets** · "
                     f"Club ID: `{club_id}`"
-                ),
-                inline=False,
+                )
             )
+
+        embed.description = (
+            f"**Official EA all-time club leaderboard**\n"
+            f"Platform: **{platform_name}**\n\n"
+            + "\n\n".join(club_sections)
+        )
 
         footer_icon = (
             client.user.display_avatar.url
