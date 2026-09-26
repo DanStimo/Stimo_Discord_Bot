@@ -466,7 +466,7 @@ async def on_member_join(member: discord.Member):
         title="Welcome aboard! 👋",
         description=(
             f"{member.mention}, you've reached the **{config['server_name']}** Discord server!\n\n"
-            f"• **Say hi!:** <#{config['welcome_channel_id']}> 👋"
+            f"• **Say hi! 👋"
         ),
         color=WELCOME_COLOR,
         timestamp=datetime.now(timezone.utc)
