@@ -2385,7 +2385,19 @@ EA_TOP100_STATE_FILE = os.getenv(
     "EA_TOP100_STATE_FILE",
     "ea_top100_messages.json",
 )
+EA_TOP100_LAST_PLAYED_FILE = os.getenv(
+    "EA_TOP100_LAST_PLAYED_FILE",
+    "ea_top100_last_played.json",
+)
 EA_TOP100_CLUBS_PER_EMBED = 5
+
+try:
+    EA_TOP100_LAST_PLAYED_CACHE_HOURS = max(
+        1,
+        int(os.getenv("EA_TOP100_LAST_PLAYED_CACHE_HOURS", "6")),
+    )
+except ValueError:
+    EA_TOP100_LAST_PLAYED_CACHE_HOURS = 6
 
 try:
     EA_TOP100_UPDATE_MINUTES = max(
@@ -2396,7 +2408,37 @@ except ValueError:
     EA_TOP100_UPDATE_MINUTES = 30
 
 _ea_top100_refresh_lock = asyncio.Lock()
+_ea_top100_last_played_lock = asyncio.Lock()
 _ea_top100_clubs_cache: list[dict] = []
+
+
+def _load_ea_top100_last_played_cache() -> dict:
+    try:
+        with open(
+            EA_TOP100_LAST_PLAYED_FILE,
+            "r",
+            encoding="utf-8",
+        ) as file:
+            cache = json.load(file)
+
+        return cache if isinstance(cache, dict) else {}
+    except FileNotFoundError:
+        return {}
+    except Exception as error:
+        print(f"[TOP 100] Could not load last-played cache: {error}")
+        return {}
+
+
+def _save_ea_top100_last_played_cache(cache: dict) -> None:
+    temporary_file = f"{EA_TOP100_LAST_PLAYED_FILE}.tmp"
+
+    try:
+        with open(temporary_file, "w", encoding="utf-8") as file:
+            json.dump(cache, file, indent=2, ensure_ascii=False)
+
+        os.replace(temporary_file, EA_TOP100_LAST_PLAYED_FILE)
+    except Exception as error:
+        print(f"[TOP 100] Could not save last-played cache: {error}")
 
 
 def _load_ea_top100_state() -> dict:
@@ -2484,6 +2526,89 @@ async def fetch_ea_top100_clubs() -> list[dict]:
     return clubs
 
 
+async def _enrich_ea_top100_last_played_unlocked(
+    clubs: list[dict],
+) -> None:
+    """Attach each club's newest match time without refetching unchanged clubs."""
+    cache = _load_ea_top100_last_played_cache()
+    semaphore = asyncio.Semaphore(3)
+    cache_changed = False
+    now_timestamp = int(datetime.now(timezone.utc).timestamp())
+    cache_ttl = EA_TOP100_LAST_PLAYED_CACHE_HOURS * 60 * 60
+
+    async def enrich_club(club: dict) -> None:
+        nonlocal cache_changed
+
+        club_id = _ea_top100_club_id(club)
+        games_played = _ea_top100_int(club, "gamesPlayed")
+        cached = cache.get(club_id) or {}
+
+        try:
+            cached_games = int(cached.get("games_played", -1))
+            cached_timestamp = int(cached.get("timestamp", 0))
+            cached_checked_at = int(cached.get("checked_at", 0))
+        except (TypeError, ValueError):
+            cached_games = -1
+            cached_timestamp = 0
+            cached_checked_at = 0
+
+        cache_is_fresh = (
+            cached_checked_at > 0
+            and now_timestamp - cached_checked_at < cache_ttl
+        )
+
+        # Recheck immediately when the match count changes, and periodically
+        # in case EA has recorded a friendly without changing that total.
+        if (
+            cached_games == games_played
+            and cached_timestamp > 0
+            and cache_is_fresh
+        ):
+            club["_lastPlayedTimestamp"] = cached_timestamp
+            return
+
+        async with semaphore:
+            last_played = await get_last_played_timestamp(club_id)
+
+        if last_played is not None:
+            timestamp = int(last_played.timestamp())
+            club["_lastPlayedTimestamp"] = timestamp
+            cache[club_id] = {
+                "games_played": games_played,
+                "timestamp": timestamp,
+                "checked_at": now_timestamp,
+            }
+            cache_changed = True
+            return
+
+        # Keep the last known good value if EA temporarily fails.
+        if cached_timestamp > 0:
+            club["_lastPlayedTimestamp"] = cached_timestamp
+
+    await asyncio.gather(*(enrich_club(club) for club in clubs))
+
+    if cache_changed:
+        _save_ea_top100_last_played_cache(cache)
+
+
+async def enrich_ea_top100_last_played(clubs: list[dict]) -> None:
+    async with _ea_top100_last_played_lock:
+        await _enrich_ea_top100_last_played_unlocked(clubs)
+
+
+def _ea_top100_last_played_line(club: dict) -> str:
+    try:
+        timestamp = int(club.get("_lastPlayedTimestamp", 0))
+    except (TypeError, ValueError):
+        timestamp = 0
+
+    if timestamp <= 0:
+        return "🕒 **Last played** —"
+
+    # Discord renders this as a live relative value, such as "2 hours ago".
+    return f"🕒 **Last played** <t:{timestamp}:R>"
+
+
 def _ea_top100_medal(rank: int) -> str:
     return {
         1: "🥇",
@@ -2520,7 +2645,7 @@ def build_ea_top100_embeds(
                 f"EA FC TOP 100 — RANKS "
                 f"{first_rank}–{last_rank}"
             ),
-            color=0x00D084,
+            color=0x18AFE6,
             timestamp=updated_at,
         )
 
@@ -2582,6 +2707,7 @@ def build_ea_top100_embeds(
                     f"**GA** {goals_against:,} · "
                     f"**GD** {goal_difference:+,} · "
                     f"**CS** {clean_sheets:,}\n"
+                    f"{_ea_top100_last_played_line(club)}\n"
                     f"🆔 **Club ID** `{club_id}`"
                 )
             )
@@ -2645,9 +2771,10 @@ def build_ea_top100_search_embed(club: dict) -> discord.Embed:
             f"**GA** {goals_against:,} · "
             f"**GD** {goal_difference:+,} · "
             f"**CS** {clean_sheets:,}\n"
+            f"{_ea_top100_last_played_line(club)}\n"
             f"🆔 **Club ID** `{club_id}`"
         ),
-        color=0x00D084,
+        color=0x18AFE6,
         timestamp=datetime.now(timezone.utc),
     )
 
@@ -2775,6 +2902,9 @@ class EATop100SearchDropdown(discord.ui.View):
             )
             return
 
+        if not chosen.get("_lastPlayedTimestamp"):
+            await enrich_ea_top100_last_played([chosen])
+
         embed = build_ea_top100_search_embed(chosen)
         await interaction.response.edit_message(
             content=None,
@@ -2849,6 +2979,9 @@ async def handle_ea_top100_channel_search(
                 return
 
             if len(matches) == 1:
+                if not matches[0].get("_lastPlayedTimestamp"):
+                    await enrich_ea_top100_last_played([matches[0]])
+
                 embed = build_ea_top100_search_embed(matches[0])
                 response = await message.channel.send(embed=embed)
                 await _record_ea_top100_search(message, embed)
@@ -2947,6 +3080,7 @@ async def refresh_ea_top100(reason: str = "scheduled") -> dict:
             channel = await client.fetch_channel(EA_TOP100_CHANNEL_ID)
 
         clubs = await fetch_ea_top100_clubs()
+        await enrich_ea_top100_last_played(clubs)
         _ea_top100_clubs_cache = clubs
         updated_at = datetime.now(timezone.utc)
         embeds = build_ea_top100_embeds(clubs, updated_at)
