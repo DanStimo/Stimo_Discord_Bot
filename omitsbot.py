@@ -2578,19 +2578,20 @@ def build_ea_top100_embeds(
             club_sections.append(
                 (
                     f"### {medal}#{rank} — {club_name}\n"
-                    f"🏅 **{skill_rating:,} SR** · "
-                    f"Division **{division_text}** · "
-                    f"Best **{best_division_text}** · "
-                    f"Rep **{reputation}** · "
-                    f"🧤 **{clean_sheets:,} CS**\n"
-                    f"🎮 **{games_played:,} played** · "
-                    f"✅ {wins:,} · ➖ {draws:,} · ❌ {losses:,} · "
-                    f"📈 **{win_rate:.1f}% wins** · "
-                    f"ID: `{club_id}`\n"
-                    f"⚽ {goals_for:,} GF (**{goals_per_game:.2f}/match**) · "
-                    f"🥅 {goals_against:,} GA "
-                    f"(**{conceded_per_game:.2f}/match**) · "
-                    f"GD **{goal_difference:+,}**"
+                    f"🏅 **Skill Rating:** {skill_rating:,} · "
+                    f"🏆 **Division:** {division_text} "
+                    f"(Best {best_division_text}) · "
+                    f"⭐ **Rep:** {reputation}\n"
+                    f"🎮 **Played:** {games_played:,} · "
+                    f"📊 **W-D-L:** {wins:,}-{draws:,}-{losses:,} · "
+                    f"📈 **Win Rate:** {win_rate:.1f}%\n"
+                    f"⚽ **Goals For:** {goals_for:,} "
+                    f"({goals_per_game:.2f}/match) · "
+                    f"🥅 **Against:** {goals_against:,} "
+                    f"({conceded_per_game:.2f}/match) · "
+                    f"**GD:** {goal_difference:+,}\n"
+                    f"🧤 **Clean Sheets:** {clean_sheets:,} · "
+                    f"🆔 **Club ID:** `{club_id}`"
                 )
             )
 
