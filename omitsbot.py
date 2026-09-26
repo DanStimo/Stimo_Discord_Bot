@@ -466,6 +466,13 @@ async def refresh_welcome_footers(interaction: discord.Interaction):
             continue
 
         updated_embed = embed.copy()
+        existing_description = updated_embed.description or ""
+        first_section = existing_description.split("\n\n", 1)[0]
+        
+        updated_embed.description = (
+            f"{first_section}\n\n"
+            f"• **Say hi!** 👋"
+        )
         updated_embed.set_footer(
             text="Phonics Bot",
             icon_url=footer_icon,
@@ -532,7 +539,7 @@ async def on_member_join(member: discord.Member):
         title="Welcome aboard! 👋",
         description=(
             f"{member.mention}, you've reached the **{config['server_name']}** Discord server!\n\n"
-            f"• **Say hi! 👋"
+            f"• **Say hi!** 👋"
         ),
         color=WELCOME_COLOR,
         timestamp=datetime.now(timezone.utc)
