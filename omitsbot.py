@@ -2439,13 +2439,6 @@ def _ea_top100_int(club: dict, key: str, default: int = 0) -> int:
         return default
 
 
-def _ea_top100_float(club: dict, key: str, default: float = 0.0) -> float:
-    try:
-        return float(str(club.get(key, default)).replace(",", ""))
-    except (TypeError, ValueError):
-        return default
-
-
 def _ea_top100_club_name(club: dict) -> str:
     club_info = club.get("clubInfo") or {}
     name = (
@@ -2556,11 +2549,6 @@ def build_ea_top100_embeds(
                 if games_played > 0
                 else 0.0
             )
-            goals_per_game = _ea_top100_float(club, "goalsPerGame")
-            conceded_per_game = _ea_top100_float(
-                club,
-                "goalsAgainstPerGame",
-            )
             goal_difference = goals_for - goals_against
 
             division_text = (
@@ -2578,20 +2566,18 @@ def build_ea_top100_embeds(
             club_sections.append(
                 (
                     f"### {medal}#{rank} — {club_name}\n"
-                    f"🏅 **Skill Rating:** {skill_rating:,} · "
-                    f"🏆 **Division:** {division_text} "
-                    f"(Best {best_division_text}) · "
-                    f"⭐ **Rep:** {reputation}\n"
-                    f"🎮 **Played:** {games_played:,} · "
-                    f"📊 **W-D-L:** {wins:,}-{draws:,}-{losses:,} · "
-                    f"📈 **Win Rate:** {win_rate:.1f}%\n"
-                    f"⚽ **Goals For:** {goals_for:,} "
-                    f"({goals_per_game:.2f}/match) · "
-                    f"🥅 **Against:** {goals_against:,} "
-                    f"({conceded_per_game:.2f}/match) · "
-                    f"**GD:** {goal_difference:+,}\n"
-                    f"🧤 **Clean Sheets:** {clean_sheets:,} · "
-                    f"🆔 **Club ID:** `{club_id}`"
+                    f"🏅 **SR** {skill_rating:,} · "
+                    f"**D** {division_text} · "
+                    f"**BD** {best_division_text} · "
+                    f"**R** {reputation}\n"
+                    f"🎮 **P** {games_played:,} · "
+                    f"**W-D-L** {wins:,}-{draws:,}-{losses:,} · "
+                    f"**W%** {win_rate:.1f}\n"
+                    f"⚽ **GF** {goals_for:,} · "
+                    f"**GA** {goals_against:,} · "
+                    f"**GD** {goal_difference:+,} · "
+                    f"**CS** {clean_sheets:,}\n"
+                    f"🆔 **Club ID** `{club_id}`"
                 )
             )
 
