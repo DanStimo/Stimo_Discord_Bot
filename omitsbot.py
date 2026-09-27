@@ -340,7 +340,7 @@ async def get_crest_asset_id_for_club(club_id: str | int) -> str | None:
 
 # === Welcome Feature ===
 WELCOME_CHANNEL_ID = int(os.getenv("WELCOME_CHANNEL_ID", "0"))
-WELCOME_COLOR_HEX = os.getenv("WELCOME_COLOR_HEX", "#2ecc71")
+WELCOME_COLOR_HEX = os.getenv("WELCOME_COLOR_HEX", "#17c1ff")
 
 welcome_config = {
     "channel_id": WELCOME_CHANNEL_ID,
@@ -387,7 +387,7 @@ def save_lineups_store():
     save_json_file(LINEUPS_FILE, lineups_store)
 
 def _color_from_hex(h: str) -> discord.Color:
-    h = (h or "#2ecc71").strip().lstrip("#")
+    h = (h or "#17c1ff").strip().lstrip("#")
     return discord.Color(int(h, 16))
 
 def _twitch_url_from_input(value: str | None) -> str | None:
@@ -421,7 +421,7 @@ def _twitch_url_from_input(value: str | None) -> str | None:
 
 @tree.command(
     name="refreshwelcomefooters",
-    description="Update the footer icon on existing welcome messages."
+    description="Update existing welcome message styling."
 )
 async def refresh_welcome_footers(interaction: discord.Interaction):
     if not interaction.guild:
@@ -473,6 +473,7 @@ async def refresh_welcome_footers(interaction: discord.Interaction):
             f"{first_section}\n\n"
             f"• **Say hi!** 👋"
         )
+        updated_embed.colour = discord.Colour(0x17C1FF)
         updated_embed.set_footer(
             text="Phonics Bot",
             icon_url=footer_icon,
@@ -512,7 +513,7 @@ async def on_member_join(member: discord.Member):
         return
     
     WELCOME_CHANNEL_ID = config["welcome_channel_id"]
-    WELCOME_COLOR = 0x3498DB
+    WELCOME_COLOR = 0x17C1FF
     MEMBER_ROLE_ID = config["member_role_id"]
 
     # --- Resolve channel ---
