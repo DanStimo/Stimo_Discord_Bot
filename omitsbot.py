@@ -6945,6 +6945,7 @@ def _funstat_badness(player: dict) -> int:
     conceded = int(_to_number(player.get("goalsconceded")) or 0)
     saves = int(_to_number(player.get("saves")) or 0)
     player_of_match = int(_to_number(player.get("mom")) or 0)
+    minutes = _funstat_minutes(player)
     clean_sheet = max(
         int(_to_number(player.get("cleansheetsany")) or 0),
         int(_to_number(player.get("cleansheetsdef")) or 0),
@@ -6952,11 +6953,25 @@ def _funstat_badness(player: dict) -> int:
     )
     group = _player_position_group(player)
 
-    if rating and rating < 6.0:
+    rating_thresholds = {
+        # (very poor, poor, below par). Defensive positions naturally receive
+        # fewer attacking rating boosts, so their thresholds are lower.
+        "Forwards": (6.2, 6.7, 7.1),
+        "Midfielders": (6.0, 6.5, 7.0),
+        "Defenders": (5.8, 6.3, 6.8),
+        "Goalkeepers": (5.8, 6.3, 6.8),
+        "Players": (6.0, 6.5, 7.0),
+    }
+    very_poor, poor, below_par = rating_thresholds.get(
+        group,
+        rating_thresholds["Players"],
+    )
+
+    if rating and rating < very_poor:
         score += 5
-    elif rating and rating < 6.5:
+    elif rating and rating < poor:
         score += 4
-    elif rating and rating < 7.0:
+    elif rating and rating < below_par:
         score += 2
 
     if red_cards:
@@ -6997,7 +7012,20 @@ def _funstat_badness(player: dict) -> int:
     # because of one weaker metric.
     score -= min(goals * 2, 4)
     score -= min(assists, 2)
-    score -= min(clean_sheet, 1)
+    score -= min(clean_sheet * (2 if group in ("Defenders", "Goalkeepers") else 1), 2)
+
+    if group == "Defenders" and tackle_attempts >= 2:
+        tackle_pct = (tackles_made / tackle_attempts) * 100
+        if tackle_pct >= 85:
+            score -= 2
+        elif tackle_pct >= 70:
+            score -= 1
+
+    if minutes and minutes < 30:
+        score -= 2
+    elif minutes and minutes < 60:
+        score -= 1
+
     if player_of_match:
         score -= 5
 
@@ -7212,6 +7240,35 @@ def _funstat_roast_lines_legacy(
 # Remember recently used rendered lines for each player. This prevents the
 # same small group of jokes appearing every time the command is used.
 FUNSTAT_RECENT_LINES: dict[str, list[str]] = {}
+FUNSTAT_RECENT_PLAYERS: dict[str, list[str]] = {}
+
+
+def _funstat_choose_player(
+    club_id: str | int,
+    candidates: list[dict],
+) -> dict:
+    """Rotate eligible players so repeated calls do not target one person."""
+    club_key = str(club_id)
+    recent = FUNSTAT_RECENT_PLAYERS.setdefault(club_key, [])
+
+    fresh_candidates = [
+        candidate
+        for candidate in candidates
+        if _player_display_name(candidate).casefold() not in recent
+    ]
+
+    if not fresh_candidates:
+        recent.clear()
+        fresh_candidates = candidates[:]
+
+    chosen = random.choice(fresh_candidates)
+    chosen_key = _player_display_name(chosen).casefold()
+    recent.append(chosen_key)
+
+    # Remember enough names to rotate a normal Pro Clubs starting eleven,
+    # while allowing the pool to recover when the eligible squad changes.
+    del recent[:-10]
+    return chosen
 
 
 def _funstat_pick_fresh_lines(
@@ -7722,7 +7779,10 @@ async def funstat_command(
                 for candidate in players
                 if _funstat_badness(candidate) >= 2
             ]
-            selected_player = random.choice(bad_candidates or players)
+            selected_player = _funstat_choose_player(
+                club_id,
+                bad_candidates or players,
+            )
 
         badness = _funstat_badness(selected_player)
         selected_name = escape_markdown(_player_display_name(selected_player))
