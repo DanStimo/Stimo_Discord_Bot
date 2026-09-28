@@ -7004,7 +7004,7 @@ def _funstat_badness(player: dict) -> int:
     return max(score, 0)
 
 
-def _funstat_roast_lines(
+def _funstat_roast_lines_legacy(
     player: dict,
     teammates: list[dict],
 ) -> list[str]:
@@ -7209,6 +7209,367 @@ def _funstat_roast_lines(
     return random.sample(lines, k=min(3, len(lines)))
 
 
+# Remember recently used rendered lines for each player. This prevents the
+# same small group of jokes appearing every time the command is used.
+FUNSTAT_RECENT_LINES: dict[str, list[str]] = {}
+
+
+def _funstat_pick_fresh_lines(
+    player_key: str,
+    categories: list[list[str]],
+    count: int = 3,
+) -> list[str]:
+    recent = FUNSTAT_RECENT_LINES.setdefault(player_key.casefold(), [])
+    shuffled_categories = [category[:] for category in categories if category]
+    random.shuffle(shuffled_categories)
+
+    selected = []
+    for category in shuffled_categories:
+        fresh = [line for line in category if line not in recent]
+        if fresh:
+            selected.append(random.choice(fresh))
+        if len(selected) >= count:
+            break
+
+    # If every applicable line has recently appeared, progressively release
+    # the oldest history rather than repeating the latest response.
+    if len(selected) < count:
+        all_lines = [line for category in shuffled_categories for line in category]
+        while len(selected) < count and recent:
+            recent.pop(0)
+            available = [
+                line
+                for line in all_lines
+                if line not in recent and line not in selected
+            ]
+            if available:
+                selected.append(random.choice(available))
+
+    if len(selected) < count:
+        remaining = [
+            line
+            for category in shuffled_categories
+            for line in category
+            if line not in selected
+        ]
+        random.shuffle(remaining)
+        selected.extend(remaining[: count - len(selected)])
+
+    recent.extend(selected)
+    del recent[:-30]
+    return selected
+
+
+def _funstat_roast_lines(
+    player: dict,
+    teammates: list[dict],
+    our_score: int,
+    opponent_score: int,
+) -> list[str]:
+    name = escape_markdown(_player_display_name(player))
+    player_key = _player_display_name(player)
+    rating = float(_to_number(player.get("rating")) or 0)
+    goals = int(_to_number(player.get("goals")) or 0)
+    assists = int(_to_number(player.get("assists")) or 0)
+    shots = int(_to_number(player.get("shots")) or 0)
+    red_cards = int(_to_number(player.get("redcards")) or 0)
+    passes_made = int(_to_number(player.get("passesmade")) or 0)
+    pass_attempts = int(_to_number(player.get("passattempts")) or 0)
+    tackles_made = int(_to_number(player.get("tacklesmade")) or 0)
+    tackle_attempts = int(_to_number(player.get("tackleattempts")) or 0)
+    conceded = int(_to_number(player.get("goalsconceded")) or 0)
+    saves = int(_to_number(player.get("saves")) or 0)
+    minutes = _funstat_minutes(player)
+    player_of_match = int(_to_number(player.get("mom")) or 0)
+    group = _player_position_group(player)
+
+    if player_of_match:
+        return _funstat_pick_fresh_lines(player_key, [[
+            f"**{name}** won Player of the Match. The roast writer has been sent home early.",
+            f"Player of the Match belongs to **{name}**. Even sarcasm has to respect the evidence.",
+            f"The match awarded **{name}** POTM, so the complaint desk is currently closed.",
+            f"**{name}** has the POTM award. Find another suspect; this one has an alibi.",
+            f"A Player of the Match roast was attempted, but the statistics filed an appeal and won.",
+        ]], count=1)
+
+    categories: list[list[str]] = []
+
+    if rating and rating < 6.5:
+        categories.append([
+            f"A **{rating:.1f}** rating: **{name}** had the impact of a ‘skip intro’ button that did not work.",
+            f"**{name}** finished on **{rating:.1f}** — roughly the football equivalent of a supermarket trolley with one bad wheel.",
+            f"At **{rating:.1f}**, **{name}** was less a match participant and more background scenery.",
+            f"That **{rating:.1f}** rating has all the ambition of a phone battery stuck on one percent.",
+            f"**{name}** posted **{rating:.1f}**. A cardboard cut-out would have offered similar positional discipline.",
+            f"A **{rating:.1f}** performance: not quite invisible, but close enough to trigger the motion sensor twice.",
+            f"The match gave **{name}** a **{rating:.1f}**; the local traffic cone has asked for a trial.",
+            f"**{rating:.1f}** is the sort of rating normally found next to a one-star delivery review.",
+            f"**{name}** earned **{rating:.1f}**, bringing all the urgency of somebody browsing the reduced aisle.",
+            f"The **{rating:.1f}** suggests **{name}** attended the match mainly for the group photo.",
+            f"On **{rating:.1f}**, **{name}** was football’s answer to an unplugged Wi-Fi extender.",
+            f"That **{rating:.1f}** display had less influence than the fourth official’s spare pen.",
+        ])
+    elif rating and rating < 7.0:
+        categories.append([
+            f"A **{rating:.1f}** rating: perfectly adequate if the objective was to avoid being remembered.",
+            f"**{name}** reached **{rating:.1f}** — the statistical equivalent of plain toast.",
+            f"At **{rating:.1f}**, **{name}** delivered a performance with all the excitement of a software update.",
+            f"That **{rating:.1f}** will not cause a crisis, but it will not make the highlights either.",
+            f"**{name}** scored **{rating:.1f}**: safely parked between useful and suspicious.",
+            f"A **{rating:.1f}** performance — football happened nearby and **{name}** occasionally acknowledged it.",
+            f"The rating says **{rating:.1f}**; the eye test says ‘maybe next match’.",
+            f"**{name}** was rated **{rating:.1f}**, which is fine in the same way airport coffee is fine.",
+        ])
+
+    # A general real-world comparison category ensures variety even when only
+    # one specific weakness qualifies.
+    categories.append([
+        f"**{name}** moved with the urgency of someone waiting for a kettle to boil.",
+        f"The performance had the reliability of a weather app during a British bank holiday.",
+        f"A sat-nav saying ‘recalculating’ contributed more clear direction than **{name}**.",
+        f"**{name}** offered the cutting edge of a plastic picnic knife.",
+        f"The display was as reassuring as an unexpected noise from the washing machine.",
+        f"A self-checkout machine provided more assistance and asked fewer questions.",
+        f"**{name}** had the presence of a parcel marked ‘delivery attempted’. Nobody saw it happen.",
+        f"The performance was less Premier League and more Sunday league after a heavy Saturday.",
+        f"A scarecrow covers more ground, although admittedly with less controller input.",
+        f"**{name}** brought the energy of the final meeting before a long weekend.",
+        f"The tactical contribution was comparable to putting an umbrella up indoors.",
+        f"A deck chair would have held its position and offered somewhere useful to sit.",
+        f"**{name}** operated like public Wi-Fi: visible, available and rarely connected.",
+        f"The performance had fewer useful features than a chocolate teapot.",
+        f"A revolving door successfully completes more transitions than that.",
+        f"**{name}** looked like the ‘before’ picture in a football coaching manual.",
+    ])
+
+    if pass_attempts >= 5:
+        pass_pct = round((passes_made / pass_attempts) * 100)
+        if pass_pct < 70:
+            categories.append([
+                f"Passing ended at **{pass_pct}%**; Royal Mail would reject that delivery rate.",
+                f"At **{pass_pct}%**, **{name}** distributed possession like free samples to the opposition.",
+                f"Only **{passes_made}/{pass_attempts}** passes arrived. Even budget couriers provide better tracking.",
+                f"**{name}** completed **{passes_made}/{pass_attempts}** passes, apparently using a sat-nav set to the wrong postcode.",
+                f"A **{pass_pct}%** pass rate suggests the controller’s X button was working on commission for the other team.",
+                f"With **{passes_made}/{pass_attempts}** completed, every pass became a small community raffle.",
+                f"The passing map probably resembles dropped spaghetti: plenty of lines, very little direction.",
+                f"At **{pass_pct}%** passing, teammates required binoculars and a collection point.",
+                f"**{name}** treated accurate passing as optional downloadable content.",
+                f"The ball left **{name}** more reliably than it reached a teammate.",
+                f"With **{pass_pct}%** accuracy, possession came with a generous returns policy.",
+                f"Those passes had the destination accuracy of luggage during a cancelled flight.",
+            ])
+
+    if tackle_attempts >= 2:
+        tackle_pct = round((tackles_made / tackle_attempts) * 100)
+        if tackle_pct < 60:
+            categories.append([
+                f"A **{tackle_pct}%** tackle rate: attackers received less resistance than an automatic door.",
+                f"Only **{tackles_made}/{tackle_attempts}** tackles landed; the opponents were shown around like estate viewers.",
+                f"**{name}** tackled at **{tackle_pct}%**, roughly the defensive strength of wet cardboard.",
+                f"The tackling approach was mostly a polite suggestion to stop.",
+                f"With **{tackles_made}/{tackle_attempts}** won, **{name}** defended like a password hint.",
+                f"The opposition passed **{name}** with the confidence of commuters through an open ticket barrier.",
+                f"A training cone would not win the ball either, but at least it keeps the correct shape.",
+                f"**{name}** attempted **{tackle_attempts}** tackles and completed **{tackles_made}** — excellent customer service for attackers.",
+                f"That **{tackle_pct}%** success rate turned defending into a non-contact activity.",
+                f"The tackles had all the stopping power of a strongly worded email.",
+                f"Attackers saw **{name}** and selected ‘continue without interruption’.",
+                f"The defensive plan appeared to be asking the opponent where they were going next.",
+            ])
+
+    if shots >= 3 and goals == 0:
+        categories.append([
+            f"**{shots}** shots without scoring; nearby advertising boards have requested protective equipment.",
+            f"After **{shots}** attempts, the goal remains an unsolved geographical mystery.",
+            f"**{name}** took **{shots}** shots and found everything except the net.",
+            f"The shooting accuracy had the precision of throwing socks at a laundry basket from another room.",
+            f"With **{shots}** empty attempts, the corner flags experienced genuine danger.",
+            f"The goalkeeper faced **{shots}** shots and may still qualify for an unused-item refund.",
+            f"**{name}** approached finishing like a stormtrooper on a company training day.",
+            f"Those **{shots}** attempts had more destinations than a replacement bus service.",
+            f"The goal is eight yards wide, but **{name}** apparently selected expert difficulty.",
+            f"**{shots}** shots, zero goals and several spectators checking their car windscreens.",
+            f"The finishing was sponsored by GPS: repeatedly recalculating, never arriving.",
+            f"At this rate the match ball needs travel insurance, not goal-line technology.",
+        ])
+
+    if group == "Forwards" and goals == 0 and assists == 0:
+        categories.append([
+            f"A forward with no goal or assist: **{name}** completed the premium spectator package.",
+            f"No goal and no assist; the striker’s union has requested clarification of **{name}**’s duties.",
+            f"The final-third contribution matched a closed café: promising sign, nothing being served.",
+            f"**{name}** returned zero goal contributions, but did occupy a shirt successfully.",
+            f"The attacking output was quieter than a library’s silent-reading section.",
+            f"No goals, no assists and no danger of the highlight editor working overtime.",
+            f"**{name}** played forward in the geographical sense only.",
+            f"The opposition defence has nominated **{name}** for employee of the month.",
+        ])
+
+    if red_cards:
+        categories.append([
+            "The red card turned the performance into an early-access departure.",
+            f"**{name}** left before full-time like someone avoiding the car-park traffic.",
+            "The tactical masterplan apparently involved creating extra space for everyone else.",
+            "A red card: the fastest route from player statistics to audience statistics.",
+            "The referee produced red and the team’s difficulty setting immediately increased.",
+            f"**{name}** clocked out early without completing the handover.",
+            "The changing room gained a new occupant while the match lost one.",
+            "Leaving the pitch early was decisive, which was more than could be said for the football.",
+        ])
+
+    if group == "Goalkeepers":
+        shots_faced = saves + conceded
+        save_pct = round((saves / shots_faced) * 100) if shots_faced else 100
+        if conceded >= 3 or (shots_faced >= 3 and save_pct < 50):
+            categories.append([
+                f"A **{save_pct}%** save rate gave the net more touches than **{name}**.",
+                f"**{conceded}** conceded; the goal operated with the opening hours of a 24-hour supermarket.",
+                f"Only **{saves}/{shots_faced}** shots were stopped. The gloves may still be eligible for a refund.",
+                "The goalkeeper’s union has classified that as ‘mostly ball retrieval’.",
+                "The net enjoyed a busier shift than the person standing in front of it.",
+                f"At **{save_pct}%**, the save rate had less protection than a free antivirus trial.",
+                "Opposition shots arrived like parcels and were accepted without a signature.",
+                "The goal required a goalkeeper but received an enthusiastic tour guide.",
+                "The clean-sheet bonus left the stadium before half-time.",
+                f"**{name}** made **{saves}** saves; the scoreboard kept the more impressive total.",
+            ])
+
+    if minutes >= 85 and goals == 0 and assists == 0 and rating < 6.5:
+        categories.append([
+            f"**{minutes} minutes** produced the output of a five-minute substitute warming up.",
+            f"After **{minutes} minutes**, **{name}** mainly helped demonstrate that time is linear.",
+            f"They had **{minutes} minutes** to influence the game and spent most of them gathering evidence against it.",
+            f"**{minutes} minutes** on the pitch and the highlights department still finished early.",
+            f"The clock recorded **{minutes} minutes**; the statistics remain unconvinced.",
+            f"A full shift from **{name}**, if the job description was ‘remain within camera range’.",
+            f"In **{minutes} minutes**, a microwave could have prepared several more useful contributions.",
+            f"**{name}** stayed for **{minutes} minutes**, showing admirable commitment to the experiment.",
+        ])
+
+    other_players = [teammate for teammate in teammates if teammate is not player]
+    if other_players:
+        best_teammate = max(
+            other_players,
+            key=lambda teammate: float(_to_number(teammate.get("rating")) or 0),
+        )
+        best_name = escape_markdown(_player_display_name(best_teammate))
+        best_rating = float(_to_number(best_teammate.get("rating")) or 0)
+        if best_rating >= rating + 1.0:
+            categories.append([
+                f"**{best_name}** reached **{best_rating:.1f}** while **{name}** managed **{rating:.1f}** — same pitch, different subscription tier.",
+                f"At **{best_rating:.1f}**, **{best_name}** looked like the player; at **{rating:.1f}**, **{name}** looked like the tutorial assistant.",
+                f"**{best_name}** posted **{best_rating:.1f}**, removing the pitch, weather and controller from **{name}**’s list of excuses.",
+                f"The rating gap between **{best_name}** and **{name}** was large enough to require public transport.",
+                f"**{best_name}** brought a **{best_rating:.1f}**; **{name}** brought a **{rating:.1f}** and presumably snacks.",
+                f"Watching **{best_name}** at **{best_rating:.1f}** next to **{name}** at **{rating:.1f}** was a live before-and-after demonstration.",
+                f"**{best_name}** delivered **{best_rating:.1f}**. **{name}** delivered the contrast.",
+                f"The teammates shared a kit, but **{best_name}**’s **{best_rating:.1f}** suggests they did not share the same game plan.",
+                f"**{best_name}** made **{best_rating:.1f}** look achievable; **{name}** made it look exclusive.",
+                f"One squad contained **{best_name}** on **{best_rating:.1f}** and **{name}** on **{rating:.1f}**. Football contains multitudes.",
+            ])
+
+        best_contributor = max(
+            other_players,
+            key=lambda teammate: (
+                int(_to_number(teammate.get("goals")) or 0)
+                + int(_to_number(teammate.get("assists")) or 0)
+            ),
+        )
+        best_contributions = (
+            int(_to_number(best_contributor.get("goals")) or 0)
+            + int(_to_number(best_contributor.get("assists")) or 0)
+        )
+        if goals + assists == 0 and best_contributions > 0:
+            contributor_name = escape_markdown(_player_display_name(best_contributor))
+            categories.append([
+                f"**{contributor_name}** produced **{best_contributions}** goal contribution(s); **{name}** produced a convincing attendance record.",
+                f"While **{contributor_name}** affected the score, **{name}** concentrated on maintaining team numbers.",
+                f"**{contributor_name}** found the decisive action; **{name}** found several excellent viewing positions.",
+                f"The scoreboard remembers **{contributor_name}**. The team sheet confirms **{name}** was also there.",
+                f"**{contributor_name}** supplied the end product; **{name}** supplied emotional availability.",
+                f"Goal contributions: **{contributor_name} {best_contributions}**, **{name} 0**. At least the shirts matched.",
+            ])
+
+        passing_teammates = []
+        tackling_teammates = []
+        for teammate in other_players:
+            teammate_pass_attempts = int(_to_number(teammate.get("passattempts")) or 0)
+            teammate_passes = int(_to_number(teammate.get("passesmade")) or 0)
+            if teammate_pass_attempts >= 5:
+                passing_teammates.append((
+                    teammate,
+                    round((teammate_passes / teammate_pass_attempts) * 100),
+                    teammate_pass_attempts,
+                ))
+            teammate_tackle_attempts = int(_to_number(teammate.get("tackleattempts")) or 0)
+            teammate_tackles = int(_to_number(teammate.get("tacklesmade")) or 0)
+            if teammate_tackle_attempts >= 2:
+                tackling_teammates.append((
+                    teammate,
+                    round((teammate_tackles / teammate_tackle_attempts) * 100),
+                    teammate_tackle_attempts,
+                ))
+
+        if pass_attempts >= 5 and passing_teammates:
+            selected_pct = round((passes_made / pass_attempts) * 100)
+            best_player, best_pct, _ = max(passing_teammates, key=lambda item: (item[1], item[2]))
+            if best_pct >= selected_pct + 15:
+                passer_name = escape_markdown(_player_display_name(best_player))
+                categories.append([
+                    f"**{passer_name}** passed at **{best_pct}%**; **{name}** answered with **{selected_pct}%** and a tracking number.",
+                    f"Passing comparison: **{passer_name} {best_pct}%**, **{name} {selected_pct}%**. One delivered; one left a card through the door.",
+                    f"**{passer_name}** found teammates at **{best_pct}%**. **{name}** found them at **{selected_pct}%**, apparently without directions.",
+                    f"The same ball produced **{best_pct}%** for **{passer_name}** and **{selected_pct}%** for **{name}**. Equipment excuse denied.",
+                    f"**{passer_name}** used passing lanes; **{name}** appeared to use postcode lottery results.",
+                    f"At **{best_pct}%**, **{passer_name}** ran a delivery service. At **{selected_pct}%**, **{name}** ran lost property.",
+                ])
+
+        if tackle_attempts >= 2 and tackling_teammates:
+            selected_pct = round((tackles_made / tackle_attempts) * 100)
+            best_player, best_pct, _ = max(tackling_teammates, key=lambda item: (item[1], item[2]))
+            if best_pct >= selected_pct + 20:
+                tackler_name = escape_markdown(_player_display_name(best_player))
+                categories.append([
+                    f"**{tackler_name}** tackled at **{best_pct}%**; **{name}** managed **{selected_pct}%** and several polite introductions.",
+                    f"Defensive comparison: **{tackler_name} {best_pct}%**, **{name} {selected_pct}%**. One stopped attacks; one observed them.",
+                    f"**{tackler_name}** won the ball at **{best_pct}%**. **{name}** offered opponents a **{100 - selected_pct}%** success scheme.",
+                    f"The tackle gap between **{tackler_name}** and **{name}** could fit another midfielder.",
+                    f"**{tackler_name}** defended the area; **{name}** provided directions through it.",
+                    f"At **{best_pct}%**, **{tackler_name}** was a barrier. At **{selected_pct}%**, **{name}** was a suggestion.",
+                ])
+
+    if our_score > opponent_score:
+        categories.append([
+            f"The team still won **{our_score}–{opponent_score}**, proving group projects can survive uneven contributions.",
+            f"A **{our_score}–{opponent_score}** win means the teammates successfully carried both the result and this review.",
+            f"The victory arrived despite **{name}** treating the match as a supervised work-experience placement.",
+            f"Fortunately, football is a team game and somebody else remembered the assignment.",
+            f"The win survived, although **{name}** appeared determined to add a difficulty modifier.",
+            f"Three points secured; individual accountability remains under investigation.",
+        ])
+    elif our_score < opponent_score:
+        categories.append([
+            f"In a **{our_score}–{opponent_score}** loss, **{name}** blended seamlessly into the evidence.",
+            f"The scoreboard said **{our_score}–{opponent_score}** and this performance declined to offer a counterargument.",
+            f"The team needed a response; **{name}** supplied an out-of-office message.",
+            f"A defeat required heroes, but **{name}** had apparently booked annual leave.",
+            f"The comeback plan arrived without the section containing **{name}**’s contribution.",
+            f"At **{our_score}–{opponent_score}**, every useful action mattered. That made the silence louder.",
+        ])
+    else:
+        categories.append([
+            f"The match ended **{our_score}–{opponent_score}**, and **{name}** also finished perfectly balanced between impact and absence.",
+            "The result was a draw; unfortunately the performance did not win any arguments either.",
+            f"Nobody won the match, and **{name}** made sure nobody won this statistical debate.",
+            "A draw was recorded, along with several unanswered questions about the individual contribution.",
+            f"The scoreboard stayed level while **{name}** kept expectations safely below it.",
+            "Honours ended even; the workload distribution may require a separate inquiry.",
+        ])
+
+    return _funstat_pick_fresh_lines(player_key, categories, count=3)
+
+
 @tree.command(
     name="funstat",
     description="Give a poor latest-match performance a random football roasting.",
@@ -7365,7 +7726,7 @@ async def funstat_command(
 
         badness = _funstat_badness(selected_player)
         selected_name = escape_markdown(_player_display_name(selected_player))
-        group = _player_position_group(selected_player)
+        selected_player_key = _player_display_name(selected_player)
         raw_type = latest_match.get("_matchType") or latest_match.get("matchType")
         match_label = MATCH_TYPE_LABELS.get(raw_type, raw_type or "Match")
 
@@ -7377,17 +7738,32 @@ async def funstat_command(
             result_emoji, result_text = "➖", "DRAW"
 
         if badness < 2:
-            verdict_lines = [
-                f"**{selected_name}** escaped the roast: the latest-match numbers are not bad enough.",
-                random.choice([
-                    "VAR reviewed the evidence and reluctantly ruled in the player's favour.",
-                    "The sarcasm department has returned this one marked ‘insufficient evidence’.",
-                    "A roast was requested, but the statistics inconveniently suggest competence.",
-                ]),
-            ]
+            verdict_lines = _funstat_pick_fresh_lines(
+                selected_player_key,
+                [[
+                    f"**{selected_name}** escaped the roast: the numbers are inconveniently respectable.",
+                    f"The statistics refuse to cooperate. **{selected_name}** actually did their job.",
+                    f"A roast was ordered, but **{selected_name}** supplied no usable evidence.",
+                    f"**{selected_name}** has been released without charge due to competent football.",
+                    f"The complaint form was opened, reviewed and quietly closed again.",
+                    f"No roast today. **{selected_name}** appears to have read the job description.",
+                    f"The joke writer checked twice; **{selected_name}** was annoyingly effective.",
+                    f"This performance is too solid to roast and too sensible to become a meme.",
+                    f"**{selected_name}** survives. The numbers have provided a complete alibi.",
+                    f"The sarcasm department has marked this case ‘insufficient incompetence’.",
+                    f"Nothing to see here: **{selected_name}** completed a professional shift.",
+                    f"The roast has been postponed until **{selected_name}** provides worse material.",
+                ]],
+                count=2,
+            )
             embed_colour = discord.Color.green()
         else:
-            verdict_lines = _funstat_roast_lines(selected_player, players)
+            verdict_lines = _funstat_roast_lines(
+                selected_player,
+                players,
+                our_score,
+                opponent_score,
+            )
             embed_colour = (
                 discord.Color.red()
                 if badness >= 6
@@ -7410,7 +7786,16 @@ async def funstat_command(
             inline=False,
         )
         embed.add_field(
-            name="🎙️ VAR Verdict",
+            name=random.choice([
+                "🔥 The Post-Match Roast",
+                "😂 The Reality Check",
+                "🗞️ Tomorrow’s Back Page",
+                "🎤 The Dressing-Room Review",
+                "📉 Performance Appraisal",
+                "🧾 The Statistical Receipt",
+                "🪑 From the Pundit’s Chair",
+                "🥶 Cold, Hard Numbers",
+            ]),
             value="\n\n".join(verdict_lines),
             inline=False,
         )
