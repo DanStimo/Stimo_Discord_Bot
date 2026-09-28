@@ -1791,9 +1791,17 @@ async def get_last5_player_totals(club_id: str):
 
             name = _player_display_name(player)
             if name not in totals:
-                totals[name] = {"appearances": 0}
+                totals[name] = {
+                    "appearances": 0,
+                    "_position_counts": {},
+                }
 
             totals[name]["appearances"] += 1
+            position_group = _player_position_group(player)
+            position_counts = totals[name]["_position_counts"]
+            position_counts[position_group] = (
+                position_counts.get(position_group, 0) + 1
+            )
 
             for key, value in player.items():
                 if key in NON_STAT_KEYS:
@@ -1808,7 +1816,11 @@ async def get_last5_player_totals(club_id: str):
     # collect every stat key that appeared for at least one player
     stat_keys = set()
     for player_stats in totals.values():
-        stat_keys.update(player_stats.keys())
+        stat_keys.update(
+            key
+            for key in player_stats.keys()
+            if not key.startswith("_")
+        )
 
     # keep appearances first, then common football stats, then everything else
     preferred_order = [
@@ -1932,6 +1944,9 @@ def _format_stats5_team_totals(totals: dict) -> str:
     tackles_won = 0
     yc = 0
     rc = 0
+    saves = 0
+    goals_conceded = 0
+    clean_sheets = 0
     rating_sum = 0.0
     rating_count = 0
 
@@ -1947,7 +1962,11 @@ def _format_stats5_team_totals(totals: dict) -> str:
         tackle_attempts += int(stats.get("tackleattempts", 0) or 0)
         tackles_won += int(stats.get("tacklesmade", 0) or 0)
 
+        yc += int(stats.get("yellowcards", 0) or 0)
         rc += int(stats.get("redcards", 0) or 0)
+        saves += int(stats.get("saves", 0) or 0)
+        goals_conceded += int(stats.get("goalsconceded", 0) or 0)
+        clean_sheets += int(stats.get("cleansheetsgk", 0) or 0)
 
         player_apps = int(stats.get("appearances", 0) or 0)
         player_rating_total = float(stats.get("rating", 0) or 0)
@@ -1960,15 +1979,22 @@ def _format_stats5_team_totals(totals: dict) -> str:
     avg_rating = round(rating_sum / rating_count, 1) if rating_count else 0.0
 
     return (
-        f"{'TEAM':<12}"
-        f"{goals:>3}"
-        f"{assists:>3}"
-        f"{shots:>4}"
-        f"{pass_pct:>4}%"
-        f"{tackle_pct:>4}%"
-        f"{avg_rating:>5.1f}"
-        f"{rc:>3}"
+        f"`Player Apps {apps} · G {goals} · A {assists}`\n"
+        f"`Sh {shots} · P% {pass_pct} · T {tackles_won}/{tackle_attempts} · T% {tackle_pct}`\n"
+        f"`Sv {saves} · Con {goals_conceded} · CS {clean_sheets}`\n"
+        f"`Rt {avg_rating:.1f} · YC {yc} · RC {rc}`"
     )
+
+
+def _stats5_position_group(stats: dict) -> str:
+    counts = stats.get("_position_counts") or {}
+    if not counts:
+        return "Players"
+
+    # Dict order follows the newest matches first, so ties favour the
+    # player's most recently recorded position group.
+    return max(counts, key=counts.get)
+
 
 def _format_player_stats_row(player_name: str, stats: dict):
     apps = int(stats.get("appearances", 0))
@@ -1984,23 +2010,47 @@ def _format_player_stats_row(player_name: str, stats: dict):
     tackles_won = int(stats.get("tacklesmade", 0) or 0)
     tackle_pct = round((tackles_won / tackle_attempts) * 100) if tackle_attempts else 0
 
-    yc = int(stats.get("yellowcards", 0))
-    rc = int(stats.get("redcards", 0))
+    yc = int(stats.get("yellowcards", 0) or 0)
+    rc = int(stats.get("redcards", 0) or 0)
 
     rating_total = float(stats.get("rating", 0) or 0)
     rating = round(rating_total / apps, 1) if apps else 0
 
-    name = player_name[:12]
+    name = escape_markdown(player_name)
+    group = _stats5_position_group(stats)
+
+    group_icons = {
+        "Forwards": "⚽",
+        "Midfielders": "🎯",
+        "Defenders": "🛡️",
+        "Goalkeepers": "🧤",
+        "Players": "👤",
+    }
+    icon = group_icons.get(group, "👤")
+
+    if group == "Goalkeepers":
+        saves = int(stats.get("saves", 0) or 0)
+        conceded = int(stats.get("goalsconceded", 0) or 0)
+        clean_sheets = int(stats.get("cleansheetsgk", 0) or 0)
+        return (
+            f"**{icon} {name}**\n"
+            f"`App {apps} · Sv {saves} · Con {conceded} · CS {clean_sheets}`\n"
+            f"`Rt {rating:.1f} · YC {yc} · RC {rc}`"
+        )
+
+    if group in ("Midfielders", "Defenders"):
+        return (
+            f"**{icon} {name}**\n"
+            f"`App {apps} · G {goals} · A {assists} · Rt {rating:.1f}`\n"
+            f"`P% {pass_pct} · T {tackles_won}/{tackle_attempts} · T% {tackle_pct}`\n"
+            f"`YC {yc} · RC {rc}`"
+        )
 
     return (
-        f"{name:<12}"
-        f"{goals:>3}"
-        f"{assists:>3}"
-        f"{shots:>4}"
-        f"{pass_pct:>4}%"
-        f"{tackle_pct:>4}%"
-        f"{rating:>5.1f}"
-        f"{rc:>3}"
+        f"**{icon} {name}**\n"
+        f"`App {apps} · G {goals} · A {assists} · Sh {shots}`\n"
+        f"`P% {pass_pct} · Rt {rating:.1f}`\n"
+        f"`YC {yc} · RC {rc}`"
     )
 
 async def build_stats5_embeds(club_id: str, club_name: str | None):
@@ -2025,6 +2075,13 @@ async def build_stats5_embeds(club_id: str, club_name: str | None):
     player_items = sorted(
         totals.items(),
         key=lambda item: (
+            {
+                "Forwards": 0,
+                "Midfielders": 1,
+                "Defenders": 2,
+                "Goalkeepers": 3,
+                "Players": 4,
+            }.get(_stats5_position_group(item[1]), 4),
             -((float(item[1].get("rating", 0) or 0) / int(item[1].get("appearances", 1) or 1))
               if int(item[1].get("appearances", 0) or 0) > 0 else 0),
             -int(item[1].get("goals", 0) or 0),
@@ -2040,28 +2097,19 @@ async def build_stats5_embeds(club_id: str, club_name: str | None):
     team_totals_row = _format_stats5_team_totals(totals)
     leaders_text = _build_stats5_leaders_text(totals)
 
-    header = (
-        f"{'Player':<12}"
-        f"{'G':>3}"
-        f"{'A':>3}"
-        f"{'Sh':>4}"
-        f"{'PA%':>5}"
-        f"{'TK%':>5}"
-        f"{'Rt':>5}"
-        f"{'RC':>3}"
-    )
-    divider = "-" * len(header)
-
     pages = []
     current_rows = []
-    current_len = len(header) + len(divider) + 20
+    current_len = 0
 
     for row in rows:
-        extra_len = len(row) + 1
-        if len(current_rows) >= 20 or current_len + extra_len > 3500:
+        extra_len = len(row) + 2
+        if current_rows and (
+            len(current_rows) >= 12
+            or current_len + extra_len > 900
+        ):
             pages.append(current_rows)
             current_rows = []
-            current_len = len(header) + len(divider) + 20
+            current_len = 0
 
         current_rows.append(row)
         current_len += extra_len
@@ -2075,24 +2123,7 @@ async def build_stats5_embeds(club_id: str, club_name: str | None):
     embeds = []
 
     for idx, page_rows in enumerate(pages, start=1):
-        table_body = "\n".join(page_rows)
-
-        if idx == len(pages):
-            table = (
-                "```text\n"
-                + header + "\n"
-                + divider + "\n"
-                + table_body + "\n"
-                + divider + "\n"
-                + team_totals_row + "\n```"
-            )
-        else:
-            table = (
-                "```text\n"
-                + header + "\n"
-                + divider + "\n"
-                + table_body + "\n```"
-            )
+        player_text = "\n\n".join(page_rows)
 
         embed = discord.Embed(
             title=base_title,
@@ -2103,7 +2134,17 @@ async def build_stats5_embeds(club_id: str, club_name: str | None):
         if crest_url:
             embed.set_thumbnail(url=crest_url)
 
-        embed.add_field(name="Totals", value=table, inline=False)
+        embed.add_field(
+            name="Player Totals",
+            value=player_text,
+            inline=False,
+        )
+        if idx == len(pages):
+            embed.add_field(
+                name="Team Totals",
+                value=team_totals_row,
+                inline=False,
+            )
         embed.set_footer(text=f"EAFC — Aggregated from the most recent {len(matches)} matches")
         embeds.append(embed)
 
@@ -2235,37 +2276,15 @@ def build_stats_embed(club_id: str, club_name: str | None, data: dict) -> discor
 
 def format_columns(names: list[str], cols: int = 2) -> str:
     """
-    Return a string with names displayed in `cols` columns, balanced top-to-bottom.
-    Uses simple spacing; NOT a code block so markdown is escaped beforehand.
+    Return wrapping inline-code chips that work at any Discord client width.
+    ``cols`` is retained for compatibility with older callers.
     """
     if not names:
         return "—"
-    escaped = [escape_markdown(n) for n in names]
-    rows = math.ceil(len(escaped) / cols)
-    # build columns as lists
-    columns = []
-    for c in range(cols):
-        start = c * rows
-        columns.append(escaped[start:start + rows])
-    # pad columns to equal length for zipping
-    for col in columns:
-        while len(col) < rows:
-            col.append("")  # empty filler
-    # compute column widths (for nicer alignment inside a code block)
-    col_widths = [max((len(x) for x in col), default=0) for col in columns]
-    # build lines
-    lines = []
-    for r in range(rows):
-        parts = []
-        for c in range(cols):
-            name = columns[c][r]
-            if not name:
-                parts.append(" " * col_widths[c])
-            else:
-                parts.append(name.ljust(col_widths[c]))
-        lines.append("  ".join(parts).rstrip())
-    # Return as a code block (monospace) so spacing lines up
-    return "```\n" + "\n".join(lines) + "\n```"
+    return " ".join(
+        f"`{str(name).replace('`', "'")}`"
+        for name in names
+    )
 
 def _leaderboard_rank_value(club: dict) -> int:
     """Return a sortable numeric rank, putting invalid ranks last."""
