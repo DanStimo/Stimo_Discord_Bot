@@ -1739,12 +1739,13 @@ def _build_stats5_leaders_text(totals: dict) -> str:
     def best_percentage_players(
         made_key: str,
         attempted_key: str,
+        minimum_attempts: int,
     ) -> tuple[list[str], int, int, int] | None:
         candidates = []
         for name, stats in totals.items():
             made = int(stats.get(made_key, 0) or 0)
             attempted = int(stats.get(attempted_key, 0) or 0)
-            if attempted <= 0:
+            if attempted < minimum_attempts:
                 continue
             percentage = round((made / attempted) * 100)
             candidates.append((name, made, attempted, percentage))
@@ -1752,21 +1753,15 @@ def _build_stats5_leaders_text(totals: dict) -> str:
         if not candidates:
             return None
 
-        highest_attempts = max(item[2] for item in candidates)
-        minimum_attempts = max(1, math.ceil(highest_attempts * 0.5))
-        qualified = [
-            item for item in candidates
-            if item[2] >= minimum_attempts
-        ]
-        best_percentage = max(item[3] for item in qualified)
+        best_percentage = max(item[3] for item in candidates)
         best_attempts = max(
             item[2]
-            for item in qualified
+            for item in candidates
             if item[3] == best_percentage
         )
         winners = [
             item
-            for item in qualified
+            for item in candidates
             if item[3] == best_percentage
             and item[2] == best_attempts
         ]
@@ -1774,8 +1769,12 @@ def _build_stats5_leaders_text(totals: dict) -> str:
         _, made, attempted, percentage = winners[0]
         return names, made, attempted, percentage
 
-    best_passer = best_percentage_players("passesmade", "passattempts")
-    best_tackler = best_percentage_players("tacklesmade", "tackleattempts")
+    best_passer = best_percentage_players(
+        "passesmade", "passattempts", minimum_attempts=10
+    )
+    best_tackler = best_percentage_players(
+        "tacklesmade", "tackleattempts", minimum_attempts=5
+    )
 
     extra_awards = []
     if best_passer:
@@ -2163,20 +2162,19 @@ async def build_stats5_embeds(club_id: str, club_name: str | None):
 
     player_chunks = []
     current_rows = []
-    current_len = 0
 
     for row in rows:
-        extra_len = len(row) + 2
-        if current_rows and (
-            len(current_rows) >= 12
-            or current_len + extra_len > 900
-        ):
+        # Discord allows up to 1,024 characters in an embed field value.
+        # Measure the finished value exactly so we do not create a
+        # continuation field earlier than necessary.
+        candidate_rows = [*current_rows, row]
+        candidate_value = "\n\n".join(candidate_rows)
+
+        if current_rows and len(candidate_value) > 1024:
             player_chunks.append(current_rows)
             current_rows = []
-            current_len = 0
 
         current_rows.append(row)
-        current_len += extra_len
 
     if current_rows:
         player_chunks.append(current_rows)
