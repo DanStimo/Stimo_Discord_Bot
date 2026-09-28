@@ -6854,7 +6854,7 @@ async def lm_command(interaction: discord.Interaction, club: str):
     await handle_lastmatch(interaction, club, from_dropdown=False, original_message=None)
 
 
-# - /funstat
+# - /roast
 def _funstat_minutes(player: dict) -> int:
     seconds = int(
         _to_number(
@@ -7628,14 +7628,14 @@ def _funstat_roast_lines(
 
 
 @tree.command(
-    name="funstat",
+    name="roast",
     description="Give a poor latest-match performance a random football roasting.",
 )
 @app_commands.describe(
     club="Club name or club ID",
     player="Optional player gamertag; leave blank for a random poor performer",
 )
-async def funstat_command(
+async def roast_command(
     interaction: discord.Interaction,
     club: str,
     player: str | None = None,
@@ -7831,7 +7831,7 @@ async def funstat_command(
             )
 
         embed = discord.Embed(
-            title=f"🎭 FUNSTAT — {selected_name}",
+            title=f"🔥 PLAYER ROAST — {selected_name}",
             description=(
                 f"**{club_name} · {match_label}**\n"
                 f"{result_emoji} **{result_text}** vs "
@@ -7867,11 +7867,11 @@ async def funstat_command(
 
         embed.set_footer(text="All in good fun — blame the statistics")
         message = await interaction.followup.send(embed=embed)
-        await log_command_output(interaction, "funstat", message)
+        await log_command_output(interaction, "roast", message)
         asyncio.create_task(delete_after_delay(message, 60))
 
     except Exception as e:
-        print(f"[ERROR] /funstat failed: {e}")
+        print(f"[ERROR] /roast failed: {e}")
         await send_temporary_message(
             interaction.followup,
             content="An error occurred while building the fun stat.",
