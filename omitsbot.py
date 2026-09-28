@@ -1740,12 +1740,17 @@ def _build_stats5_leaders_text(totals: dict) -> str:
         made_key: str,
         attempted_key: str,
         minimum_attempts: int,
+        minimum_appearances: int = 3,
     ) -> tuple[list[str], int, int, int] | None:
         candidates = []
         for name, stats in totals.items():
+            appearances = int(stats.get("appearances", 0) or 0)
             made = int(stats.get(made_key, 0) or 0)
             attempted = int(stats.get(attempted_key, 0) or 0)
-            if attempted < minimum_attempts:
+            if (
+                appearances < minimum_appearances
+                or attempted < minimum_attempts
+            ):
                 continue
             percentage = round((made / attempted) * 100)
             candidates.append((name, made, attempted, percentage))
@@ -1770,10 +1775,10 @@ def _build_stats5_leaders_text(totals: dict) -> str:
         return names, made, attempted, percentage
 
     best_passer = best_percentage_players(
-        "passesmade", "passattempts", minimum_attempts=10
+        "passesmade", "passattempts", minimum_attempts=50
     )
     best_tackler = best_percentage_players(
-        "tacklesmade", "tackleattempts", minimum_attempts=5
+        "tacklesmade", "tackleattempts", minimum_attempts=10
     )
 
     extra_awards = []
