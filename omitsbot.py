@@ -6853,6 +6853,586 @@ async def lastmatch_command(interaction: discord.Interaction, club: str):
 async def lm_command(interaction: discord.Interaction, club: str):
     await handle_lastmatch(interaction, club, from_dropdown=False, original_message=None)
 
+
+# - /funstat
+def _funstat_minutes(player: dict) -> int:
+    seconds = int(
+        _to_number(
+            player.get("secondsPlayed", player.get("gameTime", 0))
+        )
+        or 0
+    )
+    return round(seconds / 60) if seconds > 0 else 0
+
+
+def _format_funstat_evidence(player: dict) -> str:
+    """Show the fullest useful set of documented match-performance data."""
+    group = _player_position_group(player)
+    name = escape_markdown(_player_display_name(player))
+    rating = _match_rating(player)
+    minutes = _funstat_minutes(player)
+    goals = int(_to_number(player.get("goals")) or 0)
+    assists = int(_to_number(player.get("assists")) or 0)
+    shots = int(_to_number(player.get("shots")) or 0)
+    passes_made = int(_to_number(player.get("passesmade")) or 0)
+    pass_attempts = int(_to_number(player.get("passattempts")) or 0)
+    pass_pct = round((passes_made / pass_attempts) * 100) if pass_attempts else 0
+    tackles_made = int(_to_number(player.get("tacklesmade")) or 0)
+    tackle_attempts = int(_to_number(player.get("tackleattempts")) or 0)
+    tackle_pct = round((tackles_made / tackle_attempts) * 100) if tackle_attempts else 0
+    red_cards = int(_to_number(player.get("redcards")) or 0)
+    yellow_cards = int(_to_number(player.get("yellowcards")) or 0)
+    player_of_match = int(_to_number(player.get("mom")) or 0)
+
+    lines = [f"**{name}**"]
+    if minutes:
+        lines.append(f"`Min {minutes} · Rt {rating} · POTM {player_of_match}`")
+    else:
+        lines.append(f"`Rt {rating} · POTM {player_of_match}`")
+
+    if group == "Goalkeepers":
+        saves = int(_to_number(player.get("saves")) or 0)
+        conceded = int(_to_number(player.get("goalsconceded")) or 0)
+        clean_sheets = int(_to_number(player.get("cleansheetsgk")) or 0)
+        dive_saves = int(_to_number(player.get("ballDiveSaves")) or 0)
+        reflex_saves = int(_to_number(player.get("reflexSaves")) or 0)
+        parry_saves = int(_to_number(player.get("parrySaves")) or 0)
+        cross_saves = int(_to_number(player.get("crossSaves")) or 0)
+        punch_saves = int(_to_number(player.get("punchSaves")) or 0)
+        direction_saves = int(_to_number(player.get("goodDirectionSaves")) or 0)
+        lines.extend([
+            f"`Sv {saves} · Con {conceded} · CS {clean_sheets}`",
+            f"`Dive {dive_saves} · Ref {reflex_saves} · Parry {parry_saves}`",
+            f"`Cross {cross_saves} · Punch {punch_saves} · Dir {direction_saves}`",
+            f"`YC {yellow_cards} · RC {red_cards}`",
+        ])
+        return "\n".join(lines)
+
+    lines.append(f"`G {goals} · A {assists} · Sh {shots}`")
+    lines.append(f"`P {passes_made}/{pass_attempts} · P% {pass_pct}`")
+    if group in ("Midfielders", "Defenders"):
+        lines.append(
+            f"`T {tackles_made}/{tackle_attempts} · T% {tackle_pct}`"
+        )
+
+    clean_sheets = int(
+        _to_number(
+            player.get(
+                "cleansheetsdef" if group == "Defenders" else "cleansheetsany"
+            )
+        )
+        or 0
+    )
+    if clean_sheets:
+        lines.append(f"`CS {clean_sheets}`")
+    lines.append(f"`YC {yellow_cards} · RC {red_cards}`")
+    return "\n".join(lines)
+
+
+def _funstat_badness(player: dict) -> int:
+    """Return a simple football-performance roast score."""
+    score = 0
+    rating = float(_to_number(player.get("rating")) or 0)
+    goals = int(_to_number(player.get("goals")) or 0)
+    assists = int(_to_number(player.get("assists")) or 0)
+    shots = int(_to_number(player.get("shots")) or 0)
+    red_cards = int(_to_number(player.get("redcards")) or 0)
+    yellow_cards = int(_to_number(player.get("yellowcards")) or 0)
+    passes_made = int(_to_number(player.get("passesmade")) or 0)
+    pass_attempts = int(_to_number(player.get("passattempts")) or 0)
+    tackles_made = int(_to_number(player.get("tacklesmade")) or 0)
+    tackle_attempts = int(_to_number(player.get("tackleattempts")) or 0)
+    conceded = int(_to_number(player.get("goalsconceded")) or 0)
+    saves = int(_to_number(player.get("saves")) or 0)
+    player_of_match = int(_to_number(player.get("mom")) or 0)
+    clean_sheet = max(
+        int(_to_number(player.get("cleansheetsany")) or 0),
+        int(_to_number(player.get("cleansheetsdef")) or 0),
+        int(_to_number(player.get("cleansheetsgk")) or 0),
+    )
+    group = _player_position_group(player)
+
+    if rating and rating < 6.0:
+        score += 5
+    elif rating and rating < 6.5:
+        score += 4
+    elif rating and rating < 7.0:
+        score += 2
+
+    if red_cards:
+        score += 5
+    elif yellow_cards:
+        score += 1
+
+    if pass_attempts >= 5:
+        pass_pct = (passes_made / pass_attempts) * 100
+        if pass_pct < 60:
+            score += 4
+        elif pass_pct < 70:
+            score += 2
+
+    if tackle_attempts >= 2:
+        tackle_pct = (tackles_made / tackle_attempts) * 100
+        if tackle_pct < 40:
+            score += 3
+        elif tackle_pct < 60:
+            score += 2
+
+    if group == "Forwards" and goals == 0 and assists == 0:
+        score += 1
+    if shots >= 3 and goals == 0:
+        score += 2
+    if group == "Goalkeepers":
+        if conceded >= 3:
+            score += 3
+        if conceded > 0 and saves == 0:
+            score += 2
+
+        shots_faced = saves + conceded
+        save_pct = (saves / shots_faced) * 100 if shots_faced else 100
+        if shots_faced >= 3 and save_pct < 50:
+            score += 2
+
+    # Positive contributions protect a player from being labelled poor solely
+    # because of one weaker metric.
+    score -= min(goals * 2, 4)
+    score -= min(assists, 2)
+    score -= min(clean_sheet, 1)
+    if player_of_match:
+        score -= 5
+
+    return max(score, 0)
+
+
+def _funstat_roast_lines(
+    player: dict,
+    teammates: list[dict],
+) -> list[str]:
+    name = escape_markdown(_player_display_name(player))
+    rating = float(_to_number(player.get("rating")) or 0)
+    goals = int(_to_number(player.get("goals")) or 0)
+    assists = int(_to_number(player.get("assists")) or 0)
+    shots = int(_to_number(player.get("shots")) or 0)
+    red_cards = int(_to_number(player.get("redcards")) or 0)
+    passes_made = int(_to_number(player.get("passesmade")) or 0)
+    pass_attempts = int(_to_number(player.get("passattempts")) or 0)
+    tackles_made = int(_to_number(player.get("tacklesmade")) or 0)
+    tackle_attempts = int(_to_number(player.get("tackleattempts")) or 0)
+    conceded = int(_to_number(player.get("goalsconceded")) or 0)
+    saves = int(_to_number(player.get("saves")) or 0)
+    minutes = _funstat_minutes(player)
+    player_of_match = int(_to_number(player.get("mom")) or 0)
+    group = _player_position_group(player)
+
+    lines = []
+
+    if rating and rating < 6.5:
+        lines.extend([
+            f"A **{rating:.1f}** rating — the match engine considered issuing a missing-person report for **{name}**.",
+            f"**{name}** earned a **{rating:.1f}**. Technically present, statistically questionable.",
+            f"That **{rating:.1f}** rating is less ‘player of the match’ and more ‘person near the match’.",
+        ])
+    elif rating and rating < 7.0:
+        lines.extend([
+            f"A **{rating:.1f}** rating: not a disaster, but nobody is framing the match report.",
+            f"**{name}** finished on **{rating:.1f}** — aggressively average with a hint of danger.",
+        ])
+
+    if pass_attempts >= 5:
+        pass_pct = round((passes_made / pass_attempts) * 100)
+        if pass_pct < 70:
+            lines.extend([
+                f"Passing finished at **{pass_pct}%**. Several teammates are still looking for the ball.",
+                f"With **{passes_made}/{pass_attempts}** passes completed, possession was treated as a temporary arrangement.",
+                f"At **{pass_pct}%** passing, the opposition received excellent service.",
+            ])
+
+    if tackle_attempts >= 2:
+        tackle_pct = round((tackles_made / tackle_attempts) * 100)
+        if tackle_pct < 60:
+            lines.extend([
+                f"Only **{tackles_made}/{tackle_attempts}** tackles landed. The attackers mostly experienced a guided tour.",
+                f"A **{tackle_pct}%** tackle rate — more social distancing than defending.",
+            ])
+
+    if shots >= 3 and goals == 0:
+        lines.extend([
+            f"**{shots}** shots and no goals. The corner flags were under more threat than the goalkeeper.",
+            f"After **{shots}** attempts without scoring, the goal may need to be made wider next time.",
+        ])
+
+    if group == "Forwards" and goals == 0 and assists == 0:
+        lines.append(
+            "A forward with no goal or assist — an impressively convincing spectator role."
+        )
+
+    if red_cards:
+        lines.extend([
+            "The red card was a bold tactical decision to give everyone else more space.",
+            "Leaving early was efficient, although the manager probably meant after full-time.",
+        ])
+
+    if group == "Goalkeepers" and conceded >= 3:
+        lines.append(
+            f"**{conceded}** conceded — the goal spent the match operating an open-door policy."
+        )
+    if group == "Goalkeepers" and conceded > 0 and saves == 0:
+        lines.append("Zero saves. At least the net got plenty of touches.")
+    if group == "Goalkeepers":
+        shots_faced = saves + conceded
+        save_pct = round((saves / shots_faced) * 100) if shots_faced else 100
+        if shots_faced >= 3 and save_pct < 50:
+            lines.extend([
+                f"A **{save_pct}%** save rate — the gloves appear to have been mainly decorative.",
+                f"Only **{saves}** of **{shots_faced}** shots were stopped. The net had the busier afternoon.",
+            ])
+
+    if minutes >= 85 and goals == 0 and assists == 0 and rating < 6.5:
+        lines.extend([
+            f"After **{minutes} minutes**, the main contribution was helping the clock reach full-time.",
+            f"They had **{minutes} minutes** to change the match and chose consistency instead.",
+        ])
+
+    # This normally prevents a roast through the badness score, but retaining
+    # the check keeps manually selected POTM performances fair.
+    if player_of_match:
+        return [
+            f"**{name}** was Player of the Match. VAR has cancelled the roast for lack of evidence."
+        ]
+
+    other_players = [
+        teammate
+        for teammate in teammates
+        if teammate is not player
+    ]
+    if other_players:
+        best_teammate = max(
+            other_players,
+            key=lambda teammate: float(_to_number(teammate.get("rating")) or 0),
+        )
+        best_name = escape_markdown(_player_display_name(best_teammate))
+        best_rating = float(_to_number(best_teammate.get("rating")) or 0)
+        if best_rating >= rating + 1.0:
+            lines.extend([
+                f"Meanwhile, **{best_name}** posted **{best_rating:.1f}** and may request separate changing facilities.",
+                f"For comparison, **{best_name}** managed **{best_rating:.1f}** in the very same match.",
+                f"**{best_name}** reached **{best_rating:.1f}**, proving it was not the pitch, weather or controller batteries.",
+            ])
+
+        selected_contributions = goals + assists
+        best_contributor = max(
+            other_players,
+            key=lambda teammate: (
+                int(_to_number(teammate.get("goals")) or 0)
+                + int(_to_number(teammate.get("assists")) or 0)
+            ),
+        )
+        best_contributions = (
+            int(_to_number(best_contributor.get("goals")) or 0)
+            + int(_to_number(best_contributor.get("assists")) or 0)
+        )
+        if selected_contributions == 0 and best_contributions > 0:
+            contributor_name = escape_markdown(
+                _player_display_name(best_contributor)
+            )
+            lines.append(
+                f"**{contributor_name}** supplied **{best_contributions}** goal contribution(s); "
+                f"**{name}** supplied moral support."
+            )
+
+        passing_teammates = []
+        for teammate in other_players:
+            teammate_attempts = int(
+                _to_number(teammate.get("passattempts")) or 0
+            )
+            teammate_made = int(_to_number(teammate.get("passesmade")) or 0)
+            if teammate_attempts >= 5:
+                passing_teammates.append(
+                    (
+                        teammate,
+                        round((teammate_made / teammate_attempts) * 100),
+                        teammate_attempts,
+                    )
+                )
+        if pass_attempts >= 5 and passing_teammates:
+            selected_pass_pct = round((passes_made / pass_attempts) * 100)
+            best_passing_teammate, best_pass_pct, _ = max(
+                passing_teammates,
+                key=lambda item: (item[1], item[2]),
+            )
+            if best_pass_pct >= selected_pass_pct + 15:
+                passer_name = escape_markdown(
+                    _player_display_name(best_passing_teammate)
+                )
+                lines.append(
+                    f"**{passer_name}** passed at **{best_pass_pct}%** while "
+                    f"**{name}** managed **{selected_pass_pct}%** — same match, different sport."
+                )
+
+        tackling_teammates = []
+        for teammate in other_players:
+            teammate_attempts = int(
+                _to_number(teammate.get("tackleattempts")) or 0
+            )
+            teammate_made = int(_to_number(teammate.get("tacklesmade")) or 0)
+            if teammate_attempts >= 2:
+                tackling_teammates.append(
+                    (
+                        teammate,
+                        round((teammate_made / teammate_attempts) * 100),
+                        teammate_attempts,
+                    )
+                )
+        if tackle_attempts >= 2 and tackling_teammates:
+            selected_tackle_pct = round(
+                (tackles_made / tackle_attempts) * 100
+            )
+            best_tackling_teammate, best_tackle_pct, _ = max(
+                tackling_teammates,
+                key=lambda item: (item[1], item[2]),
+            )
+            if best_tackle_pct >= selected_tackle_pct + 20:
+                tackler_name = escape_markdown(
+                    _player_display_name(best_tackling_teammate)
+                )
+                lines.append(
+                    f"**{tackler_name}** won **{best_tackle_pct}%** of their tackles; "
+                    f"**{name}** answered with **{selected_tackle_pct}%** and optimism."
+                )
+
+    if not lines:
+        lines.append(
+            f"The numbers refuse to cooperate: **{name}** did not provide enough evidence for a proper roasting."
+        )
+
+    # Avoid repeating the same type of joke while keeping every invocation random.
+    return random.sample(lines, k=min(3, len(lines)))
+
+
+@tree.command(
+    name="funstat",
+    description="Give a poor latest-match performance a random football roasting.",
+)
+@app_commands.describe(
+    club="Club name or club ID",
+    player="Optional player gamertag; leave blank for a random poor performer",
+)
+async def funstat_command(
+    interaction: discord.Interaction,
+    club: str,
+    player: str | None = None,
+):
+    try:
+        await interaction.response.defer()
+
+        if club.isdigit():
+            club_id = club
+        else:
+            matches = await search_clubs_ea(club)
+            if not matches:
+                await send_temporary_message(
+                    interaction.followup,
+                    content="No matching clubs found.",
+                    delay=15,
+                )
+                return
+
+            exact_matches = [
+                match
+                for match in matches
+                if str((match.get("clubInfo") or {}).get("name", "")).casefold()
+                == club.strip().casefold()
+            ]
+            chosen_club = exact_matches[0] if exact_matches else matches[0]
+            club_id = str(chosen_club["clubInfo"]["clubId"])
+
+        all_matches = []
+        for match_type in ("leagueMatch", "playoffMatch", "friendlyMatch"):
+            match_data = await _ea_get_json(
+                "https://proclubs.ea.com/api/fc/clubs/matches",
+                {
+                    "matchType": match_type,
+                    "platform": PLATFORM,
+                    "clubIds": club_id,
+                },
+            ) or []
+            for match in match_data:
+                match["_matchType"] = match_type
+            all_matches.extend(match_data)
+
+        if not all_matches:
+            await send_temporary_message(
+                interaction.followup,
+                content="No matches found for this club.",
+                delay=15,
+            )
+            return
+
+        all_matches.sort(key=lambda match: match.get("timestamp", 0), reverse=True)
+        latest_match = all_matches[0]
+
+        clubs = latest_match.get("clubs") or {}
+        our_id = next(
+            (candidate_id for candidate_id in clubs if str(candidate_id) == str(club_id)),
+            None,
+        )
+        opponent_id = next(
+            (candidate_id for candidate_id in clubs if str(candidate_id) != str(club_id)),
+            None,
+        )
+        our_club = clubs.get(our_id) if our_id is not None else {}
+        opponent = clubs.get(opponent_id) if opponent_id is not None else {}
+
+        club_name = (
+            (our_club.get("details") or {}).get("name")
+            or our_club.get("name")
+            or f"Club {club_id}"
+        )
+        opponent_name = (
+            (opponent.get("details") or {}).get("name")
+            or opponent.get("name")
+            or "Unknown"
+        )
+        our_score = int(our_club.get("goals", 0) or 0)
+        opponent_score = int(opponent.get("goals", 0) or 0)
+
+        players_by_club = latest_match.get("players") or {}
+        player_club_id = next(
+            (
+                candidate_id
+                for candidate_id in players_by_club
+                if str(candidate_id) == str(club_id)
+            ),
+            None,
+        )
+        club_players = (
+            players_by_club.get(player_club_id, {})
+            if player_club_id is not None
+            else {}
+        )
+        players = [
+            candidate
+            for candidate in club_players.values()
+            if isinstance(candidate, dict)
+        ]
+
+        if not players:
+            await send_temporary_message(
+                interaction.followup,
+                content="No player statistics were found for the latest match.",
+                delay=15,
+            )
+            return
+
+        if player:
+            requested = player.strip().casefold()
+            exact_players = [
+                candidate
+                for candidate in players
+                if _player_display_name(candidate).casefold() == requested
+            ]
+            partial_players = [
+                candidate
+                for candidate in players
+                if requested in _player_display_name(candidate).casefold()
+            ]
+            selected_player = (
+                exact_players[0]
+                if exact_players
+                else partial_players[0] if len(partial_players) == 1 else None
+            )
+            if selected_player is None:
+                available_names = ", ".join(
+                    escape_markdown(_player_display_name(candidate))
+                    for candidate in players
+                )
+                await send_temporary_message(
+                    interaction.followup,
+                    content=(
+                        f"That player was not found in the latest match. "
+                        f"Available players: {available_names}"
+                    )[:1900],
+                    delay=30,
+                )
+                return
+        else:
+            bad_candidates = [
+                candidate
+                for candidate in players
+                if _funstat_badness(candidate) >= 2
+            ]
+            selected_player = random.choice(bad_candidates or players)
+
+        badness = _funstat_badness(selected_player)
+        selected_name = escape_markdown(_player_display_name(selected_player))
+        group = _player_position_group(selected_player)
+        raw_type = latest_match.get("_matchType") or latest_match.get("matchType")
+        match_label = MATCH_TYPE_LABELS.get(raw_type, raw_type or "Match")
+
+        if our_score > opponent_score:
+            result_emoji, result_text = "✅", "WIN"
+        elif our_score < opponent_score:
+            result_emoji, result_text = "❌", "LOSS"
+        else:
+            result_emoji, result_text = "➖", "DRAW"
+
+        if badness < 2:
+            verdict_lines = [
+                f"**{selected_name}** escaped the roast: the latest-match numbers are not bad enough.",
+                random.choice([
+                    "VAR reviewed the evidence and reluctantly ruled in the player's favour.",
+                    "The sarcasm department has returned this one marked ‘insufficient evidence’.",
+                    "A roast was requested, but the statistics inconveniently suggest competence.",
+                ]),
+            ]
+            embed_colour = discord.Color.green()
+        else:
+            verdict_lines = _funstat_roast_lines(selected_player, players)
+            embed_colour = (
+                discord.Color.red()
+                if badness >= 6
+                else discord.Color.orange()
+            )
+
+        embed = discord.Embed(
+            title=f"🎭 FUNSTAT — {selected_name}",
+            description=(
+                f"**{club_name} · {match_label}**\n"
+                f"{result_emoji} **{result_text}** vs "
+                f"**{escape_markdown(opponent_name)}** · "
+                f"**{our_score}–{opponent_score}**"
+            ),
+            color=embed_colour,
+        )
+        embed.add_field(
+            name="📋 The Evidence",
+            value=_format_funstat_evidence(selected_player),
+            inline=False,
+        )
+        embed.add_field(
+            name="🎙️ VAR Verdict",
+            value="\n\n".join(verdict_lines),
+            inline=False,
+        )
+
+        crest_asset_id = await get_crest_asset_id_for_club(club_id)
+        crest_url = build_crest_url(crest_asset_id) if crest_asset_id else None
+        if crest_url:
+            embed.set_thumbnail(url=crest_url)
+
+        embed.set_footer(text="All in good fun — blame the statistics")
+        message = await interaction.followup.send(embed=embed)
+        await log_command_output(interaction, "funstat", message)
+        asyncio.create_task(delete_after_delay(message, 60))
+
+    except Exception as e:
+        print(f"[ERROR] /funstat failed: {e}")
+        await send_temporary_message(
+            interaction.followup,
+            content="An error occurred while building the fun stat.",
+            delay=15,
+        )
+
 # - Top 100
 class Top100View(discord.ui.View):
     def __init__(self, data, per_page=10):
