@@ -2161,7 +2161,7 @@ async def build_stats5_embeds(club_id: str, club_name: str | None):
     team_totals_row = _format_stats5_team_totals(totals)
     leaders_text = _build_stats5_leaders_text(totals)
 
-    pages = []
+    player_chunks = []
     current_rows = []
     current_len = 0
 
@@ -2171,7 +2171,7 @@ async def build_stats5_embeds(club_id: str, club_name: str | None):
             len(current_rows) >= 12
             or current_len + extra_len > 900
         ):
-            pages.append(current_rows)
+            player_chunks.append(current_rows)
             current_rows = []
             current_len = 0
 
@@ -2179,40 +2179,41 @@ async def build_stats5_embeds(club_id: str, club_name: str | None):
         current_len += extra_len
 
     if current_rows:
-        pages.append(current_rows)
+        player_chunks.append(current_rows)
 
-    if not pages:
+    if not player_chunks:
         return []
 
-    embeds = []
+    embed = discord.Embed(
+        title=base_title,
+        description=f"{subtitle}\n\n{leaders_text}",
+        color=0xB30000,
+    )
 
-    for idx, page_rows in enumerate(pages, start=1):
-        player_text = "\n\n".join(page_rows)
+    if crest_url:
+        embed.set_thumbnail(url=crest_url)
 
-        embed = discord.Embed(
-            title=base_title,
-            description=f"{subtitle}\nPage {idx}/{len(pages)}\n\n{leaders_text}",
-            color=0xB30000
-        )
-
-        if crest_url:
-            embed.set_thumbnail(url=crest_url)
-
+    for index, chunk_rows in enumerate(player_chunks):
         embed.add_field(
-            name="Player Totals",
-            value=player_text,
+            name=(
+                "Player Totals"
+                if index == 0
+                else "Player Totals — continued"
+            ),
+            value="\n\n".join(chunk_rows),
             inline=False,
         )
-        if idx == len(pages):
-            embed.add_field(
-                name="Team Totals",
-                value=team_totals_row,
-                inline=False,
-            )
-        embed.set_footer(text=f"EAFC — Aggregated from the most recent {len(matches)} matches")
-        embeds.append(embed)
 
-    return embeds
+    embed.add_field(
+        name="Team Totals",
+        value=team_totals_row,
+        inline=False,
+    )
+    embed.set_footer(
+        text=f"EAFC — Aggregated from the most recent {len(matches)} matches"
+    )
+
+    return [embed]
 
 # Helpers + embed builder for /stats
 ZWSP = "\u200b"
