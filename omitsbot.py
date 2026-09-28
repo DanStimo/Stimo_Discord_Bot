@@ -1736,11 +1736,69 @@ def _build_stats5_leaders_text(totals: dict) -> str:
         if avg_rating(stats) == best_rating
     )
 
-    return (
+    def best_percentage_players(
+        made_key: str,
+        attempted_key: str,
+    ) -> tuple[list[str], int, int, int] | None:
+        candidates = []
+        for name, stats in totals.items():
+            made = int(stats.get(made_key, 0) or 0)
+            attempted = int(stats.get(attempted_key, 0) or 0)
+            if attempted <= 0:
+                continue
+            percentage = round((made / attempted) * 100)
+            candidates.append((name, made, attempted, percentage))
+
+        if not candidates:
+            return None
+
+        highest_attempts = max(item[2] for item in candidates)
+        minimum_attempts = max(1, math.ceil(highest_attempts * 0.5))
+        qualified = [
+            item for item in candidates
+            if item[2] >= minimum_attempts
+        ]
+        best_percentage = max(item[3] for item in qualified)
+        best_attempts = max(
+            item[2]
+            for item in qualified
+            if item[3] == best_percentage
+        )
+        winners = [
+            item
+            for item in qualified
+            if item[3] == best_percentage
+            and item[2] == best_attempts
+        ]
+        names = sorted(item[0] for item in winners)
+        _, made, attempted, percentage = winners[0]
+        return names, made, attempted, percentage
+
+    best_passer = best_percentage_players("passesmade", "passattempts")
+    best_tackler = best_percentage_players("tacklesmade", "tackleattempts")
+
+    extra_awards = []
+    if best_passer:
+        names, made, attempted, percentage = best_passer
+        extra_awards.append(
+            f"🎯 Best passer: {join_names(names)} "
+            f"({percentage}% · {made}/{attempted})"
+        )
+    if best_tackler:
+        names, made, attempted, percentage = best_tackler
+        extra_awards.append(
+            f"🛡️ Best tackler: {join_names(names)} "
+            f"({percentage}% · {made}/{attempted})"
+        )
+
+    leaders = (
         f"⚽ Top scorer: {join_names(top_scorers)} ({best_goals})\n"
         f"🅰️ Top assister: {join_names(top_assisters)} ({best_assists})\n"
         f"⭐ Best avg rating: {join_names(best_rated_players)} ({best_rating:.1f})"
     )
+    if extra_awards:
+        leaders += "\n" + "\n".join(extra_awards)
+    return leaders
 
 def _sort_players_for_stats5(item: tuple[str, dict]):
     _, stats = item
@@ -1979,10 +2037,12 @@ def _format_stats5_team_totals(totals: dict) -> str:
     avg_rating = round(rating_sum / rating_count, 1) if rating_count else 0.0
 
     return (
-        f"`Player Apps {apps} · G {goals} · A {assists}`\n"
-        f"`Sh {shots} · P% {pass_pct} · T {tackles_won}/{tackle_attempts} · T% {tackle_pct}`\n"
+        f"`Pl {apps} · G {goals} · A {assists} · Sh {shots}`\n"
+        f"`P {pass_completed}/{pass_attempts} · P% {pass_pct}`\n"
+        f"`T {tackles_won}/{tackle_attempts} · T% {tackle_pct}`\n"
         f"`Sv {saves} · Con {goals_conceded} · CS {clean_sheets}`\n"
-        f"`Rt {avg_rating:.1f} · YC {yc} · RC {rc}`"
+        f"`YC {yc} · RC {rc}`\n"
+        f"`Rt {avg_rating:.1f}`"
     )
 
 
@@ -2034,23 +2094,27 @@ def _format_player_stats_row(player_name: str, stats: dict):
         clean_sheets = int(stats.get("cleansheetsgk", 0) or 0)
         return (
             f"**{icon} {name}**\n"
-            f"`App {apps} · Sv {saves} · Con {conceded} · CS {clean_sheets}`\n"
-            f"`Rt {rating:.1f} · YC {yc} · RC {rc}`"
+            f"`Pl {apps} · Sv {saves} · Con {conceded} · CS {clean_sheets}`\n"
+            f"`YC {yc} · RC {rc}`\n"
+            f"`Rt {rating:.1f}`"
         )
 
     if group in ("Midfielders", "Defenders"):
         return (
             f"**{icon} {name}**\n"
-            f"`App {apps} · G {goals} · A {assists} · Rt {rating:.1f}`\n"
-            f"`P% {pass_pct} · T {tackles_won}/{tackle_attempts} · T% {tackle_pct}`\n"
-            f"`YC {yc} · RC {rc}`"
+            f"`Pl {apps} · G {goals} · A {assists}`\n"
+            f"`P {pass_completed}/{pass_attempts} · P% {pass_pct}`\n"
+            f"`T {tackles_won}/{tackle_attempts} · T% {tackle_pct}`\n"
+            f"`YC {yc} · RC {rc}`\n"
+            f"`Rt {rating:.1f}`"
         )
 
     return (
         f"**{icon} {name}**\n"
-        f"`App {apps} · G {goals} · A {assists} · Sh {shots}`\n"
-        f"`P% {pass_pct} · Rt {rating:.1f}`\n"
-        f"`YC {yc} · RC {rc}`"
+        f"`Pl {apps} · G {goals} · A {assists} · Sh {shots}`\n"
+        f"`P {pass_completed}/{pass_attempts} · P% {pass_pct}`\n"
+        f"`YC {yc} · RC {rc}`\n"
+        f"`Rt {rating:.1f}`"
     )
 
 async def build_stats5_embeds(club_id: str, club_name: str | None):
