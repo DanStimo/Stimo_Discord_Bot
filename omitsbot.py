@@ -1363,34 +1363,40 @@ def _made_attempted(player: dict, made_key: str, attempted_key: str) -> str:
     return f"{made}/{attempted}"
 
 def _format_last_match_player(player: dict, group: str) -> str:
-    # A vertical layout is readable on narrow phones and desktop Discord.
     name = escape_markdown(_player_display_name(player))
     rating = _match_rating(player)
-    pass_pct = _percentage(player.get("passesmade"), player.get("passattempts"))
     goals = int(_to_number(player.get("goals")) or 0)
     assists = int(_to_number(player.get("assists")) or 0)
     shots = int(_to_number(player.get("shots")) or 0)
-    tackles = _made_attempted(player, "tacklesmade", "tackleattempts")
+
+    passes_made = int(_to_number(player.get("passesmade")) or 0)
+    pass_attempts = int(_to_number(player.get("passattempts")) or 0)
+    pass_pct = round((passes_made / pass_attempts) * 100) if pass_attempts else 0
+
+    tackles_made = int(_to_number(player.get("tacklesmade")) or 0)
+    tackle_attempts = int(_to_number(player.get("tackleattempts")) or 0)
+    tackle_pct = round((tackles_made / tackle_attempts) * 100) if tackle_attempts else 0
+
+    yellow_cards = int(_to_number(player.get("yellowcards")) or 0)
+    red_cards = int(_to_number(player.get("redcards")) or 0)
 
     if group == "Forwards":
         return (
             f"**{name}**\n"
             f"`G {goals} · A {assists} · Sh {shots}`\n"
-            f"`Pass {pass_pct}% · Rt {rating}`"
+            f"`P {passes_made}/{pass_attempts} · P% {pass_pct}`\n"
+            f"`YC {yellow_cards} · RC {red_cards}`\n"
+            f"`Rt {rating}`"
         )
 
-    if group == "Midfielders":
+    if group in ("Midfielders", "Defenders"):
         return (
             f"**{name}**\n"
-            f"`G {goals} · A {assists} · Pass {pass_pct}%`\n"
-            f"`Tkl {tackles} · Rt {rating}`"
-        )
-
-    if group == "Defenders":
-        return (
-            f"**{name}**\n"
-            f"`G {goals} · A {assists} · Pass {pass_pct}%`\n"
-            f"`Tkl {tackles} · Rt {rating}`"
+            f"`G {goals} · A {assists}`\n"
+            f"`P {passes_made}/{pass_attempts} · P% {pass_pct}`\n"
+            f"`T {tackles_made}/{tackle_attempts} · T% {tackle_pct}`\n"
+            f"`YC {yellow_cards} · RC {red_cards}`\n"
+            f"`Rt {rating}`"
         )
 
     if group == "Goalkeepers":
@@ -1399,14 +1405,65 @@ def _format_last_match_player(player: dict, group: str) -> str:
         clean_sheets = int(_to_number(player.get("cleansheetsgk")) or 0)
         return (
             f"**{name}**\n"
-            f"`Sv {saves} · Con {conceded}`\n"
-            f"`CS {clean_sheets} · Rt {rating}`"
+            f"`Sv {saves} · Con {conceded} · CS {clean_sheets}`\n"
+            f"`YC {yellow_cards} · RC {red_cards}`\n"
+            f"`Rt {rating}`"
         )
 
     return (
         f"**{name}**\n"
         f"`G {goals} · A {assists} · Sh {shots}`\n"
-        f"`Pass {pass_pct}% · Rt {rating}`"
+        f"`P {passes_made}/{pass_attempts} · P% {pass_pct}`\n"
+        f"`YC {yellow_cards} · RC {red_cards}`\n"
+        f"`Rt {rating}`"
+    )
+
+
+def _format_last_match_team_totals(
+    players: list[dict],
+    our_score: int,
+    opponent_score: int,
+) -> str:
+    assists = 0
+    shots = 0
+    passes_made = 0
+    pass_attempts = 0
+    tackles_made = 0
+    tackle_attempts = 0
+    saves = 0
+    yellow_cards = 0
+    red_cards = 0
+    rating_total = 0.0
+    rating_count = 0
+
+    for player in players:
+        assists += int(_to_number(player.get("assists")) or 0)
+        shots += int(_to_number(player.get("shots")) or 0)
+        passes_made += int(_to_number(player.get("passesmade")) or 0)
+        pass_attempts += int(_to_number(player.get("passattempts")) or 0)
+        tackles_made += int(_to_number(player.get("tacklesmade")) or 0)
+        tackle_attempts += int(_to_number(player.get("tackleattempts")) or 0)
+        saves += int(_to_number(player.get("saves")) or 0)
+        yellow_cards += int(_to_number(player.get("yellowcards")) or 0)
+        red_cards += int(_to_number(player.get("redcards")) or 0)
+
+        rating = _to_number(player.get("rating"))
+        if rating is not None:
+            rating_total += float(rating)
+            rating_count += 1
+
+    pass_pct = round((passes_made / pass_attempts) * 100) if pass_attempts else 0
+    tackle_pct = round((tackles_made / tackle_attempts) * 100) if tackle_attempts else 0
+    average_rating = rating_total / rating_count if rating_count else 0.0
+    clean_sheet = 1 if opponent_score == 0 else 0
+
+    return (
+        f"`GF {our_score} · GA {opponent_score} · CS {clean_sheet}`\n"
+        f"`A {assists} · Sh {shots} · Sv {saves}`\n"
+        f"`P {passes_made}/{pass_attempts} · P% {pass_pct}`\n"
+        f"`T {tackles_made}/{tackle_attempts} · T% {tackle_pct}`\n"
+        f"`YC {yellow_cards} · RC {red_cards}`\n"
+        f"`Rt {average_rating:.1f}`"
     )
 
 async def get_last_match_details(club_id: str | int) -> dict | None:
@@ -6644,8 +6701,15 @@ async def handle_lastmatch(interaction: discord.Interaction, club: str, from_dro
         label = MATCH_TYPE_LABELS.get(raw_type, raw_type or "Unknown")
 
         clubs = last_match.get("clubs", {}) or {}
-        club_data = clubs.get(club_id)
-        opponent_id = next((cid for cid in clubs if cid != club_id), None)
+        our_id = next(
+            (cid for cid in clubs if str(cid) == str(club_id)),
+            None,
+        )
+        club_data = clubs.get(our_id) if our_id is not None else None
+        opponent_id = next(
+            (cid for cid in clubs if str(cid) != str(club_id)),
+            None,
+        )
         opponent_data = clubs.get(opponent_id) if opponent_id else {}
 
         our_name = club_data.get("details", {}).get("name", club_data.get("name", "Unknown")) if club_data else "Unknown"
@@ -6657,8 +6721,12 @@ async def handle_lastmatch(interaction: discord.Interaction, club: str, from_dro
         result_text = "Win" if our_score > opponent_score else "Loss" if our_score < opponent_score else "Draw"
 
         embed = discord.Embed(
-            title=f"📅 Last Match: [{label}] {our_name} vs {opponent_name}",
-            description=f"{result_emoji} {result_text} ({our_score}-{opponent_score})",
+            title=f"📅 {our_name.upper()} — LAST MATCH",
+            description=(
+                f"**{label}** · vs **{escape_markdown(opponent_name)}**\n"
+                f"{result_emoji} **{result_text.upper()}** · "
+                f"**{our_score}–{opponent_score}**"
+            ),
             color=discord.Color.green() if our_score > opponent_score else discord.Color.red() if our_score < opponent_score else discord.Color.gold()
         )
 
@@ -6668,22 +6736,87 @@ async def handle_lastmatch(interaction: discord.Interaction, club: str, from_dro
         if crest_url:
             embed.set_thumbnail(url=crest_url)
 
-        # Players
-        players_data = list((last_match.get("players", {}) or {}).get(club_id, {}).values())
-        sorted_players = sorted(players_data, key=lambda p: float(p.get("rating", 0)), reverse=True)
-        for player in sorted_players:
-            name = player.get("playername", "Unknown")
-            goals = player.get("goals", 0)
-            assists = player.get("assists", 0)
-            red = player.get("redcards", 0)
-            rating = player.get("rating", "N/A")
-            tackles = player.get("tacklesmade", 0)
-            saves = player.get("saves", 0)
-            embed.add_field(
-                name=f"{name}",
-                value=(f"⚽ {goals} | 🎯 {assists} | 🟥 {red} | 🛡️ {tackles} | 🧤 {saves} | ⭐ {rating}"),
-                inline=False
+        # Position-aware player sections. Each statistic group gets its own
+        # line so the layout remains readable on narrow mobile screens.
+        players_by_club = last_match.get("players", {}) or {}
+        player_club_id = next(
+            (cid for cid in players_by_club if str(cid) == str(club_id)),
+            None,
+        )
+        club_players = (
+            players_by_club.get(player_club_id, {})
+            if player_club_id is not None
+            else {}
+        )
+        players_data = [
+            player
+            for player in club_players.values()
+            if isinstance(player, dict)
+        ]
+
+        grouped_players = {
+            "Forwards": [],
+            "Midfielders": [],
+            "Defenders": [],
+            "Goalkeepers": [],
+            "Players": [],
+        }
+        for player in players_data:
+            grouped_players[_player_position_group(player)].append(player)
+
+        section_icons = {
+            "Forwards": "⚽",
+            "Midfielders": "🎯",
+            "Defenders": "🛡️",
+            "Goalkeepers": "🧤",
+            "Players": "👤",
+        }
+
+        for group_name, group_players in grouped_players.items():
+            if not group_players:
+                continue
+
+            group_players.sort(
+                key=lambda player: float(_to_number(player.get("rating")) or 0),
+                reverse=True,
             )
+            rows = [
+                _format_last_match_player(player, group_name)
+                for player in group_players
+            ]
+
+            chunks = []
+            current_rows = []
+            for row in rows:
+                candidate_rows = [*current_rows, row]
+                if current_rows and len("\n\n".join(candidate_rows)) > 1024:
+                    chunks.append(current_rows)
+                    current_rows = []
+                current_rows.append(row)
+            if current_rows:
+                chunks.append(current_rows)
+
+            for chunk_index, chunk_rows in enumerate(chunks):
+                continuation = " — continued" if chunk_index else ""
+                embed.add_field(
+                    name=(
+                        f"{section_icons[group_name]} "
+                        f"{group_name}{continuation}"
+                    ),
+                    value="\n\n".join(chunk_rows),
+                    inline=False,
+                )
+
+        embed.add_field(
+            name="📊 Team Totals",
+            value=_format_last_match_team_totals(
+                players_data,
+                our_score,
+                opponent_score,
+            ),
+            inline=False,
+        )
+        embed.set_footer(text="EAFC — Latest recorded club match")
 
         if from_dropdown and original_message:
             await original_message.edit(content=None, embed=embed, view=None)
