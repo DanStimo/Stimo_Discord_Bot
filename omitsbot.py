@@ -1995,9 +1995,20 @@ def _format_stat_value(key: str, val):
         return f"{val:.2f}"
     return str(val)
 
-def _format_stats5_team_totals(totals: dict) -> str:
-    apps = 0
-    goals = 0
+def _format_stats5_team_totals(
+    totals: dict,
+    matches: list[dict],
+    club_id: str | int,
+) -> str:
+    club_id = str(club_id)
+    matches_played = 0
+    wins = 0
+    draws = 0
+    losses = 0
+    goals_for = 0
+    goals_against = 0
+    clean_sheets = 0
+
     assists = 0
     shots = 0
     pass_attempts = 0
@@ -2007,14 +2018,50 @@ def _format_stats5_team_totals(totals: dict) -> str:
     yc = 0
     rc = 0
     saves = 0
-    goals_conceded = 0
-    clean_sheets = 0
     rating_sum = 0.0
     rating_count = 0
 
+    # Match-level figures must come from the club score in each match.
+    # Player goals-conceded values are repeated for multiple players and
+    # cannot safely be added together.
+    for match in matches:
+        clubs = match.get("clubs") or {}
+        our_id = next(
+            (candidate_id for candidate_id in clubs if str(candidate_id) == club_id),
+            None,
+        )
+        our_club = clubs.get(our_id) if our_id is not None else None
+        opponent_id = next(
+            (
+                candidate_id
+                for candidate_id in clubs
+                if str(candidate_id) != club_id
+            ),
+            None,
+        )
+        opponent = clubs.get(opponent_id) if opponent_id else None
+
+        if not our_club or not opponent:
+            continue
+
+        our_score = int(our_club.get("goals", 0) or 0)
+        opponent_score = int(opponent.get("goals", 0) or 0)
+
+        matches_played += 1
+        goals_for += our_score
+        goals_against += opponent_score
+
+        if our_score > opponent_score:
+            wins += 1
+        elif our_score < opponent_score:
+            losses += 1
+        else:
+            draws += 1
+
+        if opponent_score == 0:
+            clean_sheets += 1
+
     for _, stats in totals.items():
-        apps += int(stats.get("appearances", 0) or 0)
-        goals += int(stats.get("goals", 0) or 0)
         assists += int(stats.get("assists", 0) or 0)
         shots += int(stats.get("shots", 0) or 0)
 
@@ -2027,24 +2074,23 @@ def _format_stats5_team_totals(totals: dict) -> str:
         yc += int(stats.get("yellowcards", 0) or 0)
         rc += int(stats.get("redcards", 0) or 0)
         saves += int(stats.get("saves", 0) or 0)
-        goals_conceded += int(stats.get("goalsconceded", 0) or 0)
-        clean_sheets += int(stats.get("cleansheetsgk", 0) or 0)
 
         player_apps = int(stats.get("appearances", 0) or 0)
         player_rating_total = float(stats.get("rating", 0) or 0)
         if player_apps > 0:
-            rating_sum += player_rating_total / player_apps
-            rating_count += 1
+            rating_sum += player_rating_total
+            rating_count += player_apps
 
     pass_pct = round((pass_completed / pass_attempts) * 100) if pass_attempts else 0
     tackle_pct = round((tackles_won / tackle_attempts) * 100) if tackle_attempts else 0
     avg_rating = round(rating_sum / rating_count, 1) if rating_count else 0.0
 
     return (
-        f"`Pl {apps} · G {goals} · A {assists} · Sh {shots}`\n"
+        f"`Pl {matches_played} · W {wins} · D {draws} · L {losses}`\n"
+        f"`GF {goals_for} · GA {goals_against} · CS {clean_sheets}`\n"
+        f"`A {assists} · Sh {shots} · Sv {saves}`\n"
         f"`P {pass_completed}/{pass_attempts} · P% {pass_pct}`\n"
         f"`T {tackles_won}/{tackle_attempts} · T% {tackle_pct}`\n"
-        f"`Sv {saves} · Con {goals_conceded} · CS {clean_sheets}`\n"
         f"`YC {yc} · RC {rc}`\n"
         f"`Rt {avg_rating:.1f}`"
     )
@@ -2162,7 +2208,7 @@ async def build_stats5_embeds(club_id: str, club_name: str | None):
     if not rows:
         return []
 
-    team_totals_row = _format_stats5_team_totals(totals)
+    team_totals_row = _format_stats5_team_totals(totals, matches, club_id)
     leaders_text = _build_stats5_leaders_text(totals)
 
     player_chunks = []
