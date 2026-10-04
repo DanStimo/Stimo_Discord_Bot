@@ -6883,12 +6883,14 @@ def _format_funstat_evidence(player: dict) -> str:
     red_cards = int(_to_number(player.get("redcards")) or 0)
     yellow_cards = int(_to_number(player.get("yellowcards")) or 0)
     player_of_match = int(_to_number(player.get("mom")) or 0)
+    potm_text = "Yes" if player_of_match else "No"
 
     lines = [f"**{name}**"]
     if minutes:
-        lines.append(f"`Min {minutes} · Rt {rating} · POTM {player_of_match}`")
+        lines.append(f"`Minutes {minutes} · Rating {rating}`")
     else:
-        lines.append(f"`Rt {rating} · POTM {player_of_match}`")
+        lines.append(f"`Rating {rating}`")
+    lines.append(f"`Player of Match: {potm_text}`")
 
     if group == "Goalkeepers":
         saves = int(_to_number(player.get("saves")) or 0)
@@ -6901,18 +6903,21 @@ def _format_funstat_evidence(player: dict) -> str:
         punch_saves = int(_to_number(player.get("punchSaves")) or 0)
         direction_saves = int(_to_number(player.get("goodDirectionSaves")) or 0)
         lines.extend([
-            f"`Sv {saves} · Con {conceded} · CS {clean_sheets}`",
-            f"`Dive {dive_saves} · Ref {reflex_saves} · Parry {parry_saves}`",
-            f"`Cross {cross_saves} · Punch {punch_saves} · Dir {direction_saves}`",
-            f"`YC {yellow_cards} · RC {red_cards}`",
+            f"`Saves {saves} · Conceded {conceded}`",
+            f"`Clean sheets {clean_sheets}`",
+            f"`Dive {dive_saves} · Reflex {reflex_saves} · Parry {parry_saves}`",
+            f"`Cross {cross_saves} · Punch {punch_saves} · Direction {direction_saves}`",
+            f"`Yellow cards {yellow_cards} · Red cards {red_cards}`",
         ])
         return "\n".join(lines)
 
-    lines.append(f"`G {goals} · A {assists} · Sh {shots}`")
-    lines.append(f"`P {passes_made}/{pass_attempts} · P% {pass_pct}`")
+    lines.append(f"`Goals {goals} · Assists {assists} · Shots {shots}`")
+    lines.append(
+        f"`Passes {passes_made}/{pass_attempts} · Success {pass_pct}%`"
+    )
     if group in ("Midfielders", "Defenders"):
         lines.append(
-            f"`T {tackles_made}/{tackle_attempts} · T% {tackle_pct}`"
+            f"`Tackles {tackles_made}/{tackle_attempts} · Success {tackle_pct}%`"
         )
 
     clean_sheets = int(
@@ -6924,8 +6929,10 @@ def _format_funstat_evidence(player: dict) -> str:
         or 0
     )
     if clean_sheets:
-        lines.append(f"`CS {clean_sheets}`")
-    lines.append(f"`YC {yellow_cards} · RC {red_cards}`")
+        lines.append(f"`Clean sheets {clean_sheets}`")
+    lines.append(
+        f"`Yellow cards {yellow_cards} · Red cards {red_cards}`"
+    )
     return "\n".join(lines)
 
 
@@ -7403,17 +7410,17 @@ def _funstat_roast_lines(
         pass_pct = round((passes_made / pass_attempts) * 100)
         if pass_pct < 70:
             categories.append([
-                f"Passing ended at **{pass_pct}%**; Royal Mail would reject that delivery rate.",
-                f"At **{pass_pct}%**, **{name}** distributed possession like free samples to the opposition.",
+                f"Pass completion ended at **{pass_pct}%**; Royal Mail would reject that delivery rate.",
+                f"With **{pass_pct}% pass completion**, **{name}** distributed possession like free samples to the opposition.",
                 f"Only **{passes_made}/{pass_attempts}** passes arrived. Even budget couriers provide better tracking.",
                 f"**{name}** completed **{passes_made}/{pass_attempts}** passes, apparently using a sat-nav set to the wrong postcode.",
-                f"A **{pass_pct}%** pass rate suggests the controller’s X button was working on commission for the other team.",
+                f"A **{pass_pct}% pass completion rate** suggests the controller’s X button was working on commission for the other team.",
                 f"With **{passes_made}/{pass_attempts}** completed, every pass became a small community raffle.",
                 f"The passing map probably resembles dropped spaghetti: plenty of lines, very little direction.",
-                f"At **{pass_pct}%** passing, teammates required binoculars and a collection point.",
+                f"At **{pass_pct}% pass completion**, teammates required binoculars and a collection point.",
                 f"**{name}** treated accurate passing as optional downloadable content.",
                 f"The ball left **{name}** more reliably than it reached a teammate.",
-                f"With **{pass_pct}%** accuracy, possession came with a generous returns policy.",
+                f"With **{pass_pct}% pass completion**, possession came with a generous returns policy.",
                 f"Those passes had the destination accuracy of luggage during a cancelled flight.",
             ])
 
@@ -7421,15 +7428,15 @@ def _funstat_roast_lines(
         tackle_pct = round((tackles_made / tackle_attempts) * 100)
         if tackle_pct < 60:
             categories.append([
-                f"A **{tackle_pct}%** tackle rate: attackers received less resistance than an automatic door.",
+                f"A **{tackle_pct}% tackle success rate**: attackers received less resistance than an automatic door.",
                 f"Only **{tackles_made}/{tackle_attempts}** tackles landed; the opponents were shown around like estate viewers.",
-                f"**{name}** tackled at **{tackle_pct}%**, roughly the defensive strength of wet cardboard.",
+                f"**{name}** recorded **{tackle_pct}% tackle success**, roughly the defensive strength of wet cardboard.",
                 f"The tackling approach was mostly a polite suggestion to stop.",
                 f"With **{tackles_made}/{tackle_attempts}** won, **{name}** defended like a password hint.",
                 f"The opposition passed **{name}** with the confidence of commuters through an open ticket barrier.",
                 f"A training cone would not win the ball either, but at least it keeps the correct shape.",
                 f"**{name}** attempted **{tackle_attempts}** tackles and completed **{tackles_made}** — excellent customer service for attackers.",
-                f"That **{tackle_pct}%** success rate turned defending into a non-contact activity.",
+                f"That **{tackle_pct}% tackle success rate** turned defending into a non-contact activity.",
                 f"The tackles had all the stopping power of a strongly worded email.",
                 f"Attackers saw **{name}** and selected ‘continue without interruption’.",
                 f"The defensive plan appeared to be asking the opponent where they were going next.",
@@ -7480,12 +7487,12 @@ def _funstat_roast_lines(
         save_pct = round((saves / shots_faced) * 100) if shots_faced else 100
         if conceded >= 3 or (shots_faced >= 3 and save_pct < 50):
             categories.append([
-                f"A **{save_pct}%** save rate gave the net more touches than **{name}**.",
+                f"A **{save_pct}% save success rate** gave the net more touches than **{name}**.",
                 f"**{conceded}** conceded; the goal operated with the opening hours of a 24-hour supermarket.",
                 f"Only **{saves}/{shots_faced}** shots were stopped. The gloves may still be eligible for a refund.",
                 "The goalkeeper’s union has classified that as ‘mostly ball retrieval’.",
                 "The net enjoyed a busier shift than the person standing in front of it.",
-                f"At **{save_pct}%**, the save rate had less protection than a free antivirus trial.",
+                f"At **{save_pct}% save success**, the goal had less protection than a free antivirus trial.",
                 "Opposition shots arrived like parcels and were accepted without a signature.",
                 "The goal required a goalkeeper but received an enthusiastic tour guide.",
                 "The clean-sheet bonus left the stadium before half-time.",
@@ -7574,12 +7581,12 @@ def _funstat_roast_lines(
             if best_pct >= selected_pct + 15:
                 passer_name = escape_markdown(_player_display_name(best_player))
                 categories.append([
-                    f"**{passer_name}** passed at **{best_pct}%**; **{name}** answered with **{selected_pct}%** and a tracking number.",
-                    f"Passing comparison: **{passer_name} {best_pct}%**, **{name} {selected_pct}%**. One delivered; one left a card through the door.",
-                    f"**{passer_name}** found teammates at **{best_pct}%**. **{name}** found them at **{selected_pct}%**, apparently without directions.",
-                    f"The same ball produced **{best_pct}%** for **{passer_name}** and **{selected_pct}%** for **{name}**. Equipment excuse denied.",
+                    f"**{passer_name}** completed **{best_pct}% of their passes**; **{name}** answered with **{selected_pct}% pass completion** and a tracking number.",
+                    f"Pass completion: **{passer_name} {best_pct}%**, **{name} {selected_pct}%**. One delivered; one left a card through the door.",
+                    f"**{passer_name}** found teammates with **{best_pct}% pass completion**. **{name}** managed **{selected_pct}% pass completion**, apparently without directions.",
+                    f"The same ball produced **{best_pct}% pass completion** for **{passer_name}** and **{selected_pct}% pass completion** for **{name}**. Equipment excuse denied.",
                     f"**{passer_name}** used passing lanes; **{name}** appeared to use postcode lottery results.",
-                    f"At **{best_pct}%**, **{passer_name}** ran a delivery service. At **{selected_pct}%**, **{name}** ran lost property.",
+                    f"At **{best_pct}% pass completion**, **{passer_name}** ran a delivery service. At **{selected_pct}% pass completion**, **{name}** ran lost property.",
                 ])
 
         if tackle_attempts >= 2 and tackling_teammates:
@@ -7588,12 +7595,12 @@ def _funstat_roast_lines(
             if best_pct >= selected_pct + 20:
                 tackler_name = escape_markdown(_player_display_name(best_player))
                 categories.append([
-                    f"**{tackler_name}** tackled at **{best_pct}%**; **{name}** managed **{selected_pct}%** and several polite introductions.",
-                    f"Defensive comparison: **{tackler_name} {best_pct}%**, **{name} {selected_pct}%**. One stopped attacks; one observed them.",
-                    f"**{tackler_name}** won the ball at **{best_pct}%**. **{name}** offered opponents a **{100 - selected_pct}%** success scheme.",
+                    f"**{tackler_name}** achieved **{best_pct}% tackle success**; **{name}** managed **{selected_pct}% tackle success** and several polite introductions.",
+                    f"Tackle success: **{tackler_name} {best_pct}%**, **{name} {selected_pct}%**. One stopped attacks; one observed them.",
+                    f"**{tackler_name}** achieved **{best_pct}% tackle success**. **{name}** offered opponents a **{100 - selected_pct}%** escape rate.",
                     f"The tackle gap between **{tackler_name}** and **{name}** could fit another midfielder.",
                     f"**{tackler_name}** defended the area; **{name}** provided directions through it.",
-                    f"At **{best_pct}%**, **{tackler_name}** was a barrier. At **{selected_pct}%**, **{name}** was a suggestion.",
+                    f"At **{best_pct}% tackle success**, **{tackler_name}** was a barrier. At **{selected_pct}% tackle success**, **{name}** was a suggestion.",
                 ])
 
     if our_score > opponent_score:
