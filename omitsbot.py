@@ -723,9 +723,280 @@ async def log_stats_embed_for_request(
     header = f"📥/stats by {author.name} in {origin_channel.mention}:"
     await log_ch.send(content=header, embed=embed)
 
+# -------------------------
+# Honeypot anti-spam (configured explicitly with /honeypot setup)
+# -------------------------
+HONEYPOT_CHANNEL_NAME = "‧₊˚✧do-not-post✧˚₊‧"
+HONEYPOT_FILE = os.getenv("HONEYPOT_FILE", "honeypot_state.json")
+_honeypot_state = {"guilds": {}}
+_honeypot_loaded = False
+_honeypot_lock = asyncio.Lock()
+_honeypot_recent = {}  # Short-lived deduplication for messages already in flight.
+
+
+async def honeypot_load():
+    global _honeypot_state, _honeypot_loaded
+    if _honeypot_loaded:
+        return
+    try:
+        if DB_POOL:
+            data = await db_load_json(HONEYPOT_FILE, {"guilds": {}})
+        elif os.path.exists(HONEYPOT_FILE):
+            with open(HONEYPOT_FILE, encoding="utf-8") as file:
+                data = json.load(file)
+        else:
+            data = {"guilds": {}}
+        if not isinstance(data, dict) or not isinstance(data.get("guilds"), dict):
+            raise ValueError("Invalid honeypot state; restore the state file before setup")
+        _honeypot_state = data
+        _honeypot_loaded = True
+    except Exception:
+        logging.exception("[HONEYPOT] Could not load configuration")
+        raise
+
+
+async def honeypot_save():
+    if DB_POOL:
+        await db_save_json(HONEYPOT_FILE, _honeypot_state)
+    else:
+        temporary = HONEYPOT_FILE + ".tmp"
+        with open(temporary, "w", encoding="utf-8") as file:
+            json.dump(_honeypot_state, file, ensure_ascii=False, indent=2)
+        os.replace(temporary, HONEYPOT_FILE)
+
+
+def honeypot_warning(config):
+    embed = discord.Embed(
+        title="DO NOT SEND MESSAGES IN THIS CHANNEL" if config.get("enabled") else "HONEYPOT DISABLED",
+        description=(
+            "This channel is used to catch spam bots. Any messages sent here "
+            "will result in **a softban**, and everything you posted goes with you."
+        ) if config.get("enabled") else "Automatic moderation is currently disabled in this channel.",
+        colour=0x202225,
+    )
+    embed.set_thumbnail(url="https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/26d4.png")
+    embed.set_footer(text="Softban = removal without a permanent ban. Messages from the last 24 hours are deleted.")
+    view = discord.ui.View(timeout=None)
+    view.add_item(discord.ui.Button(
+        label=f"Bans: {config.get('bans', 0)}",
+        style=discord.ButtonStyle.secondary,
+        disabled=True,
+        custom_id="honeypot_ban_counter",
+    ))
+    return embed, view
+
+
+async def honeypot_refresh(guild, config):
+    channel = guild.get_channel(config.get("channel_id", 0))
+    if not isinstance(channel, discord.TextChannel):
+        raise RuntimeError("Honeypot channel missing; run /honeypot setup again")
+    embed, view = honeypot_warning(config)
+    try:
+        message = await channel.fetch_message(config.get("message_id", 0))
+        if message.author.id != client.user.id:
+            raise RuntimeError("Saved warning does not belong to this bot")
+        await message.edit(embed=embed, view=view)
+    except discord.NotFound:
+        message = await channel.send(embed=embed, view=view)
+        config["message_id"] = message.id
+        await honeypot_save()
+
+
+async def honeypot_log(guild, config, text):
+    logging.info("[HONEYPOT] guild=%s %s", guild.id, text)
+    channel = guild.get_channel(config.get("log_channel_id", 0))
+    if channel and channel.id != config.get("channel_id"):
+        try:
+            await channel.send(text, allowed_mentions=discord.AllowedMentions.none())
+        except discord.HTTPException:
+            logging.exception("[HONEYPOT] Could not send moderation log")
+
+
+async def honeypot_handle(message):
+    if not _honeypot_loaded:
+        return False
+    config = _honeypot_state["guilds"].get(str(message.guild.id))
+    # Match the configured ID, never merely a channel name.
+    channel_id = message.channel.parent_id if isinstance(message.channel, discord.Thread) else message.channel.id
+    if not config or not config.get("enabled") or channel_id != config.get("channel_id"):
+        return False
+    member = message.author
+    if not isinstance(member, discord.Member) or member.bot or message.webhook_id:
+        return True
+    permissions = member.guild_permissions
+    if (member.id == message.guild.owner_id or permissions.administrator
+            or permissions.manage_guild or permissions.ban_members
+            or permissions.kick_members or permissions.moderate_members):
+        return True
+    guild = message.guild
+    me = guild.me
+    if not me or not me.guild_permissions.ban_members or member.top_role >= me.top_role:
+        await honeypot_log(guild, config, f"⚠️ Cannot softban {member} ({member.id}): check Ban Members permission and role order.")
+        return True
+    async with _honeypot_lock:
+        if not config.get("enabled"):
+            return True
+        key = (guild.id, member.id)
+        now = asyncio.get_running_loop().time()
+        for old_key, when in list(_honeypot_recent.items()):
+            if now - when > 30:
+                del _honeypot_recent[old_key]
+        if key in _honeypot_recent:
+            return True
+        # Persist the intended unban before taking action, so a restart can recover.
+        pending = config.setdefault("pending_unbans", [])
+        if member.id not in pending:
+            pending.append(member.id)
+        try:
+            await honeypot_save()
+        except Exception:
+            pending.remove(member.id)
+            await honeypot_log(guild, config, "⚠️ Softban skipped: could not save recovery state.")
+            return True
+        reason = f"Honeypot: posted in {HONEYPOT_CHANNEL_NAME} ({message.id})"
+        try:
+            await guild.ban(member, delete_message_days=1, reason=reason)
+        except discord.HTTPException as exc:
+            # Keep recovery record: an ambiguous network failure might have banned them.
+            await honeypot_log(guild, config, f"⚠️ Ban request failed for {member} ({member.id}): {exc}. Recovery will check on restart.")
+            return True
+        _honeypot_recent[key] = now
+        config["bans"] = config.get("bans", 0) + 1
+        outcome = "✅ Softbanned"
+        try:
+            await guild.unban(discord.Object(id=member.id), reason="Honeypot softban: allow rejoining")
+            pending.remove(member.id)
+        except discord.HTTPException as exc:
+            outcome = f"⚠️ Banned, but unban failed ({exc}); manually unban or restart the bot to retry:"
+        try:
+            await honeypot_save()
+            await honeypot_refresh(guild, config)
+        except Exception:
+            logging.exception("[HONEYPOT] Could not save/update ban counter")
+        await honeypot_log(guild, config, f"{outcome} {member} ({member.id}). Deleted messages from the last 24 hours. Total bans: {config['bans']}.")
+    return True
+
+
+async def honeypot_startup():
+    async with _honeypot_lock:
+        await honeypot_load()
+        for guild_id, config in _honeypot_state["guilds"].items():
+            guild = client.get_guild(int(guild_id))
+            if not guild:
+                continue
+            # Only undo our own recorded honeypot bans, never unrelated bans.
+            for user_id in list(config.get("pending_unbans", [])):
+                try:
+                    entry = await guild.fetch_ban(discord.Object(id=user_id))
+                    if (entry.reason or "").startswith(f"Honeypot: posted in {HONEYPOT_CHANNEL_NAME}"):
+                        await guild.unban(entry.user, reason="Recover interrupted Honeypot softban")
+                        await honeypot_log(guild, config, f"✅ Recovered pending softban: {user_id} is now unbanned.")
+                    config["pending_unbans"].remove(user_id)
+                except discord.NotFound:
+                    config["pending_unbans"].remove(user_id)
+                except discord.HTTPException:
+                    logging.exception("[HONEYPOT] Could not recover pending unban %s", user_id)
+            await honeypot_save()
+            if config.get("enabled"):
+                try:
+                    await honeypot_refresh(guild, config)
+                except Exception:
+                    logging.exception("[HONEYPOT] Warning refresh failed for %s", guild_id)
+
+
+honeypot_commands = app_commands.Group(name="honeypot", description="Set up and manage the anti-spam trap channel")
+
+
+@honeypot_commands.command(name="setup", description="Create the do-not-post channel and enable automatic softbans")
+@app_commands.guild_only()
+@app_commands.default_permissions(administrator=True)
+@app_commands.checks.has_permissions(administrator=True)
+async def honeypot_setup(interaction: discord.Interaction, category: discord.CategoryChannel | None = None, log_channel: discord.TextChannel | None = None):
+    await interaction.response.defer(ephemeral=True)
+    guild = interaction.guild
+    me = guild.me
+    required = ("manage_channels", "ban_members", "view_channel", "send_messages", "embed_links", "read_message_history")
+    missing = [name for name in required if not getattr(me.guild_permissions, name)]
+    if missing:
+        await interaction.followup.send("Bot permissions missing: " + ", ".join(missing), ephemeral=True)
+        return
+    async with _honeypot_lock:
+        await honeypot_load()
+        old = _honeypot_state["guilds"].get(str(guild.id), {})
+        channel = guild.get_channel(old.get("channel_id", 0))
+        if not isinstance(channel, discord.TextChannel):
+            # Never adopt an existing channel by name: it could contain legitimate conversation.
+            channel = await guild.create_text_channel(
+                HONEYPOT_CHANNEL_NAME, category=category,
+                topic="DO NOT POST — posting here causes an automatic softban and deletes your last 24 hours of messages.",
+                overwrites={
+                    guild.default_role: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True, create_public_threads=False, create_private_threads=False),
+                    me: discord.PermissionOverwrite(view_channel=True, send_messages=True, embed_links=True, read_message_history=True, manage_messages=True),
+                },
+                reason="Administrator requested Honeypot setup",
+            )
+        elif category is not None:
+            await channel.edit(category=category, sync_permissions=False)
+        selected_log = log_channel or guild.get_channel(old.get("log_channel_id", 0)) or guild.get_channel(LOG_CHANNEL_ID)
+        if selected_log and selected_log.id == channel.id:
+            await interaction.followup.send("Choose a different log channel from the honeypot channel.", ephemeral=True)
+            return
+        config = dict(old)
+        config.update(channel_id=channel.id, enabled=True, bans=old.get("bans", 0), log_channel_id=selected_log.id if selected_log else 0)
+        _honeypot_state["guilds"][str(guild.id)] = config
+        try:
+            await honeypot_refresh(guild, config)
+            await honeypot_save()
+        except Exception:
+            _honeypot_state["guilds"][str(guild.id)] = old
+            await honeypot_save()
+            raise
+    await interaction.followup.send(
+        f"✅ Honeypot enabled in {channel.mention}. Posting there softbans ordinary members and deletes their last 24 hours of messages. "
+        "Owners, moderators and bots are exempt. Keep the bot's role above member roles. "
+        + (f"Logs: {selected_log.mention}." if selected_log else "No Discord log channel selected; actions go to the bot logs."),
+        ephemeral=True,
+    )
+
+
+@honeypot_commands.command(name="disable", description="Stop automatic moderation in the honeypot channel")
+@app_commands.guild_only()
+@app_commands.default_permissions(administrator=True)
+@app_commands.checks.has_permissions(administrator=True)
+async def honeypot_disable(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    async with _honeypot_lock:
+        await honeypot_load()
+        config = _honeypot_state["guilds"].get(str(interaction.guild_id))
+        if config:
+            config["enabled"] = False
+            await honeypot_save()
+            try:
+                await honeypot_refresh(interaction.guild, config)
+            except Exception:
+                logging.exception("[HONEYPOT] Could not update disabled warning")
+    await interaction.followup.send("Honeypot disabled. The channel and ban counter are preserved. Run /honeypot setup to enable it again.", ephemeral=True)
+
+
+@honeypot_commands.error
+async def honeypot_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    logging.error("[HONEYPOT] Command failed: %s", error)
+    text = "Honeypot command failed. You need Administrator permission; also check the bot permissions and bot logs."
+    if interaction.response.is_done():
+        await interaction.followup.send(text, ephemeral=True)
+    else:
+        await interaction.response.send_message(text, ephemeral=True)
+
+
+tree.add_command(honeypot_commands)
+
+
 @client.event
 async def on_message(message: discord.Message):
     if message.author.bot or not message.guild:
+        return
+
+    if await honeypot_handle(message):
         return
 
     if message.channel.id == EA_TOP100_CHANNEL_ID:
@@ -10649,6 +10920,11 @@ async def on_ready():
     global events_store, templates_store, lineups_store
 
     await init_db()
+
+    try:
+        await honeypot_startup()
+    except Exception:
+        logging.exception("[HONEYPOT] Startup failed; check state and permissions")
 
     if DB_POOL:
         try:
