@@ -375,12 +375,16 @@ THEME_AUTOMATION_STATE_FILE = os.getenv(
 )
 GOD_BOT_ROLE_ID = int(os.getenv("GOD_BOT_ROLE_ID", "0") or "0")
 GOD_BOT_ROLE_NAME = os.getenv("GOD_BOT_ROLE_NAME", "God Bot").strip()
+# For webhook-authored linked messages, define one secret URL per message on
+# the VPS, e.g. THEME_WEBHOOK_URL_1551189232633253913=<webhook URL>.
+# Keep these URLs out of source control: each URL contains its webhook token.
 THEME_LINKED_MESSAGES = (
     (1551181830261313536, 1551189232633253913),
     (1553730638123630633, 1553738848054546534),
     (1551149919434317966, 1551192094301749289),
     (1553322041124585573, 1553349278544699443),
 )
+THEME_AUTOMATION_REVISION = 3
 
 
 def easter_sunday_for_year(year: int) -> date:
@@ -526,7 +530,7 @@ async def update_linked_theme_messages(
     theme: dict[str, str],
     icon_url: str,
 ) -> bool:
-    """Update the selected bot-authored embeds without changing their text."""
+    """Update the selected embeds, using their original webhook when needed."""
     all_ok = True
     for channel_id, message_id in THEME_LINKED_MESSAGES:
         try:
@@ -535,16 +539,36 @@ async def update_linked_theme_messages(
                 channel = await client.fetch_channel(channel_id)
             message = await channel.fetch_message(message_id)
 
-            if not client.user or message.author.id != client.user.id:
-                print(
-                    f"[THEME] Skipping linked message {message_id}: "
-                    "it was not sent by this bot."
-                )
+            if not message.embeds:
+                print(f"[THEME] Linked message {message_id} has no embeds to update.")
                 all_ok = False
                 continue
 
-            if not message.embeds:
-                print(f"[THEME] Linked message {message_id} has no embeds to update.")
+            webhook_id = getattr(message, "webhook_id", None)
+            webhook = None
+            if webhook_id is not None:
+                env_name = f"THEME_WEBHOOK_URL_{message_id}"
+                webhook_url = os.getenv(env_name, "").strip()
+                if not webhook_url:
+                    print(
+                        f"[THEME] Linked message {message_id} was sent by webhook "
+                        f"{webhook_id}; set {env_name} on the VPS to enable edits."
+                    )
+                    all_ok = False
+                    continue
+                webhook = discord.Webhook.from_url(webhook_url, client=client)
+                if webhook.id != webhook_id:
+                    print(
+                        f"[THEME] {env_name} points to webhook {webhook.id}, "
+                        f"but message {message_id} belongs to webhook {webhook_id}."
+                    )
+                    all_ok = False
+                    continue
+            elif not client.user or message.author.id != client.user.id:
+                print(
+                    f"[THEME] Linked message {message_id} is not authored by this bot "
+                    "and has no webhook ID; this bot cannot edit it."
+                )
                 all_ok = False
                 continue
 
@@ -555,7 +579,10 @@ async def update_linked_theme_messages(
                 embed.set_thumbnail(url=icon_url)
                 updated_embeds.append(embed)
 
-            await message.edit(embeds=updated_embeds)
+            if webhook is not None:
+                await webhook.edit_message(message_id, embeds=updated_embeds)
+            else:
+                await message.edit(embeds=updated_embeds)
             print(f"[THEME] Updated linked message {message_id}.")
         except Exception as error:
             all_ok = False
@@ -574,6 +601,12 @@ async def apply_active_theme_if_needed() -> None:
     theme_name = theme["name"]
     state = load_theme_automation_state()
     completed = state.setdefault("completed", {})
+    if state.get("automation_revision") != THEME_AUTOMATION_REVISION:
+        # Retry these two operations after deploying webhook-aware editing and
+        # improved role diagnostics, even if an older run recorded completion.
+        completed.pop("god_bot_role", None)
+        completed.pop("linked_messages", None)
+        state["automation_revision"] = THEME_AUTOMATION_REVISION
     state["desired_theme"] = theme_name
     save_theme_automation_state(state)
 
@@ -584,7 +617,7 @@ async def apply_active_theme_if_needed() -> None:
 
     pending_image_changes = any(
         completed.get(key) != theme_name
-        for key in ("server_icon", "bot_avatar")
+        for key in ("server_icon", "bot_avatar", "bot_banner")
     )
     icon_bytes = None
     if pending_image_changes:
@@ -620,28 +653,77 @@ async def apply_active_theme_if_needed() -> None:
         except Exception as error:
             print(f"[THEME] Could not change the bot avatar: {error}")
 
-    if completed.get("god_bot_role") != theme_name:
-        role = (
-            guild.get_role(GOD_BOT_ROLE_ID)
-            if GOD_BOT_ROLE_ID
-            else next(
-                (r for r in guild.roles if r.name.casefold() == GOD_BOT_ROLE_NAME.casefold()),
-                None,
+    if completed.get("bot_banner") != theme_name:
+        try:
+            if not client.user:
+                raise RuntimeError("Client user is not ready")
+            await client.user.edit(banner=icon_bytes)
+            completed["bot_banner"] = theme_name
+            save_theme_automation_state(state)
+            print(f"[THEME] Bot banner changed to match the {theme_name} avatar.")
+        except TypeError as error:
+            print(
+                "[THEME] Could not change the bot banner: this discord.py version "
+                "does not support ClientUser.edit(banner=...). Upgrade to discord.py "
+                f"2.4 or newer. Details: {error}"
             )
+        except Exception as error:
+            print(f"[THEME] Could not change the bot banner: {error}")
+
+    role = (
+        guild.get_role(GOD_BOT_ROLE_ID)
+        if GOD_BOT_ROLE_ID
+        else next(
+            (r for r in guild.roles if r.name.casefold() == GOD_BOT_ROLE_NAME.casefold()),
+            None,
         )
-        if role is None:
-            print(f"[THEME] Could not find the '{GOD_BOT_ROLE_NAME}' role.")
+    )
+    desired_role_colour = _color_from_hex(theme["colour"])
+    if role is None:
+        print(
+            f"[THEME] Could not find the '{GOD_BOT_ROLE_NAME}' role"
+            + (f" (ID {GOD_BOT_ROLE_ID})." if GOD_BOT_ROLE_ID else ".")
+        )
+    elif (
+        completed.get("god_bot_role") != theme_name
+        or role.colour.value != desired_role_colour.value
+    ):
+        bot_member = guild.me
+        if bot_member is None:
+            print("[THEME] Cannot change God Bot role colour: bot member is unavailable.")
+        elif not bot_member.guild_permissions.manage_roles:
+            print(
+                f"[THEME] Cannot change role '{role.name}' (ID {role.id}): "
+                "the bot lacks Manage Roles permission."
+            )
+        elif role >= bot_member.top_role:
+            print(
+                f"[THEME] Cannot change role '{role.name}' (ID {role.id}): "
+                f"it is at or above the bot's highest role '{bot_member.top_role.name}'. "
+                "Move the bot's role above God Bot in Server Settings > Roles."
+            )
         else:
             try:
                 await role.edit(
-                    colour=_color_from_hex(theme["colour"]),
+                    colour=desired_role_colour,
                     reason=f"Automatic {theme_name} seasonal theme",
                 )
                 completed["god_bot_role"] = theme_name
                 save_theme_automation_state(state)
-                print(f"[THEME] God Bot role colour changed to {theme['colour']}.")
+                print(
+                    f"[THEME] God Bot role '{role.name}' (ID {role.id}) "
+                    f"colour changed to {theme['colour']}."
+                )
+            except discord.Forbidden as error:
+                print(
+                    f"[THEME] Discord denied editing role '{role.name}' (ID {role.id}); "
+                    f"check Manage Roles and role hierarchy. Details: {error}"
+                )
             except Exception as error:
-                print(f"[THEME] Could not change the God Bot role colour: {error}")
+                print(
+                    f"[THEME] Could not change role '{role.name}' (ID {role.id}) "
+                    f"colour: {type(error).__name__}: {error}"
+                )
 
     if completed.get("linked_messages") != theme_name:
         if await update_linked_theme_messages(guild, theme, icon_url):
