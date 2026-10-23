@@ -384,7 +384,7 @@ THEME_LINKED_MESSAGES = (
     (1551149919434317966, 1551192094301749289),
     (1553322041124585573, 1553349278544699443),
 )
-THEME_AUTOMATION_REVISION = 3
+THEME_AUTOMATION_REVISION = 4
 
 
 def easter_sunday_for_year(year: int) -> date:
@@ -529,7 +529,7 @@ async def refresh_welcome_messages(
             return 0, False
 
     icon_url = get_welcome_icon_url(guild, theme["name"])
-    footer_icon = client.user.display_avatar.url if client.user else None
+    footer_icon = get_welcome_icon_url(guild, theme["name"])
     updated = 0
     all_ok = True
 
@@ -612,6 +612,7 @@ async def update_linked_theme_messages(
                 embed = original_embed.copy()
                 embed.colour = _color_from_hex(theme["colour"])
                 embed.set_thumbnail(url=icon_url)
+                embed.set_footer(text=embed.footer.text, icon_url=icon_url)
                 updated_embeds.append(embed)
 
             if webhook is not None:
@@ -708,6 +709,7 @@ async def copy_theme_message(
             embed.colour = _color_from_hex(theme["colour"])
             if icon_url:
                 embed.set_thumbnail(url=icon_url)
+                embed.set_footer(text=embed.footer.text, icon_url=icon_url)
             themed_embeds.append(embed)
 
         replacement = await channel.send(
@@ -748,22 +750,23 @@ async def copy_theme_message(
         )
 
 
-async def apply_active_theme_if_needed() -> None:
+async def apply_active_theme_if_needed(force: bool = False) -> bool:
     """Apply the current website theme to the server, bot, role and embeds."""
     guild = client.get_guild(THEME_GUILD_ID)
     if guild is None:
         print(f"[THEME] Guild {THEME_GUILD_ID} is not in the bot cache yet.")
-        return
+        return False
 
     theme = get_welcome_theme()
     theme_name = theme["name"]
     state = load_theme_automation_state()
     completed = state.setdefault("completed", {})
     if state.get("automation_revision") != THEME_AUTOMATION_REVISION:
-        # Retry these two operations after deploying webhook-aware editing and
-        # improved role diagnostics, even if an older run recorded completion.
+        # Retry theme-managed role and message styling after deployment, even if
+        # an older run recorded completion before the new footer behaviour.
         completed.pop("god_bot_role", None)
         completed.pop("linked_messages", None)
+        completed.pop("welcome_messages", None)
         state["automation_revision"] = THEME_AUTOMATION_REVISION
     state["desired_theme"] = theme_name
     save_theme_automation_state(state)
@@ -771,9 +774,9 @@ async def apply_active_theme_if_needed() -> None:
     icon_url = get_welcome_icon_url(guild, theme_name)
     if not icon_url:
         print("[THEME] No public icon URL is configured; theme sync skipped.")
-        return
+        return False
 
-    pending_image_changes = any(
+    pending_image_changes = force or any(
         completed.get(key) != theme_name
         for key in ("server_icon", "bot_avatar", "bot_banner")
     )
@@ -786,9 +789,9 @@ async def apply_active_theme_if_needed() -> None:
                 icon_bytes = prepare_discord_icon_bytes(response.content)
         except Exception as error:
             print(f"[THEME] Could not download {theme_name} icon: {error}")
-            return
+            return False
 
-    if completed.get("server_icon") != theme_name:
+    if force or completed.get("server_icon") != theme_name:
         try:
             await guild.edit(
                 icon=icon_bytes,
@@ -800,7 +803,7 @@ async def apply_active_theme_if_needed() -> None:
         except Exception as error:
             print(f"[THEME] Could not change the server icon: {error}")
 
-    if completed.get("bot_avatar") != theme_name:
+    if force or completed.get("bot_avatar") != theme_name:
         try:
             if not client.user:
                 raise RuntimeError("Client user is not ready")
@@ -811,7 +814,7 @@ async def apply_active_theme_if_needed() -> None:
         except Exception as error:
             print(f"[THEME] Could not change the bot avatar: {error}")
 
-    if completed.get("bot_banner") != theme_name:
+    if force or completed.get("bot_banner") != theme_name:
         try:
             if not client.user:
                 raise RuntimeError("Client user is not ready")
@@ -843,7 +846,8 @@ async def apply_active_theme_if_needed() -> None:
             + (f" (ID {GOD_BOT_ROLE_ID})." if GOD_BOT_ROLE_ID else ".")
         )
     elif (
-        completed.get("god_bot_role") != theme_name
+        force
+        or completed.get("god_bot_role") != theme_name
         or role.colour.value != desired_role_colour.value
     ):
         bot_member = guild.me
@@ -883,17 +887,64 @@ async def apply_active_theme_if_needed() -> None:
                     f"colour: {type(error).__name__}: {error}"
                 )
 
-    if completed.get("linked_messages") != theme_name:
+    if force or completed.get("linked_messages") != theme_name:
         if await update_linked_theme_messages(guild, theme, icon_url):
             completed["linked_messages"] = theme_name
             save_theme_automation_state(state)
 
-    if completed.get("welcome_messages") != theme_name:
+    if force or completed.get("welcome_messages") != theme_name:
         updated, all_ok = await refresh_welcome_messages(guild, theme)
         print(f"[THEME] Refreshed {updated} welcome messages for {theme_name}.")
         if all_ok:
             completed["welcome_messages"] = theme_name
             save_theme_automation_state(state)
+
+    return True
+
+
+@tree.command(
+    name="refreshtheme",
+    description="Force-refresh all seasonal styling using the currently active theme.",
+)
+@app_commands.default_permissions(administrator=True)
+async def refresh_current_theme(interaction: discord.Interaction) -> None:
+    if not interaction.guild or interaction.guild_id != THEME_GUILD_ID:
+        await interaction.response.send_message(
+            "This command can only be used in the PASSOPHONICS server.",
+            ephemeral=True,
+        )
+        return
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message(
+            "You must be an administrator to refresh the server theme.",
+            ephemeral=True,
+        )
+        return
+
+    await interaction.response.defer(ephemeral=True)
+    theme = get_welcome_theme()
+    try:
+        refreshed = await apply_active_theme_if_needed(force=True)
+    except Exception as error:
+        logging.exception("[THEME] Manual theme refresh failed")
+        await interaction.followup.send(
+            f"❌ Theme refresh failed: {type(error).__name__}: {error}",
+            ephemeral=True,
+        )
+        return
+
+    if not refreshed:
+        await interaction.followup.send(
+            "❌ Theme refresh could not start. Check the bot logs for details.",
+            ephemeral=True,
+        )
+        return
+
+    await interaction.followup.send(
+        f"✅ Forced a refresh using the current **{theme['name']}** theme. "
+        "Check the bot logs for any individual Discord permission or webhook errors.",
+        ephemeral=True,
+    )
 
 
 @tasks.loop(time=datetime_time(hour=0, minute=5, tzinfo=WELCOME_THEME_TIMEZONE))
