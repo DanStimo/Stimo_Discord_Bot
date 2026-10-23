@@ -899,6 +899,23 @@ async def apply_active_theme_if_needed(force: bool = False) -> bool:
             completed["welcome_messages"] = theme_name
             save_theme_automation_state(state)
 
+    # Rebuild the persistent Top 100 embeds now so their trim colour changes
+    # with the seasonal styling instead of waiting for the regular refresh.
+    try:
+        top100_result = await refresh_ea_top100(
+            reason=f"theme refresh: {theme_name}",
+        )
+        print(
+            f"[THEME] Refreshed Top 100 embeds for {theme_name} "
+            f"({top100_result['created']} created, "
+            f"{top100_result['edited']} edited)."
+        )
+    except Exception as error:
+        print(
+            f"[THEME] Could not refresh Top 100 embeds for {theme_name}: "
+            f"{type(error).__name__}: {error}"
+        )
+
     return True
 
 
@@ -3653,6 +3670,11 @@ def _ea_top100_medal(rank: int) -> str:
     }.get(rank, "🏆")
 
 
+def _ea_top100_embed_colour() -> discord.Color:
+    """Return the embed trim colour for the currently active server theme."""
+    return _color_from_hex(get_welcome_theme()["colour"])
+
+
 def build_ea_top100_embeds(
     clubs: list[dict],
     updated_at: datetime,
@@ -3681,7 +3703,7 @@ def build_ea_top100_embeds(
                 f"EA FC TOP 100 — RANKS "
                 f"{first_rank}–{last_rank}"
             ),
-            color=0x18AFE6,
+            color=_ea_top100_embed_colour(),
             timestamp=updated_at,
         )
 
@@ -3810,7 +3832,7 @@ def build_ea_top100_search_embed(club: dict) -> discord.Embed:
             f"{_ea_top100_last_played_line(club)}\n"
             f"🆔 **Club ID** `{club_id}`"
         ),
-        color=0x18AFE6,
+        color=_ea_top100_embed_colour(),
         timestamp=datetime.now(timezone.utc),
     )
 
@@ -8756,7 +8778,7 @@ class Top100View(discord.ui.View):
         embed = discord.Embed(
             title=title,
             description=f"{subtitle}{body}",
-            color=discord.Color.gold()
+            color=_ea_top100_embed_colour(),
         )
         embed.set_footer(text="EA Pro Clubs All-Time Leaderboard")
         return embed
@@ -8818,7 +8840,7 @@ class Top100View(discord.ui.View):
         embed = discord.Embed(
             title=title,
             description=f"{subtitle}{body}",
-            color=discord.Color.gold()
+            color=_ea_top100_embed_colour(),
         )
         embed.set_footer(text="EA Pro Clubs All-Time Leaderboard")
         return embed
