@@ -7,15 +7,16 @@ import os
 import random
 import asyncio
 from dotenv import load_dotenv
-from datetime import date, datetime, timezone, timedelta
+from datetime import date, datetime, time as datetime_time, timezone, timedelta
 from zoneinfo import ZoneInfo
+from discord.ext import tasks
 import re
 import asyncpg
 import logging
 from discord.utils import escape_markdown
 import math
 from io import BytesIO
-from PIL import Image
+from PIL import Image, ImageOps
 
 load_dotenv()
 
@@ -363,6 +364,24 @@ WELCOME_ICON_FILES = {
 }
 WELCOME_THEME_TIMEZONE = ZoneInfo("Europe/London")
 
+# Seasonal theme automation for the PASSOPHONICS Discord server.
+THEME_GUILD_ID = 1551149701972103208
+THEME_AUTOMATION_STATE_FILE = os.getenv(
+    "THEME_AUTOMATION_STATE_FILE",
+    os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "seasonal_theme_state.json",
+    ),
+)
+GOD_BOT_ROLE_ID = int(os.getenv("GOD_BOT_ROLE_ID", "0") or "0")
+GOD_BOT_ROLE_NAME = os.getenv("GOD_BOT_ROLE_NAME", "God Bot").strip()
+THEME_LINKED_MESSAGES = (
+    (1551181830261313536, 1551189232633253913),
+    (1553730638123630633, 1553738848054546534),
+    (1551149919434317966, 1551192094301749289),
+    (1553322041124585573, 1553349278544699443),
+)
+
 
 def easter_sunday_for_year(year: int) -> date:
     """Return Gregorian Easter Sunday, matching the website's computus."""
@@ -417,6 +436,237 @@ def get_welcome_icon_url(guild: discord.Guild, theme_name: str) -> str | None:
             f"?v={WELCOME_ICON_VERSION}"
         )
     return guild.icon.url if guild.icon else None
+
+
+def prepare_discord_icon_bytes(image_bytes: bytes) -> bytes:
+    """Normalize GitHub artwork to a square 1024px PNG for Discord uploads."""
+    with Image.open(BytesIO(image_bytes)) as source:
+        square = ImageOps.fit(
+            source.convert("RGBA"),
+            (1024, 1024),
+            method=Image.Resampling.LANCZOS,
+        )
+        output = BytesIO()
+        square.save(output, format="PNG", optimize=True)
+        return output.getvalue()
+
+
+def load_theme_automation_state() -> dict:
+    try:
+        with open(THEME_AUTOMATION_STATE_FILE, "r", encoding="utf-8") as file:
+            state = json.load(file)
+        if isinstance(state, dict):
+            state.setdefault("completed", {})
+            return state
+    except FileNotFoundError:
+        pass
+    except Exception as error:
+        print(f"[THEME] Could not load automation state: {error}")
+    return {"desired_theme": None, "completed": {}}
+
+
+def save_theme_automation_state(state: dict) -> None:
+    temporary_file = f"{THEME_AUTOMATION_STATE_FILE}.tmp"
+    try:
+        with open(temporary_file, "w", encoding="utf-8") as file:
+            json.dump(state, file, indent=2)
+        os.replace(temporary_file, THEME_AUTOMATION_STATE_FILE)
+    except Exception as error:
+        print(f"[THEME] Could not save automation state: {error}")
+
+
+async def refresh_welcome_messages(
+    guild: discord.Guild,
+    theme: dict[str, str],
+) -> tuple[int, bool]:
+    """Refresh bot-authored welcome embeds; return (updated count, all_ok)."""
+    welcome_channel_id = 1551149703167475744
+    channel = guild.get_channel(welcome_channel_id)
+    if channel is None:
+        try:
+            channel = await client.fetch_channel(welcome_channel_id)
+        except Exception as error:
+            print(f"[WELCOME] Could not resolve welcome channel: {error}")
+            return 0, False
+
+    icon_url = get_welcome_icon_url(guild, theme["name"])
+    footer_icon = client.user.display_avatar.url if client.user else None
+    updated = 0
+    all_ok = True
+
+    async for message in channel.history(limit=None):
+        if not client.user or message.author.id != client.user.id or not message.embeds:
+            continue
+
+        embed = message.embeds[0]
+        if embed.title != "Welcome aboard! 👋":
+            continue
+
+        updated_embed = embed.copy()
+        existing_description = updated_embed.description or ""
+        first_section = existing_description.split("\n\n", 1)[0]
+        updated_embed.description = f"{first_section}\n\n• **Say hi!** 👋"
+        updated_embed.colour = _color_from_hex(theme["colour"])
+        if icon_url:
+            updated_embed.set_thumbnail(url=icon_url)
+        updated_embed.set_footer(text="Phonics Bot", icon_url=footer_icon)
+
+        try:
+            await message.edit(embed=updated_embed)
+            updated += 1
+        except discord.HTTPException as error:
+            all_ok = False
+            print(f"[WELCOME] Could not update message {message.id}: {error}")
+
+    return updated, all_ok
+
+
+async def update_linked_theme_messages(
+    guild: discord.Guild,
+    theme: dict[str, str],
+    icon_url: str,
+) -> bool:
+    """Update the selected bot-authored embeds without changing their text."""
+    all_ok = True
+    for channel_id, message_id in THEME_LINKED_MESSAGES:
+        try:
+            channel = guild.get_channel(channel_id)
+            if channel is None:
+                channel = await client.fetch_channel(channel_id)
+            message = await channel.fetch_message(message_id)
+
+            if not client.user or message.author.id != client.user.id:
+                print(
+                    f"[THEME] Skipping linked message {message_id}: "
+                    "it was not sent by this bot."
+                )
+                all_ok = False
+                continue
+
+            if not message.embeds:
+                print(f"[THEME] Linked message {message_id} has no embeds to update.")
+                all_ok = False
+                continue
+
+            updated_embeds = []
+            for original_embed in message.embeds:
+                embed = original_embed.copy()
+                embed.colour = _color_from_hex(theme["colour"])
+                embed.set_thumbnail(url=icon_url)
+                updated_embeds.append(embed)
+
+            await message.edit(embeds=updated_embeds)
+            print(f"[THEME] Updated linked message {message_id}.")
+        except Exception as error:
+            all_ok = False
+            print(f"[THEME] Could not update linked message {message_id}: {error}")
+    return all_ok
+
+
+async def apply_active_theme_if_needed() -> None:
+    """Apply the current website theme to the server, bot, role and embeds."""
+    guild = client.get_guild(THEME_GUILD_ID)
+    if guild is None:
+        print(f"[THEME] Guild {THEME_GUILD_ID} is not in the bot cache yet.")
+        return
+
+    theme = get_welcome_theme()
+    theme_name = theme["name"]
+    state = load_theme_automation_state()
+    completed = state.setdefault("completed", {})
+    state["desired_theme"] = theme_name
+    save_theme_automation_state(state)
+
+    icon_url = get_welcome_icon_url(guild, theme_name)
+    if not icon_url:
+        print("[THEME] No public icon URL is configured; theme sync skipped.")
+        return
+
+    pending_image_changes = any(
+        completed.get(key) != theme_name
+        for key in ("server_icon", "bot_avatar")
+    )
+    icon_bytes = None
+    if pending_image_changes:
+        try:
+            async with httpx.AsyncClient(timeout=20) as http:
+                response = await http.get(icon_url)
+                response.raise_for_status()
+                icon_bytes = prepare_discord_icon_bytes(response.content)
+        except Exception as error:
+            print(f"[THEME] Could not download {theme_name} icon: {error}")
+            return
+
+    if completed.get("server_icon") != theme_name:
+        try:
+            await guild.edit(
+                icon=icon_bytes,
+                reason=f"Automatic {theme_name} seasonal theme",
+            )
+            completed["server_icon"] = theme_name
+            save_theme_automation_state(state)
+            print(f"[THEME] Server icon changed to {theme_name}.")
+        except Exception as error:
+            print(f"[THEME] Could not change the server icon: {error}")
+
+    if completed.get("bot_avatar") != theme_name:
+        try:
+            if not client.user:
+                raise RuntimeError("Client user is not ready")
+            await client.user.edit(avatar=icon_bytes)
+            completed["bot_avatar"] = theme_name
+            save_theme_automation_state(state)
+            print(f"[THEME] Bot avatar changed to {theme_name}.")
+        except Exception as error:
+            print(f"[THEME] Could not change the bot avatar: {error}")
+
+    if completed.get("god_bot_role") != theme_name:
+        role = (
+            guild.get_role(GOD_BOT_ROLE_ID)
+            if GOD_BOT_ROLE_ID
+            else next(
+                (r for r in guild.roles if r.name.casefold() == GOD_BOT_ROLE_NAME.casefold()),
+                None,
+            )
+        )
+        if role is None:
+            print(f"[THEME] Could not find the '{GOD_BOT_ROLE_NAME}' role.")
+        else:
+            try:
+                await role.edit(
+                    colour=_color_from_hex(theme["colour"]),
+                    reason=f"Automatic {theme_name} seasonal theme",
+                )
+                completed["god_bot_role"] = theme_name
+                save_theme_automation_state(state)
+                print(f"[THEME] God Bot role colour changed to {theme['colour']}.")
+            except Exception as error:
+                print(f"[THEME] Could not change the God Bot role colour: {error}")
+
+    if completed.get("linked_messages") != theme_name:
+        if await update_linked_theme_messages(guild, theme, icon_url):
+            completed["linked_messages"] = theme_name
+            save_theme_automation_state(state)
+
+    if completed.get("welcome_messages") != theme_name:
+        updated, all_ok = await refresh_welcome_messages(guild, theme)
+        print(f"[THEME] Refreshed {updated} welcome messages for {theme_name}.")
+        if all_ok:
+            completed["welcome_messages"] = theme_name
+            save_theme_automation_state(state)
+
+
+@tasks.loop(time=datetime_time(hour=0, minute=5, tzinfo=WELCOME_THEME_TIMEZONE))
+async def seasonal_theme_schedule() -> None:
+    try:
+        await apply_active_theme_if_needed()
+    except Exception:
+        logging.exception("[THEME] Scheduled theme update failed")
+
+
+@seasonal_theme_schedule.before_loop
+async def before_seasonal_theme_schedule() -> None:
+    await client.wait_until_ready()
 
 # --- Lineups config/persistence ---
 LINEUPS_FILE = os.getenv("LINEUPS_FILE", "lineups.json")
@@ -510,61 +760,20 @@ async def refresh_welcome_footers(interaction: discord.Interaction):
         return
 
     await interaction.response.defer(ephemeral=True)
-
-    welcome_channel_id = 1551149703167475744
-    channel = interaction.guild.get_channel(welcome_channel_id)
-
-    if channel is None:
+    theme = get_welcome_theme()
+    try:
+        updated, all_ok = await refresh_welcome_messages(interaction.guild, theme)
+    except Exception as error:
+        logging.exception("[WELCOME] Refresh command failed")
         await interaction.followup.send(
-            "I could not find the welcome channel.",
+            f"❌ Welcome refresh failed: {error}",
             ephemeral=True,
         )
         return
 
-    footer_icon = client.user.display_avatar.url
-    theme = get_welcome_theme()
-    icon_url = get_welcome_icon_url(interaction.guild, theme["name"])
-    updated = 0
-
-    async for message in channel.history(limit=None):
-        if message.author.id != client.user.id:
-            continue
-
-        if not message.embeds:
-            continue
-
-        embed = message.embeds[0]
-
-        if embed.title != "Welcome aboard! 👋":
-            continue
-
-        updated_embed = embed.copy()
-        existing_description = updated_embed.description or ""
-        first_section = existing_description.split("\n\n", 1)[0]
-        
-        updated_embed.description = (
-            f"{first_section}\n\n"
-            f"• **Say hi!** 👋"
-        )
-        updated_embed.colour = _color_from_hex(theme["colour"])
-        if icon_url:
-            updated_embed.set_thumbnail(url=icon_url)
-        updated_embed.set_footer(
-            text="Phonics Bot",
-            icon_url=footer_icon,
-        )
-
-        try:
-            await message.edit(embed=updated_embed)
-            updated += 1
-        except discord.HTTPException as error:
-            print(
-                f"[WELCOME] Could not update message "
-                f"{message.id}: {error}"
-            )
-
     await interaction.followup.send(
-        f"✅ Updated **{updated}** existing welcome messages to the **{theme['name']}** theme.",
+        f"{'✅' if all_ok else '⚠️'} Updated **{updated}** existing welcome messages "
+        f"to the **{theme['name']}** theme.",
         ephemeral=True,
     )
 
@@ -628,8 +837,7 @@ async def on_member_join(member: discord.Member):
         icon_url=member.display_avatar.url
     )
 
-    # Thumbnail: current seasonal icon from the website, or the live server icon
-    # until WELCOME_ICON_BASE_URL has been configured.
+    # Thumbnail: the public GitHub icon for the active theme.
     icon_url = get_welcome_icon_url(member.guild, theme["name"])
     embed.set_thumbnail(url=icon_url or member.display_avatar.url)
 
@@ -11113,5 +11321,11 @@ async def on_ready():
 
     except Exception as e:
         print(f"[SELF ROLES] Failed to add reactions: {e}")
+
+    # Run a reconciliation at startup (for missed theme boundaries) and keep
+    # checking shortly after midnight in the same UK timezone as index.html.
+    if not seasonal_theme_schedule.is_running():
+        seasonal_theme_schedule.start()
+    asyncio.create_task(apply_active_theme_if_needed())
 
 client.run(TOKEN)
