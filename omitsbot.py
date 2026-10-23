@@ -7,7 +7,7 @@ import os
 import random
 import asyncio
 from dotenv import load_dotenv
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 import re
 import asyncpg
@@ -347,6 +347,77 @@ welcome_config = {
     "color_hex": WELCOME_COLOR_HEX,
 }
 
+# Seasonal welcome icons are served directly from the public GitHub repository.
+# Override WELCOME_ICON_BASE_URL in .env only if you move the images elsewhere.
+WELCOME_ICON_BASE_URL = os.getenv(
+    "WELCOME_ICON_BASE_URL",
+    "https://raw.githubusercontent.com/DanStimo/Stimo_Discord_Bot/master",
+).strip().rstrip("/")
+WELCOME_ICON_VERSION = os.getenv("WELCOME_ICON_VERSION", "1").strip() or "1"
+WELCOME_ICON_FILES = {
+    "default": "passophonics-logo-500px.png",
+    "halloween": "passophonics-halloween.png",
+    "christmas": "passophonics-christmas.png",
+    "newyear": "passophonics-newyear.png",
+    "easter": "passophonics-easter.png",
+}
+WELCOME_THEME_TIMEZONE = ZoneInfo("Europe/London")
+
+
+def easter_sunday_for_year(year: int) -> date:
+    """Return Gregorian Easter Sunday, matching the website's computus."""
+    a = year % 19
+    b = year // 100
+    c = year % 100
+    d = b // 4
+    e = b % 4
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i = c // 4
+    k = c % 4
+    l = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * l) // 451
+    month = (h + l - 7 * m + 114) // 31
+    day = ((h + l - 7 * m + 114) % 31) + 1
+    return date(year, month, day)
+
+
+def get_welcome_theme(when: date | None = None) -> dict[str, str]:
+    """Return the welcome theme active on the website's Europe/London date."""
+    if when is None:
+        when = datetime.now(WELCOME_THEME_TIMEZONE).date()
+
+    easter_sunday = easter_sunday_for_year(when.year)
+    if easter_sunday - timedelta(days=2) <= when < easter_sunday + timedelta(days=2):
+        return {"name": "easter", "colour": "#9de2b1"}
+
+    month_day = (when.month, when.day)
+    if (10, 24) <= month_day <= (11, 7):
+        return {"name": "halloween", "colour": "#ff8a24"}
+
+    if when.month == 12:
+        return {"name": "christmas", "colour": "#123b2a"}
+
+    jan_8 = date(when.year, 1, 8)
+    days_to_monday = (0 - jan_8.weekday()) % 7
+    new_year_end = jan_8 + timedelta(days=days_to_monday)
+    if when.month == 1 and when < new_year_end:
+        return {"name": "newyear", "colour": "#10172a"}
+
+    return {"name": "default", "colour": "#17c1ff"}
+
+
+def get_welcome_icon_url(guild: discord.Guild, theme_name: str) -> str | None:
+    """Use the public themed icon when configured; otherwise use the live guild icon."""
+    if WELCOME_ICON_BASE_URL:
+        filename = WELCOME_ICON_FILES.get(theme_name, WELCOME_ICON_FILES["default"])
+        return (
+            f"{WELCOME_ICON_BASE_URL}/{filename}"
+            f"?v={WELCOME_ICON_VERSION}"
+        )
+    return guild.icon.url if guild.icon else None
+
 # --- Lineups config/persistence ---
 LINEUPS_FILE = os.getenv("LINEUPS_FILE", "lineups.json")
 
@@ -421,7 +492,7 @@ def _twitch_url_from_input(value: str | None) -> str | None:
 
 @tree.command(
     name="refreshwelcomefooters",
-    description="Update existing welcome message styling."
+    description="Refresh existing welcome message styling and theme icons."
 )
 async def refresh_welcome_footers(interaction: discord.Interaction):
     if not interaction.guild:
@@ -451,6 +522,8 @@ async def refresh_welcome_footers(interaction: discord.Interaction):
         return
 
     footer_icon = client.user.display_avatar.url
+    theme = get_welcome_theme()
+    icon_url = get_welcome_icon_url(interaction.guild, theme["name"])
     updated = 0
 
     async for message in channel.history(limit=None):
@@ -473,7 +546,9 @@ async def refresh_welcome_footers(interaction: discord.Interaction):
             f"{first_section}\n\n"
             f"• **Say hi!** 👋"
         )
-        updated_embed.colour = discord.Colour(0x17C1FF)
+        updated_embed.colour = _color_from_hex(theme["colour"])
+        if icon_url:
+            updated_embed.set_thumbnail(url=icon_url)
         updated_embed.set_footer(
             text="Phonics Bot",
             icon_url=footer_icon,
@@ -489,7 +564,7 @@ async def refresh_welcome_footers(interaction: discord.Interaction):
             )
 
     await interaction.followup.send(
-        f"✅ Updated **{updated}** existing welcome messages.",
+        f"✅ Updated **{updated}** existing welcome messages to the **{theme['name']}** theme.",
         ephemeral=True,
     )
 
@@ -513,7 +588,8 @@ async def on_member_join(member: discord.Member):
         return
     
     WELCOME_CHANNEL_ID = config["welcome_channel_id"]
-    WELCOME_COLOR = 0x17C1FF
+    theme = get_welcome_theme()
+    WELCOME_COLOR = _color_from_hex(theme["colour"])
     MEMBER_ROLE_ID = config["member_role_id"]
 
     # --- Resolve channel ---
@@ -552,11 +628,10 @@ async def on_member_join(member: discord.Member):
         icon_url=member.display_avatar.url
     )
 
-    # Thumbnail: guild icon (fallback to member avatar)
-    if member.guild.icon:
-        embed.set_thumbnail(url=member.guild.icon.url)
-    else:
-        embed.set_thumbnail(url=member.display_avatar.url)
+    # Thumbnail: current seasonal icon from the website, or the live server icon
+    # until WELCOME_ICON_BASE_URL has been configured.
+    icon_url = get_welcome_icon_url(member.guild, theme["name"])
+    embed.set_thumbnail(url=icon_url or member.display_avatar.url)
 
     # Footer
     footer_icon = client.user.display_avatar.url if client.user else None
