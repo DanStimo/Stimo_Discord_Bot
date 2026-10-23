@@ -479,6 +479,41 @@ def save_theme_automation_state(state: dict) -> None:
         print(f"[THEME] Could not save automation state: {error}")
 
 
+def get_theme_linked_messages() -> list[tuple[int, int]]:
+    """Load persisted message targets, falling back to the source defaults."""
+    state = load_theme_automation_state()
+    saved_targets = state.get("theme_linked_messages")
+    if not isinstance(saved_targets, list):
+        return list(THEME_LINKED_MESSAGES)
+
+    targets: list[tuple[int, int]] = []
+    for target in saved_targets:
+        try:
+            channel_id, message_id = target
+            targets.append((int(channel_id), int(message_id)))
+        except (TypeError, ValueError):
+            logging.warning("[THEME] Ignoring invalid saved message target: %r", target)
+    return targets or list(THEME_LINKED_MESSAGES)
+
+
+def save_theme_linked_messages(targets: list[tuple[int, int]]) -> None:
+    """Persist linked message targets so reposted bot messages survive restarts."""
+    state = load_theme_automation_state()
+    state["theme_linked_messages"] = [list(target) for target in targets]
+    save_theme_automation_state(state)
+
+
+def parse_discord_message_link(message_link: str) -> tuple[int, int, int] | None:
+    cleaned_link = message_link.strip().strip("<>")
+    match = re.search(
+        r"(?:https?://)?(?:www\.)?discord(?:app)?\.com/channels/(\d+)/(\d+)/(\d+)",
+        cleaned_link,
+    )
+    if not match:
+        return None
+    return tuple(map(int, match.groups()))
+
+
 async def refresh_welcome_messages(
     guild: discord.Guild,
     theme: dict[str, str],
@@ -532,7 +567,7 @@ async def update_linked_theme_messages(
 ) -> bool:
     """Update the selected embeds, using their original webhook when needed."""
     all_ok = True
-    for channel_id, message_id in THEME_LINKED_MESSAGES:
+    for channel_id, message_id in get_theme_linked_messages():
         try:
             channel = guild.get_channel(channel_id)
             if channel is None:
@@ -588,6 +623,129 @@ async def update_linked_theme_messages(
             all_ok = False
             print(f"[THEME] Could not update linked message {message_id}: {error}")
     return all_ok
+
+
+@tree.command(
+    name="copythememessage",
+    description="Repost an embed as the bot and register it for seasonal theme updates.",
+)
+@app_commands.default_permissions(administrator=True)
+@app_commands.describe(message_link="Discord link to the message you want the bot to repost")
+async def copy_theme_message(
+    interaction: discord.Interaction,
+    message_link: str,
+) -> None:
+    """Copy a Discohook embed as a bot-authored, automatically themed message."""
+    if not interaction.guild or interaction.guild_id != THEME_GUILD_ID:
+        await interaction.response.send_message(
+            "This command can only be used in the PASSOPHONICS server.",
+            ephemeral=True,
+        )
+        return
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message(
+            "You must be an administrator to repost a theme message.",
+            ephemeral=True,
+        )
+        return
+
+    parsed_link = parse_discord_message_link(message_link)
+    if parsed_link is None:
+        await interaction.response.send_message(
+            "That doesn't look like a Discord message link. Paste the full message URL.",
+            ephemeral=True,
+        )
+        return
+
+    linked_guild_id, channel_id, source_message_id = parsed_link
+    if linked_guild_id != THEME_GUILD_ID:
+        await interaction.response.send_message(
+            "The message link must point to this server.",
+            ephemeral=True,
+        )
+        return
+
+    await interaction.response.defer(ephemeral=True)
+    try:
+        channel = interaction.guild.get_channel(channel_id)
+        if channel is None:
+            channel = await client.fetch_channel(channel_id)
+        if getattr(channel, "guild", None) is None or channel.guild.id != THEME_GUILD_ID:
+            raise ValueError("The linked channel is not part of this server.")
+
+        source_message = await channel.fetch_message(source_message_id)
+        if not source_message.embeds:
+            await interaction.followup.send(
+                "That message has no embeds to copy. Nothing was posted.",
+                ephemeral=True,
+            )
+            return
+
+        state = load_theme_automation_state()
+        source_key = f"{channel_id}:{source_message_id}"
+        prior_copies = state.setdefault("theme_message_copies", {})
+        prior_target = prior_copies.get(source_key)
+        if isinstance(prior_target, list) and len(prior_target) == 2:
+            try:
+                prior_channel_id, prior_message_id = map(int, prior_target)
+                prior_channel = interaction.guild.get_channel(prior_channel_id)
+                if prior_channel is None:
+                    prior_channel = await client.fetch_channel(prior_channel_id)
+                existing_copy = await prior_channel.fetch_message(prior_message_id)
+                await interaction.followup.send(
+                    f"This message has already been reposted as {existing_copy.jump_url}.",
+                    ephemeral=True,
+                )
+                return
+            except discord.NotFound:
+                prior_copies.pop(source_key, None)
+
+        theme = get_welcome_theme()
+        icon_url = get_welcome_icon_url(interaction.guild, theme["name"])
+        themed_embeds = []
+        for source_embed in source_message.embeds:
+            embed = source_embed.copy()
+            embed.colour = _color_from_hex(theme["colour"])
+            if icon_url:
+                embed.set_thumbnail(url=icon_url)
+            themed_embeds.append(embed)
+
+        replacement = await channel.send(
+            content=source_message.content or None,
+            embeds=themed_embeds,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+
+        targets = get_theme_linked_messages()
+        old_target = (channel_id, source_message_id)
+        new_target = (channel_id, replacement.id)
+        if old_target in targets:
+            targets = [new_target if target == old_target else target for target in targets]
+        elif new_target not in targets:
+            targets.append(new_target)
+
+        state["theme_linked_messages"] = [list(target) for target in targets]
+        prior_copies[source_key] = [channel_id, replacement.id]
+        state.setdefault("completed", {}).pop("linked_messages", None)
+        save_theme_automation_state(state)
+
+        notes = []
+        if source_message.attachments:
+            notes.append("attached files were not copied")
+        if source_message.components:
+            notes.append("buttons and other components were not copied")
+        note_text = f" ({'; '.join(notes)})." if notes else "."
+        await interaction.followup.send(
+            f"Posted as Phonics Bot and registered for seasonal theme updates: "
+            f"{replacement.jump_url}{note_text}",
+            ephemeral=True,
+        )
+    except Exception as error:
+        logging.exception("[THEME] Could not repost linked message")
+        await interaction.followup.send(
+            f"Could not repost that message: {type(error).__name__}: {error}",
+            ephemeral=True,
+        )
 
 
 async def apply_active_theme_if_needed() -> None:
