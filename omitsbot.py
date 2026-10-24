@@ -688,7 +688,7 @@ async def update_linked_theme_messages(
     icon_url: str,
     state: dict,
 ) -> bool:
-    """Update the selected embeds, using their original webhook when needed."""
+    """Update linked embeds and Components V2 cards, including webhook posts."""
     all_ok = True
     targets = get_theme_linked_messages()
     for channel_id, message_id in list(targets):
@@ -697,11 +697,6 @@ async def update_linked_theme_messages(
             if channel is None:
                 channel = await client.fetch_channel(channel_id)
             message = await channel.fetch_message(message_id)
-
-            if not message.embeds:
-                print(f"[THEME] Linked message {message_id} has no embeds to update.")
-                all_ok = False
-                continue
 
             webhook_id = getattr(message, "webhook_id", None)
             webhook = None
@@ -728,6 +723,44 @@ async def update_linked_theme_messages(
                     f"[THEME] Linked message {message_id} is not authored by this bot "
                     "and has no webhook ID; this bot cannot edit it."
                 )
+                all_ok = False
+                continue
+
+            if not message.embeds and message.components:
+                if not hasattr(discord.ui, "LayoutView"):
+                    print(
+                        f"[THEME] Linked message {message_id} uses Components V2, "
+                        "which requires discord.py 2.6 or later."
+                    )
+                    all_ok = False
+                    continue
+
+                view = discord.ui.LayoutView.from_message(message, timeout=None)
+                for component in view.children:
+                    if isinstance(component, discord.ui.Container):
+                        component.accent_color = _color_from_hex(theme["colour"])
+                        for child in component.walk_children():
+                            if (
+                                isinstance(child, discord.ui.Section)
+                                and isinstance(child.accessory, discord.ui.Thumbnail)
+                                and icon_url
+                            ):
+                                old_thumbnail = child.accessory
+                                child.accessory = discord.ui.Thumbnail(
+                                    icon_url,
+                                    description="Current theme icon",
+                                    id=old_thumbnail.id,
+                                )
+
+                if webhook is not None:
+                    await webhook.edit_message(message_id, view=view)
+                else:
+                    await message.edit(view=view)
+                print(f"[THEME] Updated linked Components V2 message {message_id}.")
+                continue
+
+            if not message.embeds:
+                print(f"[THEME] Linked message {message_id} has no embeds to update.")
                 all_ok = False
                 continue
 
@@ -898,16 +931,16 @@ async def copy_theme_message(
 
 @tree.command(
     name="postthemeembed",
-    description="Post a theme-styled embed as the bot and register it for updates.",
+    description="Post a theme-styled card with an optional image gallery.",
 )
 @app_commands.default_permissions(administrator=True)
 @app_commands.describe(
     channel="Channel where the bot should post the embed",
     title="Optional embed heading",
     title_url="Optional URL opened when the title is clicked",
-    description="Optional main text shown inside the embed",
-    content="Optional message text shown above the embed",
-    mention_everyone="Allow @everyone in the optional message text",
+    description="Optional main text shown inside the card",
+    content="Optional text shown at the top of the card",
+    mention_everyone="Allow @everyone in the card text",
     image_urls="Up to 5 large image URLs, separated by spaces",
     thumbnail_url="Optional thumbnail URL; defaults to the active theme icon",
     field1_name="Optional field 1 heading",
@@ -1055,23 +1088,54 @@ async def post_theme_embed(
             ephemeral=True,
         )
         return
-    embed_text_length = (
-        len(title or "")
-        + len(description or "")
-        + sum(len(field_name) + len(field_value) for field_name, field_value, _ in fields)
-    )
-    if embed_text_length > 6000:
+    message_content = (content or "").strip() or None
+    if message_content and len(message_content) > 2000:
         await interaction.response.send_message(
-            "The combined embed title, description, and field text must be "
-            "6,000 characters or fewer.",
+            "The message text must be 2,000 characters or fewer.",
             ephemeral=True,
         )
         return
 
-    message_content = (content or "").strip() or None
-    if message_content and len(message_content) > 2000:
+    if not all(
+        hasattr(discord.ui, component_name)
+        for component_name in ("LayoutView", "Container", "TextDisplay", "Section", "Thumbnail", "MediaGallery")
+    ):
         await interaction.response.send_message(
-            "The message text above the embed must be 2,000 characters or fewer.",
+            "This gallery layout needs discord.py 2.6 or later. Update discord.py "
+            "on the VPS, then restart the bot.",
+            ephemeral=True,
+        )
+        return
+
+    body_parts = []
+    if message_content:
+        body_parts.append(message_content)
+    if title:
+        formatted_title = f"[{title}]({title_url})" if title_url else title
+        body_parts.append(f"**{formatted_title}**")
+    if description:
+        body_parts.append(description)
+
+    inline_group = []
+
+    def flush_inline_fields() -> None:
+        if inline_group:
+            body_parts.append("　•　".join(inline_group))
+            inline_group.clear()
+
+    for field_name, field_value, inline in fields:
+        if inline:
+            inline_group.append(f"**{field_name}** — {field_value}")
+        else:
+            flush_inline_fields()
+            body_parts.append(f"**{field_name}**\n{field_value}")
+    flush_inline_fields()
+
+    body_text = "\n\n".join(body_parts)
+    if len(body_text) + len("Phonics Bot") > 4000:
+        await interaction.response.send_message(
+            "The combined message text and footer must be 4,000 characters or fewer "
+            "in a Components V2 message.",
             ephemeral=True,
         )
         return
@@ -1079,32 +1143,61 @@ async def post_theme_embed(
     await interaction.response.defer(ephemeral=True)
     theme = get_welcome_theme()
     icon_url = get_welcome_icon_url(interaction.guild, theme["name"])
-    embed = discord.Embed(
-        title=title,
-        url=title_url,
-        description=description,
-        colour=_color_from_hex(theme["colour"]),
-    )
-    for field_name, field_value, inline in fields:
-        embed.add_field(name=field_name, value=field_value, inline=inline)
     active_thumbnail = thumbnail_url or icon_url
-    if active_thumbnail:
-        embed.set_thumbnail(url=active_thumbnail)
-    if icon_url:
-        embed.set_footer(text="Phonics Bot", icon_url=icon_url)
-    else:
-        embed.set_footer(text="Phonics Bot")
+    view = discord.ui.LayoutView(timeout=None)
+    container = discord.ui.Container(
+        accent_color=_color_from_hex(theme["colour"]),
+        id=1,
+    )
+    view.add_item(container)
 
-    gallery_embeds = []
-    for image_url in large_image_urls:
-        image_embed = discord.Embed(colour=_color_from_hex(theme["colour"]))
-        image_embed.set_image(url=image_url)
-        gallery_embeds.append(image_embed)
+    if body_text:
+        text_display = discord.ui.TextDisplay(body_text, id=2)
+        if active_thumbnail:
+            container.add_item(
+                discord.ui.Section(
+                    text_display,
+                    accessory=discord.ui.Thumbnail(
+                        active_thumbnail,
+                        description="Embed thumbnail",
+                        id=3,
+                    ),
+                    id=4,
+                )
+            )
+        else:
+            container.add_item(text_display)
+
+    if large_image_urls:
+        container.add_item(
+            discord.ui.MediaGallery(
+                *[
+                    discord.MediaGalleryItem(image_url)
+                    for image_url in large_image_urls
+                ],
+                id=5,
+            )
+        )
+
+    if icon_url:
+        container.add_item(discord.ui.Separator())
+        container.add_item(
+            discord.ui.Section(
+                discord.ui.TextDisplay("Phonics Bot"),
+                accessory=discord.ui.Thumbnail(
+                    icon_url,
+                    description="Theme footer icon",
+                    id=6,
+                ),
+                id=7,
+            )
+        )
+    else:
+        container.add_item(discord.ui.TextDisplay("Phonics Bot"))
 
     try:
         message = await channel.send(
-            content=message_content,
-            embeds=[embed, *gallery_embeds],
+            view=view,
             allowed_mentions=discord.AllowedMentions(
                 everyone=mention_everyone,
                 users=False,
