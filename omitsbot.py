@@ -558,12 +558,9 @@ async def announce_theme_change_if_needed(
         )
         if icon_url:
             embed.set_thumbnail(url=icon_url)
-            embed.set_footer(
-                text=f"PASSOPHONICS • {new_label} theme",
-                icon_url=icon_url,
-            )
+            embed.set_footer(text="Phonics Bot", icon_url=icon_url)
         else:
-            embed.set_footer(text=f"PASSOPHONICS • {new_label} theme")
+            embed.set_footer(text="Phonics Bot")
 
         message = await channel.send(
             content="@everyone",
@@ -619,7 +616,7 @@ def get_theme_linked_messages() -> list[tuple[int, int]]:
             targets.append((int(channel_id), int(message_id)))
         except (TypeError, ValueError):
             logging.warning("[THEME] Ignoring invalid saved message target: %r", target)
-    return targets or list(THEME_LINKED_MESSAGES)
+    return targets
 
 
 def save_theme_linked_messages(targets: list[tuple[int, int]]) -> None:
@@ -690,10 +687,12 @@ async def update_linked_theme_messages(
     guild: discord.Guild,
     theme: dict[str, str],
     icon_url: str,
+    state: dict,
 ) -> bool:
     """Update the selected embeds, using their original webhook when needed."""
     all_ok = True
-    for channel_id, message_id in get_theme_linked_messages():
+    targets = get_theme_linked_messages()
+    for channel_id, message_id in list(targets):
         try:
             channel = guild.get_channel(channel_id)
             if channel is None:
@@ -746,6 +745,18 @@ async def update_linked_theme_messages(
             else:
                 await message.edit(embeds=updated_embeds)
             print(f"[THEME] Updated linked message {message_id}.")
+        except discord.NotFound:
+            targets = [
+                target
+                for target in targets
+                if target != (channel_id, message_id)
+            ]
+            state["theme_linked_messages"] = [list(target) for target in targets]
+            save_theme_automation_state(state)
+            print(
+                f"[THEME] Removed missing linked message {message_id} "
+                f"from channel {channel_id} from saved theme state."
+            )
         except Exception as error:
             all_ok = False
             print(f"[THEME] Could not update linked message {message_id}: {error}")
@@ -883,18 +894,54 @@ async def copy_theme_message(
 @app_commands.default_permissions(administrator=True)
 @app_commands.describe(
     channel="Channel where the bot should post the embed",
-    title="Embed heading",
-    description="Main text shown inside the embed",
+    title="Optional embed heading",
+    title_url="Optional URL opened when the title is clicked",
+    description="Optional main text shown inside the embed",
     content="Optional message text shown above the embed",
     mention_everyone="Allow @everyone in the optional message text",
+    image_url="Optional large image URL",
+    thumbnail_url="Optional thumbnail URL; defaults to the active theme icon",
+    field1_name="Optional field 1 heading",
+    field1_value="Optional field 1 body",
+    field1_inline="Show field 1 beside other inline fields",
+    field2_name="Optional field 2 heading",
+    field2_value="Optional field 2 body",
+    field2_inline="Show field 2 beside other inline fields",
+    field3_name="Optional field 3 heading",
+    field3_value="Optional field 3 body",
+    field3_inline="Show field 3 beside other inline fields",
+    field4_name="Optional field 4 heading",
+    field4_value="Optional field 4 body",
+    field4_inline="Show field 4 beside other inline fields",
+    field5_name="Optional field 5 heading",
+    field5_value="Optional field 5 body",
+    field5_inline="Show field 5 beside other inline fields",
 )
 async def post_theme_embed(
     interaction: discord.Interaction,
     channel: discord.TextChannel,
-    title: str,
-    description: str,
+    title: str | None = None,
+    title_url: str | None = None,
+    description: str | None = None,
     content: str | None = None,
     mention_everyone: bool = False,
+    image_url: str | None = None,
+    thumbnail_url: str | None = None,
+    field1_name: str | None = None,
+    field1_value: str | None = None,
+    field1_inline: bool = False,
+    field2_name: str | None = None,
+    field2_value: str | None = None,
+    field2_inline: bool = False,
+    field3_name: str | None = None,
+    field3_value: str | None = None,
+    field3_inline: bool = False,
+    field4_name: str | None = None,
+    field4_value: str | None = None,
+    field4_inline: bool = False,
+    field5_name: str | None = None,
+    field5_value: str | None = None,
+    field5_inline: bool = False,
 ) -> None:
     """Post a new bot-authored embed and register it for theme changes."""
     if not interaction.guild or interaction.guild_id != THEME_GUILD_ID:
@@ -915,13 +962,89 @@ async def post_theme_embed(
             ephemeral=True,
         )
         return
-    if len(title) > 256 or len(description) > 4096:
+    title = (title or "").strip() or None
+    title_url = (title_url or "").strip() or None
+    description = (description or "").strip() or None
+    image_url = (image_url or "").strip() or None
+    thumbnail_url = (thumbnail_url or "").strip() or None
+
+    if title and len(title) > 256:
         await interaction.response.send_message(
-            "The title must be 256 characters or fewer and the description "
-            "must be 4,096 characters or fewer.",
+            "The title must be 256 characters or fewer.",
             ephemeral=True,
         )
         return
+    if description and len(description) > 4096:
+        await interaction.response.send_message(
+            "The description must be 4,096 characters or fewer.",
+            ephemeral=True,
+        )
+        return
+    if title_url and not title:
+        await interaction.response.send_message(
+            "Add a title when using a title URL.",
+            ephemeral=True,
+        )
+        return
+
+    field_inputs = [
+        (field1_name, field1_value, field1_inline),
+        (field2_name, field2_value, field2_inline),
+        (field3_name, field3_value, field3_inline),
+        (field4_name, field4_value, field4_inline),
+        (field5_name, field5_value, field5_inline),
+    ]
+    fields = []
+    for number, (field_name, field_value, inline) in enumerate(field_inputs, 1):
+        field_name = (field_name or "").strip()
+        field_value = (field_value or "").strip()
+        if bool(field_name) != bool(field_value):
+            await interaction.response.send_message(
+                f"Field {number} needs both a name and a value, or leave both blank.",
+                ephemeral=True,
+            )
+            return
+        if not field_name:
+            continue
+        if len(field_name) > 256 or len(field_value) > 1024:
+            await interaction.response.send_message(
+                f"Field {number} name must be 256 characters or fewer and its "
+                "value must be 1,024 characters or fewer.",
+                ephemeral=True,
+            )
+            return
+        fields.append((field_name, field_value, inline))
+
+    for label, url in (
+        ("Title URL", title_url),
+        ("Image URL", image_url),
+        ("Thumbnail URL", thumbnail_url),
+    ):
+        if url and not url.startswith(("https://", "http://")):
+            await interaction.response.send_message(
+                f"{label} must start with http:// or https://.",
+                ephemeral=True,
+            )
+            return
+    if not any((title, description, fields, image_url)):
+        await interaction.response.send_message(
+            "Add a title, description, at least one field, or a large image.",
+            ephemeral=True,
+        )
+        return
+    embed_text_length = (
+        len(title or "")
+        + len(description or "")
+        + sum(len(field_name) + len(field_value) for field_name, field_value, _ in fields)
+    )
+    if embed_text_length > 6000:
+        await interaction.response.send_message(
+            "The combined embed title, description, and field text must be "
+            "6,000 characters or fewer.",
+            ephemeral=True,
+        )
+        return
+
     message_content = (content or "").strip() or None
     if message_content and len(message_content) > 2000:
         await interaction.response.send_message(
@@ -935,20 +1058,22 @@ async def post_theme_embed(
     icon_url = get_welcome_icon_url(interaction.guild, theme["name"])
     embed = discord.Embed(
         title=title,
+        url=title_url,
         description=description,
         colour=_color_from_hex(theme["colour"]),
         timestamp=datetime.now(timezone.utc),
     )
+    for field_name, field_value, inline in fields:
+        embed.add_field(name=field_name, value=field_value, inline=inline)
+    if image_url:
+        embed.set_image(url=image_url)
+    active_thumbnail = thumbnail_url or icon_url
+    if active_thumbnail:
+        embed.set_thumbnail(url=active_thumbnail)
     if icon_url:
-        embed.set_thumbnail(url=icon_url)
-        embed.set_footer(
-            text=f"PASSOPHONICS • {_theme_announcement_label(theme['name'])} theme",
-            icon_url=icon_url,
-        )
+        embed.set_footer(text="Phonics Bot", icon_url=icon_url)
     else:
-        embed.set_footer(
-            text=f"PASSOPHONICS • {_theme_announcement_label(theme['name'])} theme"
-        )
+        embed.set_footer(text="Phonics Bot")
 
     try:
         message = await channel.send(
@@ -1129,7 +1254,7 @@ async def apply_active_theme_if_needed(force: bool = False) -> bool:
                 )
 
     if force or completed.get("linked_messages") != theme_name:
-        if await update_linked_theme_messages(guild, theme, icon_url):
+        if await update_linked_theme_messages(guild, theme, icon_url, state):
             completed["linked_messages"] = theme_name
             save_theme_automation_state(state)
 
