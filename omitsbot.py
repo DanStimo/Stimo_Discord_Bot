@@ -554,7 +554,6 @@ async def announce_theme_change_if_needed(
                 f"The new seasonal look is now live. Take a look around!"
             ),
             colour=_color_from_hex(theme["colour"]),
-            timestamp=datetime.now(timezone.utc),
         )
         if icon_url:
             embed.set_thumbnail(url=icon_url)
@@ -736,8 +735,18 @@ async def update_linked_theme_messages(
             for original_embed in message.embeds:
                 embed = original_embed.copy()
                 embed.colour = _color_from_hex(theme["colour"])
-                embed.set_thumbnail(url=icon_url)
-                embed.set_footer(text=embed.footer.text, icon_url=icon_url)
+                is_gallery_image = bool(original_embed.image.url) and not any(
+                    (
+                        original_embed.title,
+                        original_embed.description,
+                        original_embed.fields,
+                        original_embed.author.name,
+                        original_embed.footer.text,
+                    )
+                )
+                if not is_gallery_image:
+                    embed.set_thumbnail(url=icon_url)
+                    embed.set_footer(text=embed.footer.text, icon_url=icon_url)
                 updated_embeds.append(embed)
 
             if webhook is not None:
@@ -899,7 +908,7 @@ async def copy_theme_message(
     description="Optional main text shown inside the embed",
     content="Optional message text shown above the embed",
     mention_everyone="Allow @everyone in the optional message text",
-    image_url="Optional large image URL",
+    image_urls="Up to 5 large image URLs, separated by spaces",
     thumbnail_url="Optional thumbnail URL; defaults to the active theme icon",
     field1_name="Optional field 1 heading",
     field1_value="Optional field 1 body",
@@ -925,7 +934,7 @@ async def post_theme_embed(
     description: str | None = None,
     content: str | None = None,
     mention_everyone: bool = False,
-    image_url: str | None = None,
+    image_urls: str | None = None,
     thumbnail_url: str | None = None,
     field1_name: str | None = None,
     field1_value: str | None = None,
@@ -965,8 +974,16 @@ async def post_theme_embed(
     title = (title or "").strip() or None
     title_url = (title_url or "").strip() or None
     description = (description or "").strip() or None
-    image_url = (image_url or "").strip() or None
+    image_urls = (image_urls or "").strip()
+    large_image_urls = image_urls.split() if image_urls else []
     thumbnail_url = (thumbnail_url or "").strip() or None
+
+    if len(large_image_urls) > 5:
+        await interaction.response.send_message(
+            "You can include up to five large image URLs.",
+            ephemeral=True,
+        )
+        return
 
     if title and len(title) > 256:
         await interaction.response.send_message(
@@ -1017,7 +1034,6 @@ async def post_theme_embed(
 
     for label, url in (
         ("Title URL", title_url),
-        ("Image URL", image_url),
         ("Thumbnail URL", thumbnail_url),
     ):
         if url and not url.startswith(("https://", "http://")):
@@ -1026,9 +1042,16 @@ async def post_theme_embed(
                 ephemeral=True,
             )
             return
-    if not any((title, description, fields, image_url)):
+    for number, url in enumerate(large_image_urls, 1):
+        if not url.startswith(("https://", "http://")):
+            await interaction.response.send_message(
+                f"Large image URL {number} must start with http:// or https://.",
+                ephemeral=True,
+            )
+            return
+    if not any((title, description, fields, large_image_urls)):
         await interaction.response.send_message(
-            "Add a title, description, at least one field, or a large image.",
+            "Add a title, description, at least one field, or a large image URL.",
             ephemeral=True,
         )
         return
@@ -1061,12 +1084,9 @@ async def post_theme_embed(
         url=title_url,
         description=description,
         colour=_color_from_hex(theme["colour"]),
-        timestamp=datetime.now(timezone.utc),
     )
     for field_name, field_value, inline in fields:
         embed.add_field(name=field_name, value=field_value, inline=inline)
-    if image_url:
-        embed.set_image(url=image_url)
     active_thumbnail = thumbnail_url or icon_url
     if active_thumbnail:
         embed.set_thumbnail(url=active_thumbnail)
@@ -1075,10 +1095,16 @@ async def post_theme_embed(
     else:
         embed.set_footer(text="Phonics Bot")
 
+    gallery_embeds = []
+    for image_url in large_image_urls:
+        image_embed = discord.Embed(colour=_color_from_hex(theme["colour"]))
+        image_embed.set_image(url=image_url)
+        gallery_embeds.append(image_embed)
+
     try:
         message = await channel.send(
             content=message_content,
-            embed=embed,
+            embeds=[embed, *gallery_embeds],
             allowed_mentions=discord.AllowedMentions(
                 everyone=mention_everyone,
                 users=False,
