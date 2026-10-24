@@ -1114,7 +1114,7 @@ async def post_theme_embed(
     theme = get_welcome_theme()
     icon_url = get_welcome_icon_url(interaction.guild, theme["name"])
     gallery_url = title_url or (
-        "https://passophonics.duckdns.org/" if len(large_image_urls) > 1 else None
+        "https://passophonics.com" if len(large_image_urls) > 1 else None
     )
     embed = discord.Embed(
         title=title,
@@ -1163,11 +1163,13 @@ async def post_theme_embed(
         state.setdefault("completed", {}).pop("linked_messages", None)
         save_theme_automation_state(state)
 
-        await interaction.followup.send(
-            f"Posted as Phonics Bot and registered for future theme updates: "
-            f"{message.jump_url}",
-            ephemeral=True,
-        )
+        try:
+            await interaction.delete_original_response()
+        except discord.HTTPException as delete_error:
+            print(
+                f"[THEME] Posted message {message.id}, but could not remove the "
+                f"ephemeral command response: {delete_error}"
+            )
     except Exception as error:
         logging.exception("[THEME] Could not post theme-managed embed")
         await interaction.followup.send(
