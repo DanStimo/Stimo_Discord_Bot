@@ -941,7 +941,7 @@ async def copy_theme_message(
     description="Optional main text shown inside the card",
     content="Optional text shown at the top of the card",
     mention_everyone="Allow @everyone in the card text",
-    image_urls="Up to 5 large image URLs, separated by spaces",
+    image_urls="Up to 4 large image URLs, separated by spaces",
     thumbnail_url="Optional thumbnail URL; defaults to the active theme icon",
     field1_name="Optional field 1 heading",
     field1_value="Optional field 1 body",
@@ -1011,9 +1011,9 @@ async def post_theme_embed(
     large_image_urls = image_urls.split() if image_urls else []
     thumbnail_url = (thumbnail_url or "").strip() or None
 
-    if len(large_image_urls) > 5:
+    if len(large_image_urls) > 4:
         await interaction.response.send_message(
-            "You can include up to five large image URLs.",
+            "Discord's grouped embed gallery supports up to four images.",
             ephemeral=True,
         )
         return
@@ -1096,46 +1096,16 @@ async def post_theme_embed(
         )
         return
 
-    if not all(
-        hasattr(discord.ui, component_name)
-        for component_name in ("LayoutView", "Container", "TextDisplay", "Section", "Thumbnail", "MediaGallery")
-    ):
+    embed_text_length = (
+        len(title or "")
+        + len(description or "")
+        + sum(len(name) + len(value) for name, value, _ in fields)
+        + len("Phonics Bot")
+    )
+    if embed_text_length > 6000:
         await interaction.response.send_message(
-            "This gallery layout needs discord.py 2.6 or later. Update discord.py "
-            "on the VPS, then restart the bot.",
-            ephemeral=True,
-        )
-        return
-
-    body_parts = []
-    if message_content:
-        body_parts.append(message_content)
-    if title:
-        formatted_title = f"[{title}]({title_url})" if title_url else title
-        body_parts.append(f"**{formatted_title}**")
-    if description:
-        body_parts.append(description)
-
-    inline_group = []
-
-    def flush_inline_fields() -> None:
-        if inline_group:
-            body_parts.append("　•　".join(inline_group))
-            inline_group.clear()
-
-    for field_name, field_value, inline in fields:
-        if inline:
-            inline_group.append(f"**{field_name}** — {field_value}")
-        else:
-            flush_inline_fields()
-            body_parts.append(f"**{field_name}**\n{field_value}")
-    flush_inline_fields()
-
-    body_text = "\n\n".join(body_parts)
-    if len(body_text) + len("Phonics Bot") > 4000:
-        await interaction.response.send_message(
-            "The combined message text and footer must be 4,000 characters or fewer "
-            "in a Components V2 message.",
+            "The combined embed title, description, field text and footer must be "
+            "6,000 characters or fewer.",
             ephemeral=True,
         )
         return
@@ -1143,49 +1113,40 @@ async def post_theme_embed(
     await interaction.response.defer(ephemeral=True)
     theme = get_welcome_theme()
     icon_url = get_welcome_icon_url(interaction.guild, theme["name"])
-    active_thumbnail = thumbnail_url or icon_url
-    view = discord.ui.LayoutView(timeout=None)
-    container = discord.ui.Container(
-        accent_color=_color_from_hex(theme["colour"]),
-        id=1,
+    gallery_url = title_url or (
+        "https://passophonics.duckdns.org/" if len(large_image_urls) > 1 else None
     )
-    view.add_item(container)
-
-    if body_text:
-        text_display = discord.ui.TextDisplay(body_text, id=2)
-        if active_thumbnail:
-            container.add_item(
-                discord.ui.Section(
-                    text_display,
-                    accessory=discord.ui.Thumbnail(
-                        active_thumbnail,
-                        description="Embed thumbnail",
-                        id=3,
-                    ),
-                    id=4,
-                )
-            )
-        else:
-            container.add_item(text_display)
-
+    embed = discord.Embed(
+        title=title,
+        url=gallery_url,
+        description=description,
+        colour=_color_from_hex(theme["colour"]),
+    )
+    for field_name, field_value, inline in fields:
+        embed.add_field(name=field_name, value=field_value, inline=inline)
     if large_image_urls:
-        container.add_item(
-            discord.ui.MediaGallery(
-                *[
-                    discord.MediaGalleryItem(image_url)
-                    for image_url in large_image_urls
-                ],
-                id=5,
-            )
-        )
+        embed.set_image(url=large_image_urls[0])
+    active_thumbnail = thumbnail_url or icon_url
+    if active_thumbnail:
+        embed.set_thumbnail(url=active_thumbnail)
+    embed.set_footer(text="Phonics Bot", icon_url=icon_url or None)
 
-    if icon_url:
-        container.add_item(discord.ui.Separator())
-    container.add_item(discord.ui.TextDisplay("Phonics Bot"))
+    # Discord visually groups duplicate-URL image embeds into one image grid.
+    # Keep every image embed on the same URL so the title, thumbnail and footer
+    # remain on the first embed while the images appear together below it.
+    grouped_image_embeds = []
+    for image_url in large_image_urls[1:]:
+        image_embed = discord.Embed(
+            url=gallery_url,
+            colour=_color_from_hex(theme["colour"]),
+        )
+        image_embed.set_image(url=image_url)
+        grouped_image_embeds.append(image_embed)
 
     try:
         message = await channel.send(
-            view=view,
+            content=message_content,
+            embeds=[embed, *grouped_image_embeds],
             allowed_mentions=discord.AllowedMentions(
                 everyone=mention_everyone,
                 users=False,
