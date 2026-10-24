@@ -490,6 +490,34 @@ def _theme_announcement_label(theme_name: str) -> str:
     }.get(theme_name, theme_name.replace("_", " ").title())
 
 
+def _theme_announcement_period(
+    when: date | None = None,
+) -> tuple[date, date, dict[str, str]]:
+    """Return the active theme's date window and the theme that starts next."""
+    if when is None:
+        when = datetime.now(WELCOME_THEME_TIMEZONE).date()
+
+    theme_name = get_welcome_theme(when)["name"]
+    period_start = when
+    for _ in range(370):
+        previous_day = period_start - timedelta(days=1)
+        if get_welcome_theme(previous_day)["name"] != theme_name:
+            break
+        period_start = previous_day
+
+    next_start = when + timedelta(days=1)
+    for _ in range(370):
+        if get_welcome_theme(next_start)["name"] != theme_name:
+            break
+        next_start += timedelta(days=1)
+
+    return period_start, next_start, get_welcome_theme(next_start)
+
+
+def _format_theme_boundary(value: date) -> str:
+    return f"{value.day} {value.strftime('%B %Y')}, 00:00"
+
+
 def _theme_announcement_reaction(
     theme_name: str,
     guild: discord.Guild,
@@ -514,7 +542,9 @@ async def announce_theme_change_if_needed(
     """Replace the previous bot announcement when a new theme becomes active."""
     theme_name = theme["name"]
     previous_theme = state.get("announced_theme")
-    if previous_theme == theme_name:
+    theme_changed = previous_theme != theme_name
+    previous_message_id = state.get("theme_announcement_message_id")
+    if not theme_changed and not previous_message_id:
         return False
 
     try:
@@ -530,8 +560,7 @@ async def announce_theme_change_if_needed(
                 "is not in the configured server"
             )
 
-        previous_message_id = state.get("theme_announcement_message_id")
-        if previous_message_id:
+        if theme_changed and previous_message_id:
             try:
                 previous_message = await channel.fetch_message(
                     int(previous_message_id)
@@ -546,12 +575,18 @@ async def announce_theme_change_if_needed(
 
         old_label = _theme_announcement_label(previous_theme or "default")
         new_label = _theme_announcement_label(theme_name)
+        period_start, next_start, following_theme = _theme_announcement_period()
+        start_text = _format_theme_boundary(period_start)
+        next_text = _format_theme_boundary(next_start)
+        following_label = _theme_announcement_label(following_theme["name"])
         embed = discord.Embed(
             title=f"The {new_label} theme is here!",
             description=(
                 f"The PASSOPHONICS website and Discord server have changed "
                 f"from **{old_label}** to **{new_label}**.\n\n"
-                f"The new seasonal look is now live. Take a look around!"
+                f"The new seasonal look is now live. Take a look around!\n\n"
+                f"**Active:** {start_text} to {next_text} (UK time).\n"
+                f"**Next theme:** {following_label}, starting {next_text} (UK time)."
             ),
             colour=_color_from_hex(theme["colour"]),
         )
@@ -560,6 +595,25 @@ async def announce_theme_change_if_needed(
             embed.set_footer(text="Phonics Bot", icon_url=icon_url)
         else:
             embed.set_footer(text="Phonics Bot")
+
+        if not theme_changed:
+            try:
+                message = await channel.fetch_message(int(previous_message_id))
+            except discord.NotFound:
+                state.pop("theme_announcement_message_id", None)
+                save_theme_automation_state(state)
+                print(
+                    "[THEME] Saved announcement message was not found; "
+                    "cleared its saved ID."
+                )
+                return False
+
+            await message.edit(embed=embed)
+            print(
+                f"[THEME] Updated active {new_label} announcement "
+                f"{message.id} with its schedule and themed footer."
+            )
+            return True
 
         message = await channel.send(
             content="@everyone",
