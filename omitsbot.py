@@ -366,6 +366,7 @@ WELCOME_THEME_TIMEZONE = ZoneInfo("Europe/London")
 
 # Seasonal theme automation for the PASSOPHONICS Discord server.
 THEME_GUILD_ID = 1551149701972103208
+THEME_ANNOUNCEMENT_CHANNEL_ID = 1561006901842677840
 THEME_AUTOMATION_STATE_FILE = os.getenv(
     "THEME_AUTOMATION_STATE_FILE",
     os.path.join(
@@ -477,6 +478,128 @@ def save_theme_automation_state(state: dict) -> None:
         os.replace(temporary_file, THEME_AUTOMATION_STATE_FILE)
     except Exception as error:
         print(f"[THEME] Could not save automation state: {error}")
+
+
+def _theme_announcement_label(theme_name: str) -> str:
+    return {
+        "default": "Default",
+        "newyear": "New Year",
+        "easter": "Easter",
+        "halloween": "Halloween",
+        "christmas": "Christmas",
+    }.get(theme_name, theme_name.replace("_", " ").title())
+
+
+def _theme_announcement_reaction(
+    theme_name: str,
+    guild: discord.Guild,
+) -> discord.Emoji | str | None:
+    if theme_name == "default":
+        return discord.utils.get(guild.emojis, name="passophonics")
+
+    return {
+        "newyear": "🍻",
+        "easter": "🐣",
+        "halloween": "🎃",
+        "christmas": "🎄",
+    }.get(theme_name, "💙")
+
+
+async def announce_theme_change_if_needed(
+    guild: discord.Guild,
+    theme: dict[str, str],
+    icon_url: str,
+    state: dict,
+) -> bool:
+    """Replace the previous bot announcement when a new theme becomes active."""
+    theme_name = theme["name"]
+    previous_theme = state.get("announced_theme")
+    if previous_theme == theme_name:
+        return False
+
+    try:
+        channel = (
+            guild.get_channel(THEME_ANNOUNCEMENT_CHANNEL_ID)
+            or client.get_channel(THEME_ANNOUNCEMENT_CHANNEL_ID)
+        )
+        if channel is None:
+            channel = await client.fetch_channel(THEME_ANNOUNCEMENT_CHANNEL_ID)
+        if getattr(getattr(channel, "guild", None), "id", None) != guild.id:
+            raise RuntimeError(
+                f"Announcement channel {THEME_ANNOUNCEMENT_CHANNEL_ID} "
+                "is not in the configured server"
+            )
+
+        previous_message_id = state.get("theme_announcement_message_id")
+        if previous_message_id:
+            try:
+                previous_message = await channel.fetch_message(
+                    int(previous_message_id)
+                )
+                await previous_message.delete()
+                print(
+                    f"[THEME] Deleted previous announcement "
+                    f"{previous_message_id}."
+                )
+            except discord.NotFound:
+                pass
+
+        old_label = _theme_announcement_label(previous_theme or "default")
+        new_label = _theme_announcement_label(theme_name)
+        embed = discord.Embed(
+            title=f"The {new_label} theme is here!",
+            description=(
+                f"The PASSOPHONICS website and Discord server have changed "
+                f"from **{old_label}** to **{new_label}**.\n\n"
+                f"The new seasonal look is now live. Take a look around!"
+            ),
+            colour=_color_from_hex(theme["colour"]),
+            timestamp=datetime.now(timezone.utc),
+        )
+        embed.set_thumbnail(url=icon_url)
+        embed.set_footer(
+            text=f"PASSOPHONICS • {new_label} theme",
+            icon_url=icon_url,
+        )
+
+        message = await channel.send(
+            content="@everyone",
+            embed=embed,
+            allowed_mentions=discord.AllowedMentions(
+                everyone=True,
+                users=False,
+                roles=False,
+            ),
+        )
+        reaction = _theme_announcement_reaction(theme_name, guild)
+        if reaction is None:
+            print(
+                "[THEME] Could not add the default announcement reaction: "
+                "custom emoji 'passophonics' was not found in the server."
+            )
+        else:
+            try:
+                await message.add_reaction(reaction)
+            except Exception as error:
+                print(
+                    f"[THEME] Could not add the {theme_name} announcement reaction: "
+                    f"{type(error).__name__}: {error}"
+                )
+        state["announced_theme"] = theme_name
+        state["theme_announcement_message_id"] = message.id
+        state["theme_announcement_channel_id"] = THEME_ANNOUNCEMENT_CHANNEL_ID
+        save_theme_automation_state(state)
+        print(
+            f"[THEME] Announced theme change from {old_label} to {new_label} "
+            f"in channel {THEME_ANNOUNCEMENT_CHANNEL_ID}."
+        )
+        return True
+    except Exception as error:
+        print(
+            f"[THEME] Could not announce the {theme_name} theme: "
+            f"{type(error).__name__}: {error}"
+        )
+        return False
 
 
 def get_theme_linked_messages() -> list[tuple[int, int]]:
@@ -915,6 +1038,8 @@ async def apply_active_theme_if_needed(force: bool = False) -> bool:
             f"[THEME] Could not refresh Top 100 embeds for {theme_name}: "
             f"{type(error).__name__}: {error}"
         )
+
+    await announce_theme_change_if_needed(guild, theme, icon_url, state)
 
     return True
 
