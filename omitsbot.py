@@ -508,7 +508,7 @@ def _theme_announcement_reaction(
 async def announce_theme_change_if_needed(
     guild: discord.Guild,
     theme: dict[str, str],
-    icon_url: str,
+    icon_url: str | None,
     state: dict,
 ) -> bool:
     """Replace the previous bot announcement when a new theme becomes active."""
@@ -556,11 +556,14 @@ async def announce_theme_change_if_needed(
             colour=_color_from_hex(theme["colour"]),
             timestamp=datetime.now(timezone.utc),
         )
-        embed.set_thumbnail(url=icon_url)
-        embed.set_footer(
-            text=f"PASSOPHONICS • {new_label} theme",
-            icon_url=icon_url,
-        )
+        if icon_url:
+            embed.set_thumbnail(url=icon_url)
+            embed.set_footer(
+                text=f"PASSOPHONICS • {new_label} theme",
+                icon_url=icon_url,
+            )
+        else:
+            embed.set_footer(text=f"PASSOPHONICS • {new_label} theme")
 
         message = await channel.send(
             content="@everyone",
@@ -873,6 +876,113 @@ async def copy_theme_message(
         )
 
 
+@tree.command(
+    name="postthemeembed",
+    description="Post a theme-styled embed as the bot and register it for updates.",
+)
+@app_commands.default_permissions(administrator=True)
+@app_commands.describe(
+    channel="Channel where the bot should post the embed",
+    title="Embed heading",
+    description="Main text shown inside the embed",
+    content="Optional message text shown above the embed",
+    mention_everyone="Allow @everyone in the optional message text",
+)
+async def post_theme_embed(
+    interaction: discord.Interaction,
+    channel: discord.TextChannel,
+    title: str,
+    description: str,
+    content: str | None = None,
+    mention_everyone: bool = False,
+) -> None:
+    """Post a new bot-authored embed and register it for theme changes."""
+    if not interaction.guild or interaction.guild_id != THEME_GUILD_ID:
+        await interaction.response.send_message(
+            "This command can only be used in the PASSOPHONICS server.",
+            ephemeral=True,
+        )
+        return
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message(
+            "You must be an administrator to post a theme-managed embed.",
+            ephemeral=True,
+        )
+        return
+    if channel.guild.id != interaction.guild.id:
+        await interaction.response.send_message(
+            "Choose a channel from the PASSOPHONICS server.",
+            ephemeral=True,
+        )
+        return
+    if len(title) > 256 or len(description) > 4096:
+        await interaction.response.send_message(
+            "The title must be 256 characters or fewer and the description "
+            "must be 4,096 characters or fewer.",
+            ephemeral=True,
+        )
+        return
+    message_content = (content or "").strip() or None
+    if message_content and len(message_content) > 2000:
+        await interaction.response.send_message(
+            "The message text above the embed must be 2,000 characters or fewer.",
+            ephemeral=True,
+        )
+        return
+
+    await interaction.response.defer(ephemeral=True)
+    theme = get_welcome_theme()
+    icon_url = get_welcome_icon_url(interaction.guild, theme["name"])
+    embed = discord.Embed(
+        title=title,
+        description=description,
+        colour=_color_from_hex(theme["colour"]),
+        timestamp=datetime.now(timezone.utc),
+    )
+    if icon_url:
+        embed.set_thumbnail(url=icon_url)
+        embed.set_footer(
+            text=f"PASSOPHONICS • {_theme_announcement_label(theme['name'])} theme",
+            icon_url=icon_url,
+        )
+    else:
+        embed.set_footer(
+            text=f"PASSOPHONICS • {_theme_announcement_label(theme['name'])} theme"
+        )
+
+    try:
+        message = await channel.send(
+            content=message_content,
+            embed=embed,
+            allowed_mentions=discord.AllowedMentions(
+                everyone=mention_everyone,
+                users=False,
+                roles=False,
+            ),
+        )
+
+        state = load_theme_automation_state()
+        targets = get_theme_linked_messages()
+        target = (channel.id, message.id)
+        if target not in targets:
+            targets.append(target)
+        state["theme_linked_messages"] = [list(item) for item in targets]
+        state.setdefault("completed", {}).pop("linked_messages", None)
+        save_theme_automation_state(state)
+
+        await interaction.followup.send(
+            f"Posted as Phonics Bot and registered for future theme updates: "
+            f"{message.jump_url}",
+            ephemeral=True,
+        )
+    except Exception as error:
+        logging.exception("[THEME] Could not post theme-managed embed")
+        await interaction.followup.send(
+            f"Could not post the embed: {type(error).__name__}: {error}",
+            ephemeral=True,
+        )
+
+
 async def apply_active_theme_if_needed(force: bool = False) -> bool:
     """Apply the current website theme to the server, bot, role and embeds."""
     guild = client.get_guild(THEME_GUILD_ID)
@@ -884,6 +994,10 @@ async def apply_active_theme_if_needed(force: bool = False) -> bool:
     theme_name = theme["name"]
     state = load_theme_automation_state()
     completed = state.setdefault("completed", {})
+    print(
+        f"[THEME] Startup/current theme is {theme_name}; last announced theme is "
+        f"{state.get('announced_theme') or 'not recorded'}."
+    )
     if state.get("automation_revision") != THEME_AUTOMATION_REVISION:
         # Retry theme-managed role and message styling after deployment, even if
         # an older run recorded completion before the new footer behaviour.
@@ -895,6 +1009,10 @@ async def apply_active_theme_if_needed(force: bool = False) -> bool:
     save_theme_automation_state(state)
 
     icon_url = get_welcome_icon_url(guild, theme_name)
+    # Announce first so startup is not held up by image uploads or the slower
+    # Top 100 rebuild. The public theme icon URL is used directly in the embed.
+    await announce_theme_change_if_needed(guild, theme, icon_url, state)
+
     if not icon_url:
         print("[THEME] No public icon URL is configured; theme sync skipped.")
         return False
@@ -1038,8 +1156,6 @@ async def apply_active_theme_if_needed(force: bool = False) -> bool:
             f"[THEME] Could not refresh Top 100 embeds for {theme_name}: "
             f"{type(error).__name__}: {error}"
         )
-
-    await announce_theme_change_if_needed(guild, theme, icon_url, state)
 
     return True
 
