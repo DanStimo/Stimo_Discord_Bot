@@ -514,8 +514,21 @@ def _theme_announcement_period(
     return period_start, next_start, get_welcome_theme(next_start)
 
 
-def _format_theme_boundary(value: date) -> str:
-    return f"{value.day} {value.strftime('%B %Y')}, 00:00"
+def _format_theme_period(start: date, end: date) -> str:
+    if start.year == end.year:
+        return (
+            f"{start.day} {start.strftime('%b')} 00:00–"
+            f"{end.day} {end.strftime('%b')} 00:00 UK"
+        )
+    return (
+        f"{start.day} {start.strftime('%b %Y')} 00:00–"
+        f"{end.day} {end.strftime('%b %Y')} 00:00 UK"
+    )
+
+
+def _format_theme_start(value: date, current_period_start: date) -> str:
+    year = f" {value.year}" if value.year != current_period_start.year else ""
+    return f"{value.day} {value.strftime('%b')}{year} 00:00 UK"
 
 
 def _theme_announcement_reaction(
@@ -573,11 +586,14 @@ async def announce_theme_change_if_needed(
             except discord.NotFound:
                 pass
 
-        old_label = _theme_announcement_label(previous_theme or "default")
-        new_label = _theme_announcement_label(theme_name)
         period_start, next_start, following_theme = _theme_announcement_period()
-        start_text = _format_theme_boundary(period_start)
-        next_text = _format_theme_boundary(next_start)
+        previous_period_theme = get_welcome_theme(
+            period_start - timedelta(days=1)
+        )["name"]
+        old_label = _theme_announcement_label(previous_period_theme)
+        new_label = _theme_announcement_label(theme_name)
+        active_period_text = _format_theme_period(period_start, next_start)
+        next_start_text = _format_theme_start(next_start, period_start)
         following_label = _theme_announcement_label(following_theme["name"])
         embed = discord.Embed(
             title=f"The {new_label} theme is here!",
@@ -585,8 +601,8 @@ async def announce_theme_change_if_needed(
                 f"The PASSOPHONICS website and Discord server have changed "
                 f"from **{old_label}** to **{new_label}**.\n\n"
                 f"The new seasonal look is now live. Take a look around!\n\n"
-                f"**Active:** {start_text} to {next_text} (UK time).\n"
-                f"**Next theme:** {following_label}, starting {next_text} (UK time)."
+                f"**Active:** {active_period_text}.\n"
+                f"**Next theme:** {following_label} from {next_start_text}."
             ),
             colour=_color_from_hex(theme["colour"]),
         )
