@@ -376,6 +376,21 @@ THEME_AUTOMATION_STATE_FILE = os.getenv(
 )
 GOD_BOT_ROLE_ID = int(os.getenv("GOD_BOT_ROLE_ID", "0") or "0")
 GOD_BOT_ROLE_NAME = os.getenv("GOD_BOT_ROLE_NAME", "God Bot").strip()
+GOD_BOT_ROLE_THEME_COLOURS = {
+    "default": "#17C1FF",
+    "halloween": "#FF8A24",
+    "christmas": "#2ECC71",
+    "newyear": "#F1C40F",
+    "easter": "#9DE2B1",
+}
+MEMBER_ROLE_ID = 1551154383113429032
+MEMBER_ROLE_THEME_COLOURS = {
+    "default": "#F7C478",   # Warm amber, distinct from the bot's cyan
+    "halloween": "#B967FF", # Vivid violet, distinct from the bot's orange
+    "christmas": "#FF4757", # Bright red, distinct from the bot's dark green
+    "newyear": "#D9E1F2",   # Bright silver, distinct from the bot's gold
+    "easter": "#F4A7C1",    # Pastel pink, distinct from the bot's mint green
+}
 # For webhook-authored linked messages, define one secret URL per message on
 # the VPS, e.g. THEME_WEBHOOK_URL_1551189232633253913=<webhook URL>.
 # Keep these URLs out of source control: each URL contains its webhook token.
@@ -385,7 +400,7 @@ THEME_LINKED_MESSAGES = (
     (1551149919434317966, 1551192094301749289),
     (1553322041124585573, 1553349278544699443),
 )
-THEME_AUTOMATION_REVISION = 4
+THEME_AUTOMATION_REVISION = 5
 
 
 def easter_sunday_for_year(year: int) -> date:
@@ -414,20 +429,20 @@ def get_welcome_theme(when: date | None = None) -> dict[str, str]:
 
     easter_sunday = easter_sunday_for_year(when.year)
     if easter_sunday - timedelta(days=2) <= when < easter_sunday + timedelta(days=2):
-        return {"name": "easter", "colour": "#9de2b1"}
+        return {"name": "easter", "colour": "#f4a7c1"}
 
     month_day = (when.month, when.day)
     if (10, 24) <= month_day <= (11, 7):
         return {"name": "halloween", "colour": "#ff8a24"}
 
     if when.month == 12:
-        return {"name": "christmas", "colour": "#123b2a"}
+        return {"name": "christmas", "colour": "#2ecc71"}
 
     jan_8 = date(when.year, 1, 8)
     days_to_monday = (0 - jan_8.weekday()) % 7
     new_year_end = jan_8 + timedelta(days=days_to_monday)
     if when.month == 1 and when < new_year_end:
-        return {"name": "newyear", "colour": "#10172a"}
+        return {"name": "newyear", "colour": "#d9e1f2"}
 
     return {"name": "default", "colour": "#17c1ff"}
 
@@ -1274,6 +1289,7 @@ async def apply_active_theme_if_needed(force: bool = False) -> bool:
         # Retry theme-managed role and message styling after deployment, even if
         # an older run recorded completion before the new footer behaviour.
         completed.pop("god_bot_role", None)
+        completed.pop("member_role", None)
         completed.pop("linked_messages", None)
         completed.pop("welcome_messages", None)
         state["automation_revision"] = THEME_AUTOMATION_REVISION
@@ -1352,7 +1368,9 @@ async def apply_active_theme_if_needed(force: bool = False) -> bool:
             None,
         )
     )
-    desired_role_colour = _color_from_hex(theme["colour"])
+    desired_role_colour = _color_from_hex(
+        GOD_BOT_ROLE_THEME_COLOURS.get(theme_name, theme["colour"])
+    )
     if role is None:
         print(
             f"[THEME] Could not find the '{GOD_BOT_ROLE_NAME}' role"
@@ -1398,6 +1416,58 @@ async def apply_active_theme_if_needed(force: bool = False) -> bool:
                 print(
                     f"[THEME] Could not change role '{role.name}' (ID {role.id}) "
                     f"colour: {type(error).__name__}: {error}"
+                )
+
+    member_role = guild.get_role(MEMBER_ROLE_ID)
+    member_role_hex = MEMBER_ROLE_THEME_COLOURS.get(
+        theme_name,
+        MEMBER_ROLE_THEME_COLOURS["default"],
+    )
+    desired_member_colour = _color_from_hex(member_role_hex)
+    if member_role is None:
+        print(
+            f"[THEME] Could not find the Member role (ID {MEMBER_ROLE_ID})."
+        )
+    elif (
+        force
+        or completed.get("member_role") != theme_name
+        or member_role.colour.value != desired_member_colour.value
+    ):
+        bot_member = guild.me
+        if bot_member is None:
+            print("[THEME] Cannot change Member role colour: bot member is unavailable.")
+        elif not bot_member.guild_permissions.manage_roles:
+            print(
+                "[THEME] Cannot change the Member role colour: "
+                "the bot lacks Manage Roles permission."
+            )
+        elif member_role >= bot_member.top_role:
+            print(
+                f"[THEME] Cannot change the Member role (ID {MEMBER_ROLE_ID}): "
+                f"it is at or above the bot's highest role '{bot_member.top_role.name}'."
+            )
+        else:
+            try:
+                await member_role.edit(
+                    colour=desired_member_colour,
+                    reason=f"Automatic {theme_name} seasonal Member role colour",
+                )
+                completed["member_role"] = theme_name
+                save_theme_automation_state(state)
+                print(
+                    f"[THEME] Member role (ID {MEMBER_ROLE_ID}) colour changed "
+                    f"to {member_role_hex} for {theme_name}."
+                )
+            except discord.Forbidden as error:
+                print(
+                    f"[THEME] Discord denied editing the Member role "
+                    f"(ID {MEMBER_ROLE_ID}); check Manage Roles and role order. "
+                    f"Details: {error}"
+                )
+            except Exception as error:
+                print(
+                    f"[THEME] Could not change the Member role colour: "
+                    f"{type(error).__name__}: {error}"
                 )
 
     if force or completed.get("linked_messages") != theme_name:
