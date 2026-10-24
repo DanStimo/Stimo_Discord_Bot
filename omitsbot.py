@@ -915,12 +915,19 @@ async def copy_theme_message(
             notes.append("attached files were not copied")
         if source_message.components:
             notes.append("buttons and other components were not copied")
-        note_text = f" ({'; '.join(notes)})." if notes else "."
-        await interaction.followup.send(
-            f"Posted as Phonics Bot and registered for seasonal theme updates: "
-            f"{replacement.jump_url}{note_text}",
-            ephemeral=True,
-        )
+        if notes:
+            logging.info(
+                "[THEME] Reposted message %s as %s; %s.",
+                source_message_id,
+                replacement.id,
+                "; ".join(notes),
+            )
+        try:
+            await interaction.delete_original_response()
+        except discord.HTTPException:
+            logging.warning(
+                "[THEME] Could not remove the private copy command acknowledgement."
+            )
     except Exception as error:
         logging.exception("[THEME] Could not repost linked message")
         await interaction.followup.send(
@@ -11946,6 +11953,35 @@ async def monitor_twitch_live():
 # -------------------------
 # Command sync (global + optional guild)
 # -------------------------
+# Temporarily disabled slash commands. This includes the complete lineup,
+# event, and template command set. Removing them before sync also removes
+# previously registered copies from Discord when the bot next starts.
+DISABLED_SLASH_COMMANDS = (
+    "lineup",
+    "editlineup",
+    "deletelineup",
+    "createtemplate",
+    "listtemplates",
+    "deletetemplate",
+    "createfromtemplate",
+    "createevent",
+    "cancelevent",
+    "closeevent",
+    "openevent",
+    "eventinfo",
+    "commodity",
+    "route",
+    "terminal",
+    "besttrade",
+    "ship",
+    "cargo",
+    "trending",
+    "bestnow",
+    "members",
+)
+for disabled_command in DISABLED_SLASH_COMMANDS:
+    tree.remove_command(disabled_command)
+
 @client.event
 async def on_ready():
     # --- DB bootstrap + load persistent state ---
