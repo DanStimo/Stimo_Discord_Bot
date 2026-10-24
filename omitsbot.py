@@ -1181,19 +1181,7 @@ async def post_theme_embed(
 
     if icon_url:
         container.add_item(discord.ui.Separator())
-        container.add_item(
-            discord.ui.Section(
-                discord.ui.TextDisplay("Phonics Bot"),
-                accessory=discord.ui.Thumbnail(
-                    icon_url,
-                    description="Theme footer icon",
-                    id=6,
-                ),
-                id=7,
-            )
-        )
-    else:
-        container.add_item(discord.ui.TextDisplay("Phonics Bot"))
+    container.add_item(discord.ui.TextDisplay("Phonics Bot"))
 
     try:
         message = await channel.send(
